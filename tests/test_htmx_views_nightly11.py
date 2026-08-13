@@ -16,7 +16,7 @@ import json
 import uuid
 from contextlib import contextmanager
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -168,14 +168,28 @@ class TestProspectingAddDomain:
         assert "domain" in resp.text.lower()
 
     def test_add_domain_success(self, client: TestClient):
-        with patch("app.routers.htmx.prospecting.add_prospect_domain.__wrapped__", None, create=True):
-            with patch("app.services.prospect_claim.add_prospect_manually") as mock_add:
-                mock_add.return_value = MagicMock(id=42)
-                resp = client.post(
-                    "/v2/partials/prospecting/add-domain",
-                    data={"domain": "testdomain.com"},
-                )
-                assert resp.status_code == 200
+        # add_prospect_manually returns a dict {prospect_id, name, domain, status, is_new};
+        # the router feeds it into add_result.html, which renders the verb, the name, and a
+        # View link to /v2/prospecting/{pid}. Assert that real content, not just a 200.
+        with patch("app.services.prospect_claim.add_prospect_manually") as mock_add:
+            mock_add.return_value = {
+                "prospect_id": 42,
+                "name": "Testdomain",
+                "domain": "testdomain.com",
+                "status": "suggested",
+                "is_new": True,
+            }
+            resp = client.post(
+                "/v2/partials/prospecting/add-domain",
+                data={"domain": "testdomain.com"},
+            )
+            assert resp.status_code == 200
+            mock_add.assert_called_once()
+            assert mock_add.call_args.args[0] == "testdomain.com"
+            # New prospect → "Added" verb, the prospect name, and a working View link.
+            assert "Added" in resp.text
+            assert "Testdomain" in resp.text
+            assert "/v2/prospecting/42" in resp.text
 
     def test_add_domain_service_error_returns_error_html(self, client: TestClient):
         with patch("app.services.prospect_claim.add_prospect_manually", side_effect=ValueError("fail")):
