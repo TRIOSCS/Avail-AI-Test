@@ -101,6 +101,11 @@ jobs:
         # Keeps installs reproducible.
         if: matrix.shard == 0
         run: |
+          # pip 26.2 removed pip._internal.utils.compat.stdlib_pkgs, which pip-tools
+          # 7.6.x still imports at compile time -> ImportError breaks pip-compile on
+          # every PR. Pin pip below 26.2 for the recompile until pip-tools ships a
+          # fix; the runner's ambient pip auto-updated into 26.2 (QC 2026-08-13).
+          python -m pip install --quiet "pip<26.2"
           pip-compile --no-header --no-strip-extras --quiet requirements.in
           pip-compile --no-header --no-strip-extras --quiet requirements-dev.in
           if ! git diff --exit-code requirements.txt requirements-dev.txt; then
