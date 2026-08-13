@@ -1,6 +1,7 @@
 """Email service — batch RFQ sending, inbox monitoring, AI parsing."""
 
 import asyncio
+import html
 import json
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
@@ -42,8 +43,13 @@ from .vendor_utils import normalize_vendor_name
 
 
 def _build_html_body(plain_text: str) -> str:
-    """Convert plain text to minimal HTML that looks like a normal email."""
-    html_body = plain_text.replace("\n", "<br>\n")
+    """Convert plain text to minimal HTML that looks like a normal email.
+
+    HTML-escapes first (QC 2026-08-13): every caller passes plain text, so an
+    unescaped ``<`` / ``&`` in a part number or note silently vanished from the
+    delivered RFQ/reply (the browser swallowed it as a bogus tag/entity).
+    """
+    html_body = html.escape(plain_text).replace("\n", "<br>\n")
     return f"""<html><body style="font-family: Calibri, Arial, sans-serif; font-size: 14px; color: #333;">
 {html_body}
 </body></html>"""
