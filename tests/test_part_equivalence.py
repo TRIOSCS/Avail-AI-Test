@@ -109,6 +109,29 @@ async def test_classify_bad_verdict_becomes_uncertain(db_session):
     assert db_session.query(PartEquivalence).one().verdict == "uncertain"
 
 
+@pytest.mark.anyio
+async def test_classify_offloads_candidate_scan_but_keeps_verdicts(db_session):
+    """find_candidate_pairs now runs in an executor (perf); verdicts are unchanged.
+
+    A modest multi-key window yields one suffix candidate pair; the stored verdict and
+    reason must match the model's reply exactly — proof the thread offload did not alter
+    classification outputs.
+    """
+    spellings = {"ltc1234": "LTC1234", "ltc1234e3": "LTC1234-E3", "unrelated9": "UNRELATED9"}
+    with patch(
+        "app.utils.claude_client.claude_json",
+        new_callable=AsyncMock,
+        return_value={"verdict": "same", "confidence": 0.9, "reason": "LTC -E3 = lead-free packaging code"},
+    ):
+        stored = await classify_new_pairs(db_session, spellings)
+    assert stored == 1
+    row = db_session.query(PartEquivalence).one()
+    assert (row.key_a, row.key_b) == ("ltc1234", "ltc1234e3")
+    assert row.verdict == "same"
+    assert row.source == "ai"
+    assert row.reason == "LTC -E3 = lead-free packaging code"
+
+
 # ── Class expansion ──────────────────────────────────────────────────────
 
 
