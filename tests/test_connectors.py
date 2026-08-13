@@ -2626,6 +2626,9 @@ class TestEmailMiner:
 
     @pytest.mark.asyncio
     async def test_scan_for_stock_lists(self):
+        # MSG_SELECT has no $expand=attachments, so the search returns messages
+        # WITHOUT an inline attachment list — only hasAttachments. The scan must
+        # issue a separate GET /me/messages/{id}/attachments to enumerate them.
         miner = self._make_miner()
         miner.gc.get_all_pages = AsyncMock(
             return_value=[
@@ -2634,17 +2637,26 @@ class TestEmailMiner:
                     "from": {"emailAddress": {"address": "vendor@parts.com", "name": "Parts Co"}},
                     "subject": "Stock List - January 2026",
                     "receivedDateTime": "2026-01-15T10:00:00Z",
-                    "attachments": [
-                        {"name": "stock_list.xlsx", "size": 12345, "id": "att1"},
-                        {"name": "logo.png", "size": 5000, "id": "att2"},
-                    ],
+                    "hasAttachments": True,
                 }
             ]
+        )
+        miner.gc.get_json = AsyncMock(
+            return_value={
+                "value": [
+                    {"name": "stock_list.xlsx", "size": 12345, "id": "att1", "contentType": "application/vnd.ms-excel"},
+                    {"name": "logo.png", "size": 5000, "id": "att2", "contentType": "image/png"},
+                ]
+            }
         )
         result = await miner.scan_for_stock_lists()
         assert len(result) == 1
         assert len(result[0]["stock_files"]) == 1
         assert result[0]["stock_files"][0]["filename"] == "stock_list.xlsx"
+        assert result[0]["stock_files"][0]["attachment_id"] == "att1"
+        # The attachments endpoint was actually hit for this hasAttachments message.
+        miner.gc.get_json.assert_awaited_once()
+        assert "/me/messages/sl1/attachments" in miner.gc.get_json.await_args.args[0]
 
     @pytest.mark.asyncio
     async def test_scan_for_stock_lists_no_matching_ext(self):
@@ -2655,10 +2667,11 @@ class TestEmailMiner:
                     "id": "sl2",
                     "from": {"emailAddress": {"address": "v@x.com", "name": "V"}},
                     "subject": "Stock List",
-                    "attachments": [{"name": "readme.txt", "size": 100, "id": "a1"}],
+                    "hasAttachments": True,
                 }
             ]
         )
+        miner.gc.get_json = AsyncMock(return_value={"value": [{"name": "readme.txt", "size": 100, "id": "a1"}]})
         result = await miner.scan_for_stock_lists()
         assert result == []
 
@@ -2672,12 +2685,33 @@ class TestEmailMiner:
                     "from": {"emailAddress": {"address": "v@x.com", "name": "V"}},
                     "subject": "Excess list",
                     "receivedDateTime": "2026-01-01T00:00:00Z",
-                    "attachments": [{"name": "parts.csv", "size": 500, "id": "a1"}],
+                    "hasAttachments": True,
                 }
             ]
         )
+        miner.gc.get_json = AsyncMock(return_value={"value": [{"name": "parts.csv", "size": 500, "id": "a1"}]})
         result = await miner.scan_for_stock_lists()
         assert len(result) == 1
+
+    @pytest.mark.asyncio
+    async def test_scan_for_stock_lists_no_attachments_skips_fetch(self):
+        # A message without hasAttachments must NOT trigger the per-message
+        # attachments GET (bounded fetch), and yields no stock files.
+        miner = self._make_miner()
+        miner.gc.get_all_pages = AsyncMock(
+            return_value=[
+                {
+                    "id": "sl4",
+                    "from": {"emailAddress": {"address": "v@x.com", "name": "V"}},
+                    "subject": "Inventory update",
+                    "hasAttachments": False,
+                }
+            ]
+        )
+        miner.gc.get_json = AsyncMock(return_value={"value": []})
+        result = await miner.scan_for_stock_lists()
+        assert result == []
+        miner.gc.get_json.assert_not_awaited()
 
     # ── scan_sent_items ──────────────────────────────────────────────
 

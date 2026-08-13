@@ -416,6 +416,25 @@ class EmailMiner:
     #  Stock List Attachment Discovery
     # ══════════════════════════════════════════════════════════════════
 
+    async def _fetch_attachments(self, msg_id: str) -> list[dict]:
+        """Fetch attachment metadata (id/name/size/contentType) for one message.
+
+        MSG_SELECT does not ``$expand=attachments``, so messages returned by the
+        search arrive with ``hasAttachments`` set but no attachment list. Graph
+        requires a separate GET per message to enumerate them. Only metadata is
+        requested here — attachment bytes are never downloaded.
+        """
+        try:
+            data = await self.gc.get_json(
+                f"/me/messages/{msg_id}/attachments",
+                params={"$select": "id,name,size,contentType"},
+            )
+            attachments: list[dict] = data.get("value", [])
+            return attachments
+        except Exception as e:
+            logger.warning(f"Attachment fetch failed for message {msg_id}: {e}")
+            return []
+
     async def scan_for_stock_lists(self, lookback_days: int = 90) -> list[dict]:
         """Find emails with stock list attachments.
 
@@ -436,8 +455,12 @@ class EmailMiner:
             if not msg_id or msg_id in already_done:
                 continue
 
+            # Bounded: only messages flagged with attachments trigger the extra GET.
+            if not msg.get("hasAttachments"):
+                continue
+
             sender = msg.get("from", {}).get("emailAddress", {})
-            attachments = msg.get("attachments", [])
+            attachments = await self._fetch_attachments(msg_id)
 
             stock_files = []
             for att in attachments:
