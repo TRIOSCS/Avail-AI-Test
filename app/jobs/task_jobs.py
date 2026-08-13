@@ -69,6 +69,10 @@ async def _job_bid_due_alerts():
                 Requisition.deadline != "",
                 Requisition.deadline != "ASAP",
             )
+            # Order by nearest deadline (QC 2026-08-13): without ORDER BY the LIMIT
+            # returned an arbitrary slice, so a genuinely-due req outside that slice
+            # was never alerted. String deadlines sort correctly for ISO dates.
+            .order_by(Requisition.deadline.asc())
             .limit(_BID_DUE_CAP * 3)  # Fetch extra; many may not parse or be in range
             .all()
         )

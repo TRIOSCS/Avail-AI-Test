@@ -19,6 +19,7 @@ from datetime import UTC, datetime, timedelta
 
 from apscheduler.triggers.interval import IntervalTrigger
 from loguru import logger
+from sqlalchemy import and_, or_
 
 from ..constants import MEANINGFUL_CALL_OUTCOMES, CallOutcome, RequisitionStatus
 from ..scheduler import _traced_job
@@ -274,7 +275,13 @@ def _find_optimistic_row(db, user_id, direction, external_phone, cdr_occurred_at
     window_start = cdr_occurred_at - window
     window_end = cdr_occurred_at + window
 
-    # Fetch candidate rows: unreconciled, matching user+direction+channel+type
+    # Fetch candidate rows: unreconciled, matching user+direction+channel+type.
+    # Time-bound the scan (QC 2026-08-13): never-reconciled manual call logs keep
+    # external_id NULL forever, so without a bound this full-table scan grew without
+    # limit (48 polls/day). Match on occurred_at (the call time) inside the window;
+    # for rows with no occurred_at, fall back to a generous created_at floor. The
+    # precise ±10min reconciliation still happens in the Python loop below.
+    created_floor = cdr_occurred_at - timedelta(days=2)
     candidates = (
         db.query(ActivityLog)
         .filter(
@@ -283,6 +290,10 @@ def _find_optimistic_row(db, user_id, direction, external_phone, cdr_occurred_at
             ActivityLog.external_id.is_(None),
             ActivityLog.user_id == user_id,
             ActivityLog.direction == direction,
+            or_(
+                ActivityLog.occurred_at.between(window_start, window_end),
+                and_(ActivityLog.occurred_at.is_(None), ActivityLog.created_at >= created_floor),
+            ),
         )
         .all()
     )
