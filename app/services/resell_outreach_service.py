@@ -567,8 +567,8 @@ async def _finalize_outreach_send(
 ) -> list[ExcessOutreach]:
     """Send the emails, stamp graph ids, and advance each ``sending`` row to its final
     status. Shared by :func:`submit_outreach_email` (inline) and
-    :func:`run_outreach_email_send` (background) — the ONE place the send + lookup
-    logic lives.
+    :func:`run_outreach_email_send` (background) — the ONE place the send + lookup logic
+    lives.
 
     Reuses the RFQ send engine in its no-requisition mode (email out, no Contact rows;
     the live RFQ tracking path is untouched). Graph ids do NOT come back in
@@ -923,8 +923,8 @@ async def retry_outreach_send(
     token: str,
     session_factory=None,
 ) -> None:
-    """Retry a ``failed`` / ``interrupted`` outreach row — reconcile-first, only
-    resend if the original never actually went out (the double-send guard).
+    """Retry a ``failed`` / ``interrupted`` outreach row — reconcile-first, only resend
+    if the original never actually went out (the double-send guard).
 
     Opens its OWN session (a background job, mirroring :func:`run_outreach_email_send`). A
     row not in a retryable state is skipped (idempotent). The buyer email is resolved, then
@@ -1037,7 +1037,10 @@ async def retry_outreach_send(
         row.recipient_email = row.recipient_email or email  # backfill a legacy NULL row
         db.commit()
         parts = [p.get("part_number") for p in (row.parts_included or []) if p.get("part_number")]
-        plan = [{"card_id": card.id, "email": email, "row_ids": [row.id], "parts": parts}]
+        # Use the stored FK, not card.id (QC 2026-08-13): a merge-nulled card leaves
+        # card=None while recipient_email is still set, so card.id AttributeError'd
+        # AFTER the row was committed to SENDING — cycling it sending->interrupted forever.
+        plan = [{"card_id": row.target_vendor_card_id, "email": email, "row_ids": [row.id], "parts": parts}]
         await _finalize_outreach_send(
             db, excess_list=excess_list, owner=owner, subject=guard_subject, body=resend_body, token=token, plan=plan
         )
@@ -1163,12 +1166,17 @@ def record_response(
         new_status = ExcessOutreachStatus.RESPONDED
 
     _terminal = {ExcessOutreachStatus.BID, ExcessOutreachStatus.DECLINED}
+    # Snapshot BEFORE the loop flips statuses (QC 2026-08-13): gate the offer link on
+    # the SAME terminal check as record_manual_response, so a replayed email response
+    # on an already-BID row does not mint a SECOND ExcessOffer (inflating offer_count /
+    # best_offer_id with no row-level idempotency).
+    already_terminal = rows[0].status in _terminal
     for row in rows:
         if row.status in _terminal:
             continue  # never regress a buyer who already bid / declined
         row.status = new_status
 
-    if has_offer:
+    if has_offer and not already_terminal:
         _link_inbound_offer(db, rows[0], offer_lines or [], offer_notes)
 
     if commit:
@@ -1283,8 +1291,7 @@ def _match_outreach(
     conversation_id: str | None,
     message_id: str | None,
 ) -> list[ExcessOutreach]:
-    """Match a reply to outreach rows — conversation id (whole thread), then message
-    id.
+    """Match a reply to outreach rows — conversation id (whole thread), then message id.
 
     Conversation id is the preferred key (matches all rows on the thread, like RFQ
     Tier-1 fan-out); message id is the exact-touch fallback. Vendor-scoped by
