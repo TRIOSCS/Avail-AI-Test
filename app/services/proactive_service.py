@@ -312,17 +312,17 @@ def _build_line_items(matches: list, sell_prices: dict) -> tuple[list, Decimal, 
         if not offer:
             continue
         cost = float(offer.unit_price) if offer.unit_price else 0
-        # QC 2026-08-08: a missing cost made the default 0*1.3=0, so a draft went
-        # out quoting the customer $0.00. A seeded sell_price (incl. an
-        # intentional 0) is honored; otherwise fall back to cost x 1.3 — and if
-        # there is NO price basis at all (no anchor, no cost) skip the line
-        # rather than stage a priceless offer. The match stays NEW and resurfaces.
+        # Never email a customer a $0.00 unit price (QC 2026-08-13, supersedes the
+        # earlier "intentional 0 honored" note): use the seeded sell price if given,
+        # else fall back to cost x 1.3, then skip the line if the resolved price is
+        # non-positive (missing basis OR a 0/negative seed). The match stays NEW and
+        # resurfaces — a proactive customer offer must carry a real price.
         sell = sell_prices.get(str(m.id))
-        if sell is None:
-            if not cost:
-                logger.warning("Proactive: skipping match {} ({}) — no price basis for a sell price", m.id, m.mpn)
-                continue
+        if sell is None and cost:
             sell = cost * 1.3
+        if not sell or float(sell) <= 0:
+            logger.warning("Proactive: skipping match {} ({}) — no positive sell price", m.id, m.mpn)
+            continue
         target = m.requirement.target_qty if m.requirement else 0
         avail = offer.qty_available or 0
         qty = min(avail, target) if target > 0 else avail
