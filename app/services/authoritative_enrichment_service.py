@@ -199,6 +199,20 @@ def _apply_merged_core_fields(card: MaterialCard, merged: dict, provenance: dict
     return prov
 
 
+def _merge_provenance(card: MaterialCard, new_prov: dict) -> dict:
+    """Merge this run's per-field provenance into the card's existing provenance instead
+    of replacing it wholesale (QC 2026-08-13).
+
+    A blanket reassignment discarded the provenance of fields NOT touched this run —
+    including manual edits — so the audit trail lied about who last set them. Fields
+    written this run overwrite their entry; everything else (a prior
+    manual/authoritative entry) is preserved.
+    """
+    merged = dict(card.enrichment_provenance or {})
+    merged.update(new_prov or {})
+    return merged
+
+
 def apply_authoritative(
     card: MaterialCard,
     merged: dict,
@@ -211,7 +225,7 @@ def apply_authoritative(
     ``_apply_merged_core_fields`` (ladder-rejected writes are dropped from the persisted
     provenance).
     """
-    card.enrichment_provenance = _apply_merged_core_fields(card, merged, provenance)
+    card.enrichment_provenance = _merge_provenance(card, _apply_merged_core_fields(card, merged, provenance))
     card.enrichment_source = contributors[0] if contributors else card.enrichment_source
     card.enrichment_status = MaterialEnrichmentStatus.VERIFIED
     card.enriched_at = datetime.now(UTC)
@@ -283,7 +297,7 @@ def apply_web_sourced(card: MaterialCard, result: WebExtractResult) -> None:
     )
     card.enrichment_source = "web_search"
     card.enrichment_status = MaterialEnrichmentStatus.WEB_SOURCED
-    card.enrichment_provenance = prov
+    card.enrichment_provenance = _merge_provenance(card, prov)
     card.enriched_at = now
 
 
@@ -319,7 +333,7 @@ def apply_cross_ref_verified(
         "confirmed_by": confirmer,
         "confidence": xr.confidence,
     }
-    card.enrichment_provenance = prov
+    card.enrichment_provenance = _merge_provenance(card, prov)
     card.enrichment_source = confirmer or "cross_ref"
     card.enrichment_status = MaterialEnrichmentStatus.VERIFIED
     card.enriched_at = now
@@ -359,7 +373,7 @@ def apply_oem_sourced(card: MaterialCard, result: OemExtractResult) -> None:
     )
     card.enrichment_source = "oem_official"
     card.enrichment_status = MaterialEnrichmentStatus.OEM_SOURCED
-    card.enrichment_provenance = prov
+    card.enrichment_provenance = _merge_provenance(card, prov)
     card.enriched_at = now
 
 
@@ -523,8 +537,12 @@ async def enrich_card(
         if (vendor in HIGH_PRECISION_VENDORS and oem_attempted)
         else MaterialEnrichmentStatus.NOT_FOUND
     )
-    card.enrichment_source = None
-    card.enrichment_provenance = None
+    # Don't erase a prior manual/authoritative enrichment on a not_found run (QC
+    # 2026-08-13): only clear the summary fields when there's nothing worth keeping.
+    # A re-enrichment that finds no NEW authoritative data must not wipe a human's edit.
+    if not card.enrichment_provenance:
+        card.enrichment_source = None
+        card.enrichment_provenance = None
     return card.enrichment_status
 
 

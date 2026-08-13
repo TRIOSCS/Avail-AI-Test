@@ -972,3 +972,22 @@ async def test_dell_miss_is_not_found_not_catalogued(db_session):
     ):
         status = await aes.enrich_card(card, db_session, connectors=[], web_meter=WebMeter())
     assert status == MaterialEnrichmentStatus.NOT_FOUND  # dell is excluded from HIGH_PRECISION_VENDORS
+
+
+def test_apply_authoritative_merges_provenance_not_replaces(db_session):
+    """QC 2026-08-13: applying enrichment MERGES per-field provenance into the card's
+    existing provenance — a prior manual entry for a field NOT touched this run is
+    preserved, not wiped by the wholesale reassignment."""
+    card = _card(db_session, "PROVMERGE001")
+    # A human previously set package_type by hand (a non-core field the run below
+    # doesn't touch); its provenance must survive.
+    card.enrichment_provenance = {"package_type": {"source": "manual", "confidence": 1.0}}
+
+    apply_authoritative(
+        card, {"description": "New authoritative desc"}, {"description": _prov_entry("digikey")}, ["digikey"]
+    )
+
+    prov = card.enrichment_provenance
+    assert prov["package_type"]["source"] == "manual"  # PRESERVED (was wiped before the fix)
+    assert prov["description"]["source"] == "digikey"  # this run's entry added
+    assert card.description == "New authoritative desc"
