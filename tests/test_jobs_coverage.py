@@ -131,7 +131,8 @@ def _make_req_mock(id_, deadline, req_name):
 def _db_returning_reqs(mock_db, reqs):
     """Wire mock_db.query so the bid-due-alerts query returns ``reqs``."""
     mock_query = MagicMock()
-    mock_query.filter.return_value.limit.return_value.all.return_value = reqs
+    # Chain mirrors the real query: filter().order_by().limit().all()
+    mock_query.filter.return_value.order_by.return_value.limit.return_value.all.return_value = reqs
     mock_db.query.return_value = mock_query
 
 
