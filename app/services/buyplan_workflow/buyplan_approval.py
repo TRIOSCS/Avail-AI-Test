@@ -59,6 +59,13 @@ def submit_buy_plan(
     approval regardless of value — no auto-approve (frozen scope; the old
     sub-$5K rule was removed, ``auto_approved`` column is vestigial).
     """
+    # Row lock (QC 2026-08-13): a separate id-only SELECT ... FOR UPDATE serializes
+    # concurrent submits so a double-submit can't both pass the DRAFT gate and open TWO
+    # REQUESTED approval rows (the second orphan would then be undecidable). FOR UPDATE
+    # on the joinedload(lines) query errors on PG (locking the nullable outer-join side),
+    # so lock the plan row by id first, THEN load it with its lines. (SQLite no-ops FOR UPDATE.)
+    if db.scalar(select(BuyPlan.id).where(BuyPlan.id == plan_id).with_for_update()) is None:
+        raise ValueError(f"Buy plan {plan_id} not found")
     plan = db.get(BuyPlan, plan_id, options=[joinedload(BuyPlan.lines)])
     if not plan:
         raise ValueError(f"Buy plan {plan_id} not found")
