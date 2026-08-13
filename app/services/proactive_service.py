@@ -433,6 +433,13 @@ async def send_proactive_offer(
     if not matches:
         raise ValueError("No valid matches found")
 
+    # Confidentiality guard (QC 2026-08-13): every selected match must belong to
+    # ONE customer site. A mixed match_ids selection would build one email body
+    # from all matches, then send it (and file the throttle) under matches[0]'s
+    # site — leaking one customer's parts/prices to another.
+    if len({m.customer_site_id for m in matches}) > 1:
+        raise ValueError("All selected matches must be for a single customer site")
+
     site_id = matches[0].customer_site_id
     site = db.get(CustomerSite, site_id)
     company = site.company if site else None

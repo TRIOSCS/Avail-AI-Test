@@ -110,7 +110,7 @@ async def proactive_list_partial(
 @router.post("/v2/partials/proactive/refresh", response_class=HTMLResponse)
 async def proactive_refresh(
     request: Request,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.PROACTIVE)),
     db: Session = Depends(get_db),
 ):
     """Trigger a proactive scan then return the matches list partial."""
@@ -130,7 +130,7 @@ async def proactive_refresh(
 @router.post("/v2/partials/proactive/batch-dismiss", response_class=HTMLResponse)
 async def proactive_batch_dismiss(
     request: Request,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.PROACTIVE)),
     db: Session = Depends(get_db),
 ):
     """Batch dismiss selected proactive matches and reload the list."""
@@ -161,7 +161,7 @@ async def proactive_batch_dismiss(
 async def proactive_prepare_page(
     site_id: int,
     request: Request,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.PROACTIVE)),
     db: Session = Depends(get_db),
 ):
     """Full-page prepare/send workflow for proactive offers."""
@@ -278,7 +278,7 @@ async def proactive_add_contact(
     full_name: str = Form(""),
     email: str = Form(""),
     title: str = Form(""),
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.PROACTIVE)),
     db: Session = Depends(get_db),
 ):
     """Add a SiteContact from the Prepare page, then re-render the contact picker.
@@ -353,7 +353,7 @@ async def proactive_add_contact(
 @router.post("/v2/partials/proactive/draft", response_class=HTMLResponse)
 async def proactive_draft_for_prepare(
     request: Request,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.PROACTIVE)),
     db: Session = Depends(get_db),
 ):
     """AI-draft a proactive offer email for the prepare page."""
@@ -473,7 +473,7 @@ async def proactive_draft_for_prepare(
 @router.post("/v2/proactive/send", response_class=HTMLResponse)
 async def proactive_send_offer(
     request: Request,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.PROACTIVE)),
     db: Session = Depends(get_db),
 ):
     """Send a proactive offer email from the prepare page."""
@@ -556,7 +556,7 @@ async def proactive_send_offer(
 async def proactive_convert(
     request: Request,
     offer_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.PROACTIVE)),
     db: Session = Depends(get_db),
 ):
     """Convert a won proactive offer into req+quote+buyplan."""
@@ -631,7 +631,7 @@ async def proactive_badge(
 @router.post("/v2/partials/proactive/do-not-offer", response_class=HTMLResponse)
 async def proactive_do_not_offer(
     request: Request,
-    user: User = Depends(require_user),
+    user: User = Depends(require_access(AccessKey.PROACTIVE)),
     db: Session = Depends(get_db),
 ):
     """Add an MPN+customer combo to the do-not-offer list (with dedup check)."""
