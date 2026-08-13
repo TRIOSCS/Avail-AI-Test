@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Company, MaterialCard, Offer, ProactiveMatch, Requisition, User
 from app.models.config import SystemConfig
-from app.services.proactive_teams_push import _WATERMARK_KEY, push_new_matches_to_teams
+from app.services.proactive_teams_push import _SCAN_CAP, _WATERMARK_KEY, push_new_matches_to_teams
 
 _PUSH_PATH = "app.services.proactive_teams_push.post_teams_channel_card"
 
@@ -46,6 +46,29 @@ def _scaffold(db: Session) -> dict:
     db.add(offer)
     db.flush()
     return {"owner": owner, "company": company, "offer": offer}
+
+
+def _bulk_add_matches(db: Session, ctx: dict, count: int) -> None:
+    """Add ``count`` NEW matches.
+
+    The oldest row (lowest id) gets the lowest score, so ordered by
+    score.desc()/id.asc() it sorts LAST and is the one dropped from a capped page —
+    while the page still ends at a HIGH id. Scores stay within the model's 0-100 bound.
+    This is the shape that exposes the watermark-jump bug: a low-id match left below a
+    high page-max id.
+    """
+    for i in range(count):
+        db.add(
+            ProactiveMatch(
+                offer_id=ctx["offer"].id,
+                salesperson_id=ctx["owner"].id,
+                company_id=ctx["company"].id,
+                mpn=f"BULK-{i:04d}",
+                match_score=1 if i == 0 else 90,
+                status="new",
+            )
+        )
+    db.commit()
 
 
 def _add_match(db: Session, ctx: dict, mpn: str, score: int, status: str = "new") -> ProactiveMatch:
@@ -101,6 +124,39 @@ async def test_idempotent_second_run_pushes_nothing(db_session: Session):
     assert first == {"pushed": 1}
     assert second == {"pushed": 0}
     assert mock_post.await_count == 1
+
+
+async def test_full_page_backlog_holds_watermark(db_session: Session):
+    """A >_SCAN_CAP NEW backlog must NOT jump the watermark to the top-500 max id.
+
+    The scan is ordered by score, not id, so a full page can end at a high id while
+    lower-id matches remain unpushed. Advancing the watermark to that max would skip
+    them forever; the fix holds the watermark on a full page so they are picked up on
+    the next run.
+    """
+    ctx = _scaffold(db_session)
+    _bulk_add_matches(db_session, ctx, _SCAN_CAP + 1)  # 501 NEW matches
+
+    with patch(_PUSH_PATH, new=AsyncMock()) as mock_post:
+        result = await push_new_matches_to_teams(db_session)
+
+    assert result == {"pushed": _SCAN_CAP}  # exactly one full page was consumed
+    mock_post.assert_awaited_once()
+
+    # The top-500-by-score slice ends at a high id (newest rows carry top scores);
+    # the buggy code would have parked the watermark there and skipped the remaining
+    # low-id match forever.
+    top_page_max_id = max(
+        m.id
+        for m in db_session.query(ProactiveMatch)
+        .filter(ProactiveMatch.status == "new")
+        .order_by(ProactiveMatch.match_score.desc(), ProactiveMatch.id.asc())
+        .limit(_SCAN_CAP)
+        .all()
+    )
+    row = db_session.query(SystemConfig).filter(SystemConfig.key == _WATERMARK_KEY).first()
+    stored = int(row.value) if row and row.value and row.value.isdigit() else 0
+    assert stored < top_page_max_id  # watermark held below the top-page max, not jumped past the remainder
 
 
 async def test_only_new_status_is_pushed(db_session: Session):

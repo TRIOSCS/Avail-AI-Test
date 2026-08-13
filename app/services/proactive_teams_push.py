@@ -89,8 +89,12 @@ async def push_new_matches_to_teams(db: Session) -> dict[str, int]:
     """Post a digest of not-yet-pushed NEW proactive matches to Teams.
 
     Idempotent via the ``proactive_teams_push_last_id`` watermark: only matches
-    with an id above the mark are considered, and the mark advances to the highest
-    id seen this run (whether or not it made the card body), so nothing repeats.
+    with an id above the mark are considered. Because the scan is ordered by score
+    (not id) and capped at ``_SCAN_CAP``, a full page may leave unpushed matches
+    whose id is *below* the page's max id. Advancing the watermark to that max would
+    skip them forever, so the mark only advances on a partial page (count <
+    ``_SCAN_CAP``); a full page holds the mark and the remainder is picked up next
+    run.
 
     Returns ``{"pushed": <count>}`` — 0 when there is nothing new.
     """
@@ -114,7 +118,17 @@ async def push_new_matches_to_teams(db: Session) -> dict[str, int]:
     total = len(matches)
     await post_teams_channel_card(_build_card(matches, names, total))
 
-    max_id = max(m.id for m in matches)
-    _set_last_id(db, max_id)
-    logger.info(f"Proactive Teams push: sent digest of {total} new match(es), watermark now {max_id}")
+    # Only advance the watermark on a partial page. A full page (total == _SCAN_CAP)
+    # was ordered by score, so matches with an id below max(m.id) but outside the
+    # top-by-score slice may still be unpushed; jumping the watermark to that max id
+    # would skip them permanently. Holding it lets the next run pick up the remainder.
+    if total < _SCAN_CAP:
+        max_id = max(m.id for m in matches)
+        _set_last_id(db, max_id)
+        logger.info(f"Proactive Teams push: sent digest of {total} new match(es), watermark now {max_id}")
+    else:
+        logger.info(
+            f"Proactive Teams push: sent digest of {total} new match(es); watermark held "
+            f"(full page of {_SCAN_CAP}, backlog remains for next run)"
+        )
     return {"pushed": total}
