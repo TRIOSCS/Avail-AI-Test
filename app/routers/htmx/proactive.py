@@ -532,6 +532,17 @@ async def proactive_send_offer(
             allow_all=is_manager_or_admin(user),
         )
 
+        # Honest outcome (QC 2026-08-13): send_proactive_offer swallows a Graph
+        # rejection and marks the offer + matches FAILED (persisted), returning
+        # normally. Don't show a phantom "sent" banner — surface the failure so the
+        # HTMX error toast fires, matching the prepared-send path.
+        from ...constants import ProactiveOfferStatus
+
+        if result.get("status") == ProactiveOfferStatus.FAILED:
+            raise HTTPException(
+                502, "Send failed — Microsoft rejected the message. The offer was not delivered; try again."
+            )
+
         # Success — reload matches list with success banner
         parts_count = len(result.get("line_items", []))
         contacts_count = len(result.get("recipient_emails", []))
@@ -541,6 +552,8 @@ async def proactive_send_offer(
 
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
+    except HTTPException:
+        raise  # our own 502 phantom-send guard — don't remap it to a generic 500
     except Exception as exc:
         logger.error("Proactive send failed: {}", exc)
         raise HTTPException(500, "Send failed. Please try again or contact support.") from exc
