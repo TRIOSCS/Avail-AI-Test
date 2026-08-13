@@ -92,14 +92,17 @@ class TestGraphClientSearchSentMessages:
 
     @pytest.mark.asyncio
     @patch("app.utils.graph_client.http")
-    async def test_escapes_single_quotes(self, mock_http):
+    async def test_uses_search_no_invalid_filter_orderby(self, mock_http):
         from app.utils.graph_client import GraphClient
 
         mock_http.get = AsyncMock(return_value=MagicMock(status_code=200, json=lambda: {"value": []}))
         gc = GraphClient("token-abc")
         await gc.search_sent_messages("O'Brien's Query")
         call_params = mock_http.get.call_args[1]["params"]
-        assert "O''Brien''s Query" in call_params["$filter"]
+        # $search wraps the term in double quotes (single quotes are fine inside KQL);
+        # the Graph-invalid contains()+$orderby pair is gone (QC 2026-08-13).
+        assert call_params["$search"] == "\"O'Brien's Query\""
+        assert "$filter" not in call_params and "$orderby" not in call_params
 
 
 class TestGraphClientPatchRetry:

@@ -148,16 +148,20 @@ class GraphClient:
         """
         base = f"/users/{user_id}" if user_id else "/me"
         path = f"{base}/mailFolders/SentItems/messages"
-        # Escape single quotes per OData convention to prevent filter injection
-        safe_query = query.replace("'", "''")
+        # QC 2026-08-13: the old query was Graph-invalid on two counts — contains() is
+        # not allowed on body/content, and $filter+$orderby on sentDateTime is rejected
+        # — so PO sent-detection errored on every call. Use $search (spans subject+body)
+        # with no $orderby, then sort newest-first in Python. Strip double-quotes from
+        # the term so it can't break out of the quoted KQL search string.
+        safe_query = query.replace('"', " ")
         params = {
-            "$filter": f"contains(subject,'{safe_query}') or contains(body/content,'{safe_query}')",
+            "$search": f'"{safe_query}"',
             "$select": "id,subject,toRecipients,sentDateTime",
             "$top": str(max_results),
-            "$orderby": "sentDateTime desc",
         }
         data = await self.get_json(path, params=params)  # raises GraphAPIError on failure
         messages: list[dict] = data.get("value", [])  # Graph JSON boundary
+        messages.sort(key=lambda m: m.get("sentDateTime", ""), reverse=True)
         return messages
 
     # ── H8: Delta Query ─────────────────────────────────────────────

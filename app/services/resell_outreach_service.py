@@ -988,7 +988,13 @@ async def retry_outreach_send(
         # row may have actually delivered, so never assume the send did not happen.
         gc = GraphClient(token)
         try:
-            sent_msg = await email_service._find_sent_message(gc, guard_subject, email)
+            # Time floor (QC 2026-08-13): only THIS row's send counts. Without it, a
+            # prior campaign to the same buyer with the same tagged subject could be
+            # matched and this failed row falsely marked delivered. row.created_at here
+            # is still the original send-attempt time (the resend branch refreshes it
+            # later); a 10-min tolerance absorbs Graph/app clock skew.
+            floor = (row.created_at or datetime.now(UTC)) - timedelta(minutes=10)
+            sent_msg = await email_service._find_sent_message(gc, guard_subject, email, sent_after=floor)
         except Exception:
             # A lookup FAILURE is the UNKNOWN case, never proof of not-sent — the original
             # may have delivered while the Sent-folder query is transiently failing.
