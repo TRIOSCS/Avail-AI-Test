@@ -597,8 +597,22 @@ async def proactive_scorecard(
         from ...services.proactive_service import get_scorecard
 
         stats = get_scorecard(db, user.id)
-    except (ImportError, RuntimeError, Exception):
-        stats = {"total_sent": 0, "total_converted": 0, "conversion_rate": 0, "total_revenue": 0}
+    except Exception:
+        # QC 2026-08-13: was a silent all-zeros swallow whose keys didn't even
+        # match the template (total_revenue is unused; converted_revenue /
+        # gross_profit / anticipated_revenue / total_quoted / total_po are what
+        # scorecard.html reads). Log it, and mirror get_scorecard's real keys.
+        logger.exception("Proactive scorecard failed for user {}", user.id)
+        stats = {
+            "total_sent": 0,
+            "total_converted": 0,
+            "total_quoted": 0,
+            "total_po": 0,
+            "conversion_rate": 0,
+            "anticipated_revenue": 0,
+            "converted_revenue": 0,
+            "gross_profit": 0,
+        }
 
     return template_response(
         "htmx/partials/proactive/scorecard.html",

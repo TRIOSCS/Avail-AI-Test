@@ -1076,6 +1076,10 @@ def get_scorecard(db: Session, salesperson_id: int | None = None) -> dict:
                 _summed_when(ProactiveOfferStatus.SENT, ProactiveOffer.total_sell).label("pending"),
                 func.count(ProactiveOffer.converted_quote_id).label("quoted"),
             )
+            # Same base_filter as the top-line query (QC 2026-08-13): without it the
+            # per-rep 'sent' counts included staged DRAFTs and FAILED sends, so the
+            # breakdown didn't reconcile with the headline total.
+            .filter(*base_filter)
             .group_by(ProactiveOffer.salesperson_id)
             .all()
         )

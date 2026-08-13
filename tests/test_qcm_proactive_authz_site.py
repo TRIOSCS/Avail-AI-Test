@@ -72,3 +72,37 @@ async def test_send_proactive_offer_rejects_mixed_sites(
 
     with pytest.raises(ValueError, match="single customer site"):
         await send_proactive_offer(db_session, test_user, "tok", [m1.id, m2.id], [], {})
+
+
+# ── Scorecard accuracy + resilience ───────────────────────────────────────
+
+
+def test_scorecard_breakdown_excludes_draft_and_failed(db_session: Session, test_user, test_customer_site):
+    """The per-rep breakdown must exclude DRAFT + FAILED, matching the headline."""
+    from app.constants import ProactiveOfferStatus
+    from app.models.intelligence import ProactiveOffer
+    from app.services.proactive_service import get_scorecard
+
+    for st in (ProactiveOfferStatus.SENT, ProactiveOfferStatus.DRAFT, ProactiveOfferStatus.FAILED):
+        db_session.add(
+            ProactiveOffer(
+                customer_site_id=test_customer_site.id, salesperson_id=test_user.id, status=st, line_items=[]
+            )
+        )
+    db_session.commit()
+
+    result = get_scorecard(db_session, None)  # admin/all view builds the breakdown
+    mine = [b for b in result["breakdown"] if b["salesperson_id"] == test_user.id]
+    assert mine and mine[0]["sent"] == 1  # only the SENT one counts
+
+
+def test_scorecard_route_survives_service_error(client: TestClient, monkeypatch):
+    """A get_scorecard error renders a zeroed fallback (200), never a 500."""
+    from app.services import proactive_service
+
+    def _boom(*a, **k):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(proactive_service, "get_scorecard", _boom)
+    resp = client.get("/v2/partials/proactive/scorecard", headers={"HX-Request": "true"})
+    assert resp.status_code == 200
