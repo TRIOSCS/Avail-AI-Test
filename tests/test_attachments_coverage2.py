@@ -16,6 +16,7 @@ Called by: pytest
 Depends on: conftest.py (client, db_session, test_user, test_requisition)
 """
 
+import io
 import os
 
 os.environ["TESTING"] = "1"
@@ -439,7 +440,10 @@ class TestUploadRequirementAttachmentNoFilename:
         mock_file = MagicMock(spec=FUF)
         mock_file.filename = None
         mock_file.content_type = "application/pdf"
-        mock_file.read = AsyncMock(return_value=b"small content")
+        # read(n) must honor EOF like a real UploadFile so the chunked _read_capped
+        # loop terminates (a flat return_value would spin to the size cap).
+        _buf = io.BytesIO(b"small content")
+        mock_file.read = AsyncMock(side_effect=lambda n=-1: _buf.read(n))
 
         with patch(
             "app.scheduler.get_valid_token",
