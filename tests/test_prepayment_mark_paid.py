@@ -252,3 +252,16 @@ def test_unmark_paid_manager_only(db_session: Session):
     assert r.status_code == 403
     db_session.refresh(pp)
     assert pp.status == PrepaymentStatus.PAID.value  # still paid
+
+
+def test_mark_paid_twice_is_rejected(db_session: Session, approved_prepay: Prepayment):
+    """A second mark-paid on a now-PAID prepayment raises (the FOR UPDATE re-fetch +
+    status re-check serialize a double-submit, so the paid fan-out never double-fires
+    and wire_reference / confirmer aren't overwritten)."""
+    pp = approved_prepay
+    mark_prepayment_paid(db_session, pp, wire_reference="WIRE-1", paid_amount=Decimal("20002.38"), paid_via="in_app")
+    with pytest.raises(ValueError):
+        mark_prepayment_paid(
+            db_session, pp, wire_reference="WIRE-2", paid_amount=Decimal("20002.38"), paid_via="in_app"
+        )
+    assert pp.wire_reference == "WIRE-1"  # the second call never overwrote it

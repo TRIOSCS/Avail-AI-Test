@@ -40,13 +40,15 @@ except Exception:  # pragma: no cover
 async def send_email(user, subject: str, html_body: str, db: Session) -> None:
     """Send a single approval notification email via Graph API.
 
-    Silently skips when token fetch returns nothing (user not authenticated). On any
-    other error, re-raises so the dispatcher can record it.
+    Raises when token fetch returns nothing (user not authenticated) — like any other
+    send error — so the outbox dispatcher records a failure (fail_count/last_error →
+    retry, then dead-letter) instead of stamping ``sent_at`` on an email that never
+    went out. Previously it returned silently and the dispatcher marked the row sent,
+    losing the requester's only notice of the decision (QC 2026-08-13).
     """
     token = await get_valid_token(user, db)
     if not token:
-        logger.warning("approval email skipped — no token for {}", user.email)
-        return
+        raise RuntimeError(f"approval email not sent — no Graph token for {user.email}")
     gc = GraphClient(token)
     await gc.post_json(
         "/me/sendMail",

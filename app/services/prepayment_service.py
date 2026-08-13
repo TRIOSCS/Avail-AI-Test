@@ -280,6 +280,15 @@ def mark_prepayment_paid(
         schedule_prepayment_notify,
     )
 
+    # Row lock (QC 2026-08-13): re-fetch under FOR UPDATE so two concurrent
+    # confirmations (a double-submit, or the accounting email link racing the in-app
+    # fallback) serialize. The second blocks until the first commits PAID, then the
+    # guard below fires — instead of both fanning out the paid notice and the second
+    # overwriting wire_reference / paid_amount / confirmer. (SQLite no-ops FOR UPDATE.)
+    locked = db.query(Prepayment).filter(Prepayment.id == prepayment.id).with_for_update().one_or_none()
+    if locked is not None:
+        prepayment = locked
+
     if prepayment.status != PrepaymentStatus.APPROVED.value:
         raise ValueError("Only an approved prepayment can be marked paid.")
 
