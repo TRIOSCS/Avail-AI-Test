@@ -170,7 +170,14 @@ def ingest_stock_list(
             )
             continue
 
-        card = db.query(MaterialCard).filter_by(normalized_mpn=norm).first()
+        # Only ACTIVE cards match: prod runs a PARTIAL unique index (WHERE deleted_at
+        # IS NULL), so a soft-deleted twin must not capture the ingest — a new active
+        # card is created instead (the partial unique allows the coexisting dead row).
+        card = (
+            db.query(MaterialCard)
+            .filter(MaterialCard.normalized_mpn == norm, MaterialCard.deleted_at.is_(None))
+            .first()
+        )
         if not card:
             card = MaterialCard(
                 normalized_mpn=norm,
@@ -182,7 +189,11 @@ def ingest_stock_list(
                 db.flush()
             except IntegrityError:
                 db.rollback()
-                card = db.query(MaterialCard).filter_by(normalized_mpn=norm).first()
+                card = (
+                    db.query(MaterialCard)
+                    .filter(MaterialCard.normalized_mpn == norm, MaterialCard.deleted_at.is_(None))
+                    .first()
+                )
                 if not card:
                     result.skipped_rows += 1
                     result.warnings.append(
