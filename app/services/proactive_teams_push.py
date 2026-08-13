@@ -95,10 +95,15 @@ async def push_new_matches_to_teams(db: Session) -> dict[str, int]:
     Returns ``{"pushed": <count>}`` — 0 when there is nothing new.
     """
     last_id = _get_last_id(db)
+    # Window by id ASC (QC 2026-08-13), NOT by score: the watermark advances to this
+    # page's max id, so the page must be CONTIGUOUS in id — otherwise a NEW match with
+    # an id below the page's max but outside a top-by-score slice would be jumped over
+    # and never pushed (matches are only ever deduped by this watermark; the push does
+    # not flip their status). The digest card is score-sorted below for display.
     matches: list[ProactiveMatch] = (
         db.query(ProactiveMatch)
         .filter(ProactiveMatch.status == ProactiveMatchStatus.NEW, ProactiveMatch.id > last_id)
-        .order_by(ProactiveMatch.match_score.desc(), ProactiveMatch.id.asc())
+        .order_by(ProactiveMatch.id.asc())
         .limit(_SCAN_CAP)
         .all()
     )
@@ -112,9 +117,12 @@ async def push_new_matches_to_teams(db: Session) -> dict[str, int]:
             names[cid] = cname
 
     total = len(matches)
-    await post_teams_channel_card(_build_card(matches, names, total))
+    # Card shows the highest-score matches first (the query is id-ordered only so the
+    # watermark stays safe); _build_card slices the top _CARD_ROWS of what it's given.
+    card_matches = sorted(matches, key=lambda m: m.match_score or 0, reverse=True)
+    await post_teams_channel_card(_build_card(card_matches, names, total))
 
-    max_id = max(m.id for m in matches)
+    max_id = max(m.id for m in matches)  # = last id of the contiguous window → safe to advance
     _set_last_id(db, max_id)
     logger.info(f"Proactive Teams push: sent digest of {total} new match(es), watermark now {max_id}")
     return {"pushed": total}
