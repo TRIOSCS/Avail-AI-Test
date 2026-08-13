@@ -23,6 +23,7 @@ Depends on: models (PartEquivalence, Offer, Requirement), utils/claude_client,
     utils/normalization.
 """
 
+import asyncio
 from datetime import UTC, datetime
 
 from loguru import logger
@@ -211,7 +212,10 @@ async def classify_new_pairs(db: Session, spellings_by_key: dict[str, str], *, l
     """
     from ..utils.claude_client import claude_json
 
-    pairs = find_candidate_pairs(spellings_by_key)
+    # find_candidate_pairs is O(n^2) in the number of distinct keys; running it
+    # inline would block the event loop when the window is large. Offload it to a
+    # worker thread so the loop stays responsive — same pairs, same verdicts.
+    pairs = await asyncio.get_running_loop().run_in_executor(None, find_candidate_pairs, spellings_by_key)
     if not pairs:
         return 0
     existing = {
