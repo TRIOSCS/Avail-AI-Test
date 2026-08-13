@@ -12,6 +12,7 @@ Depends on: routers/htmx_views.py, routers/materials.py, services/stock_list_ing
 """
 
 import io
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -156,6 +157,56 @@ def test_ingest_service_existing_vendor_reused(db_session):
     )
     assert result.new_vendor is False
     assert db_session.query(VendorCard).filter_by(normalized_name=norm).count() == 1
+
+
+def test_ingest_does_not_reuse_soft_deleted_card(db_session):
+    """A soft-deleted MaterialCard must NOT capture a re-ingest of the same MPN.
+
+    Prod runs a partial unique index (WHERE deleted_at IS NULL), so the card lookup must
+    match only ACTIVE cards — the dead twin keeps its own rows and the re-ingest
+    bypasses it (a fresh active card is created on PG). Before the fix, the lookup
+    matched the soft-deleted row and linked new vendor history to the dead card.
+    """
+    # 1) First ingest creates one active card for the MPN.
+    ingest_stock_list(
+        db_session,
+        filename="stock.csv",
+        content=b"mpn,qty,price\nDEADCARD1,10,1.00",
+        vendor_name="Alpha Vendor",
+    )
+    dead = db_session.query(MaterialCard).filter_by(normalized_mpn="deadcard1").one()
+    dead_id = dead.id
+
+    # 2) Soft-delete that card; pre-create the second vendor (committed, so the
+    #    service never rolls back a pending new-vendor row on the SQLite retry path).
+    dead.deleted_at = datetime.now(UTC)
+    norm_bravo = normalize_vendor_name("Bravo Vendor")
+    db_session.add(VendorCard(normalized_name=norm_bravo, display_name="Bravo Vendor", emails=[], phones=[]))
+    db_session.commit()
+
+    # 3) Re-ingest the SAME MPN from the second vendor.
+    ingest_stock_list(
+        db_session,
+        filename="stock.csv",
+        content=b"mpn,qty,price\nDEADCARD1,20,2.00",
+        vendor_name="Bravo Vendor",
+    )
+
+    # The dead card captured NONE of the re-ingest: no vendor history for the new
+    # vendor was ever attached to it.
+    assert (
+        db_session.query(MaterialVendorHistory).filter_by(material_card_id=dead_id, vendor_name=norm_bravo).count() == 0
+    )
+    # It is never the ACTIVE match for the MPN. (On PG a fresh active card exists; on
+    # SQLite the full unique index blocks a twin, so no active row exists — either way
+    # the dead card id is never returned by the active-only lookup.)
+    active = (
+        db_session.query(MaterialCard)
+        .filter(MaterialCard.normalized_mpn == "deadcard1", MaterialCard.deleted_at.is_(None))
+        .first()
+    )
+    if active is not None:
+        assert active.id != dead_id
 
 
 # ── Removals: old vendor-import route + CRM "Find by Part" sub-tab ─────────
