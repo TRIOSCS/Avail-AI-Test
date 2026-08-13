@@ -18,6 +18,7 @@ Depends on: conftest.py (db_session, test_user fixtures), app models, attachment
 
 from __future__ import annotations
 
+import io
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -47,7 +48,10 @@ def _make_upload_file(
     f = MagicMock()
     f.filename = filename
     f.content_type = content_type
-    f.read = AsyncMock(return_value=content)
+    # Behave like a real UploadFile: read(n) returns up to n bytes then b'' at EOF,
+    # so the chunked _read_capped loop terminates (a flat return_value would spin).
+    _buf = io.BytesIO(content)
+    f.read = AsyncMock(side_effect=lambda n=-1: _buf.read(n))
     return f
 
 

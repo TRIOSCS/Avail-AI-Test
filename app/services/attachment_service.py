@@ -74,6 +74,27 @@ def _trusted_content_type(file_name: str | None) -> str:
     return _EXT_CONTENT_TYPE.get(ext, "application/octet-stream")
 
 
+_READ_CHUNK = 64 * 1024  # 64 KB per read while capping the upload
+
+
+async def _read_capped(file: UploadFile) -> bytes:
+    """Read an UploadFile into memory, aborting the moment it exceeds the size cap.
+
+    QC 2026-08-13: the prior ``await file.read()`` buffered the ENTIRE request body
+    before ``_validate`` ever checked the size, so concurrent oversized uploads
+    could OOM the container (there is no body-size limit in front of the app).
+    """
+    buf = bytearray()
+    while True:
+        chunk = await file.read(_READ_CHUNK)
+        if not chunk:
+            break
+        buf.extend(chunk)
+        if len(buf) > MAX_ATTACHMENT_BYTES:
+            raise HTTPException(400, "File too large (max 10 MB)")
+    return bytes(buf)
+
+
 def _validate(file: UploadFile, content: bytes) -> None:
     """Raise HTTPException(400) if the file exceeds the size limit or has a disallowed
     extension."""
@@ -214,7 +235,7 @@ async def store_and_attach(
     cloud folder (e.g. "Companies") entity_id    — PK of the owning entity file —
     FastAPI UploadFile user         — authenticated User ORM object
     """
-    content = await file.read()
+    content = await _read_capped(file)
     _validate(file, content)
 
     item_id, drive_id, web_url = await _store(
