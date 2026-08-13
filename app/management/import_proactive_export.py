@@ -33,7 +33,9 @@ Called by: an operator (manually, after migration 205) and
     tests/test_proactive_validation.py (the three hand-checked lines).
 Depends on: app.database.SessionLocal, app.models (Company, CustomerSite,
     Requisition, Requirement, Offer, User, MaterialCard),
-    app.utils.normalization.normalize_mpn_key.
+    app.utils.normalization.normalize_mpn_key,
+    app.services.proactive_matching (scan-watermark rewind so the backdated
+    imported offers stay visible to the proactive batch scan).
 """
 
 from __future__ import annotations
@@ -41,7 +43,7 @@ from __future__ import annotations
 import argparse
 import csv
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
@@ -130,6 +132,9 @@ def import_proactive_export(
     """
     users = _user_map(db)
     unmatched_reps: set[str] = set()
+    # Oldest created_at among offers ACTUALLY inserted this run (skipped-existing
+    # rows don't count) — drives the proactive-scan watermark rewind at the end.
+    oldest_offer_created_at: datetime | None = None
     stats: dict[str, int] = {
         "companies_created": 0,
         "requisitions_created": 0,
@@ -219,6 +224,7 @@ def import_proactive_export(
             if db.query(Offer.id).filter(Offer.notes == marker).first():
                 stats["rows_skipped_existing"] += 1
                 continue
+            offer_created_at = _parse_date(row.get("created_date", "")) or datetime.now(UTC)
             db.add(
                 Offer(
                     vendor_name=vendor,
@@ -231,14 +237,46 @@ def import_proactive_export(
                     source="salesforce_import",
                     entered_by_id=actor.id,
                     notes=marker,
-                    created_at=_parse_date(row.get("created_date", "")) or datetime.now(UTC),
+                    created_at=offer_created_at,
                 )
             )
             stats["offers_created"] += 1
+            if oldest_offer_created_at is None or offer_created_at < oldest_offer_created_at:
+                oldest_offer_created_at = offer_created_at
+
+    _rewind_scan_watermark(db, oldest_offer_created_at)
 
     if unmatched_reps:
         logger.warning("Reps not matched to users (fell back to {}): {}", actor.email, sorted(unmatched_reps))
     return {**stats, "unmatched_reps": sorted(unmatched_reps)}
+
+
+def _rewind_scan_watermark(db: Session, oldest_offer_created_at: datetime | None) -> None:
+    """Rewind the proactive-scan watermark behind the oldest imported offer.
+
+    Imported offers are backdated to their Salesforce created_date. The proactive
+    batch scan only ever looks at ``Offer.created_at > watermark`` (see
+    proactive_matching.run_proactive_scan); if the watermark already sits ahead of
+    these backdated rows they are invisible to every future scan and never seed a
+    match. So, once at least one offer was inserted, move the SHARED SystemConfig
+    watermark (same key proactive_matching uses) to just behind the oldest imported
+    offer — but only ever BACKWARD, never forward past where the scan already is.
+
+    Runs inside the import transaction (flush only), so a dry-run rollback discards
+    it exactly like the imported rows themselves.
+    """
+    if oldest_offer_created_at is None:
+        return
+    # Lazy import: keeps this management script from loading the matching service
+    # (and its dependency graph) unless an --apply actually inserts offers.
+    from ..services.proactive_matching import _get_watermark, _set_watermark
+
+    # Strictly-before target: the scan filter is ``created_at > watermark``, so a
+    # watermark equal to the oldest created_at would still exclude that offer.
+    target = oldest_offer_created_at - timedelta(seconds=1)
+    if _get_watermark(db) > target:
+        _set_watermark(db, target)
+        logger.info("Rewound proactive scan watermark to {} so imported offers are re-scanned", target)
 
 
 def main() -> int:
