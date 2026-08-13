@@ -106,3 +106,7 @@ def test_scorecard_route_survives_service_error(client: TestClient, monkeypatch)
     monkeypatch.setattr(proactive_service, "get_scorecard", _boom)
     resp = client.get("/v2/partials/proactive/scorecard", headers={"HX-Request": "true"})
     assert resp.status_code == 200
+    # The zeroed fallback still renders the real scorecard panel (not a 500/error),
+    # and its keys match the template so the values render as 0, not blanks.
+    assert "Proactive Scorecard" in resp.text
+    assert "Gross Profit" in resp.text
