@@ -186,3 +186,27 @@ class TestProcessCdrsIntegration:
         assert kwargs["user_id"] == 1
         assert kwargs["direction"] == "outbound"
         assert kwargs["phone"] == "+15551234567"
+
+
+class TestProcessCdrsFetchFailure:
+    """A failed CDR fetch must NOT advance the watermark (QC 2026-08-13)."""
+
+    @patch("app.jobs.eight_by_eight_jobs._update_watermark")
+    @patch("app.services.eight_by_eight_service.get_cdrs", new_callable=AsyncMock)
+    @patch("app.services.eight_by_eight_service.get_access_token", new_callable=AsyncMock)
+    async def test_fetch_failure_holds_watermark(self, mock_auth, mock_fetch, mock_update_wm):
+        from app.jobs.eight_by_eight_jobs import _process_cdrs
+        from app.services.eight_by_eight_service import CdrFetchError
+
+        mock_auth.return_value = "token"
+        mock_fetch.side_effect = CdrFetchError("HTTP 500")
+
+        db = MagicMock()
+        wm_query = MagicMock()
+        wm_query.filter.return_value.first.return_value = None
+        db.query.return_value = wm_query
+
+        result = await _process_cdrs(db, ENABLED_SETTINGS)
+
+        assert result["processed"] == 0
+        mock_update_wm.assert_not_called()  # watermark held so records aren't lost

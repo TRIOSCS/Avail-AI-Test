@@ -25,6 +25,16 @@ from app.http_client import http
 
 BASE_URL = "https://api.8x8.com/analytics/work/v1"
 
+
+class CdrFetchError(Exception):
+    """A CDR fetch failed (HTTP error / non-200).
+
+    Raised so the poll caller can tell a failed fetch from a clean empty window and NOT
+    advance its watermark past unfetched records (which would lose those call records
+    forever). QC 2026-08-13.
+    """
+
+
 # Module-level OAuth token cache.
 # _token_cache["token"] is reused until _token_cache["expires_at"] - 60s.
 
@@ -118,7 +128,9 @@ async def get_cdrs(token: str, settings, since: datetime, until: datetime) -> li
     """Fetch Call Detail Records from the 8x8 Analytics API.
 
     GET /v1/cdr with pbxId=allpbxes, isCallRecord=true, time window, and timezone.
-    Paginates via scrollId. Returns empty list on any error — never crashes.
+    Paginates via scrollId. Raises ``CdrFetchError`` on an HTTP error / non-200 so the
+    caller does NOT advance its watermark past unfetched records (QC 2026-08-13) — a
+    genuinely-empty window still returns ``[]``.
 
     Async — uses the shared pooled http client so it never blocks the event loop and
     reuses connections across calls.
@@ -148,11 +160,11 @@ async def get_cdrs(token: str, settings, since: datetime, until: datetime) -> li
             resp = await http.get(url, headers=headers, params=params, timeout=30)
         except httpx.HTTPError as e:
             logger.error(f"8x8 CDR fetch failed: {e}")
-            return all_records
+            raise CdrFetchError(str(e)) from e
 
         if resp.status_code != 200:
             logger.error(f"8x8 CDR fetch error: HTTP {resp.status_code} — {resp.text[:200]}")
-            return all_records
+            raise CdrFetchError(f"HTTP {resp.status_code}")
 
         body = resp.json()
         records = body.get("data", [])

@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.services.eight_by_eight_service import get_access_token, get_cdrs, normalize_cdr
+from app.services.eight_by_eight_service import CdrFetchError, get_access_token, get_cdrs, normalize_cdr
 
 FAKE_SETTINGS = SimpleNamespace(
     eight_by_eight_api_key="test-key",
@@ -75,15 +75,16 @@ class TestGetAccessToken:
 
 
 class TestGetCdrs:
-    async def test_returns_empty_on_api_error(self):
+    async def test_raises_on_api_error(self):
+        """A non-200 raises CdrFetchError so the poll caller holds its watermark."""
         mock_resp = MagicMock()
         mock_resp.status_code = 500
         mock_resp.text = "Internal Server Error"
         factory = _mock_async_client(get=mock_resp)
 
         with patch("app.services.eight_by_eight_service.http", factory):
-            result = await get_cdrs("token", FAKE_SETTINGS, SINCE, UNTIL)
-        assert result == []
+            with pytest.raises(CdrFetchError):
+                await get_cdrs("token", FAKE_SETTINGS, SINCE, UNTIL)
 
     async def test_returns_records_from_data_key(self):
         mock_resp = MagicMock()

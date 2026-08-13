@@ -20,6 +20,7 @@ import httpx
 import pytest
 
 from app.services.eight_by_eight_service import (
+    CdrFetchError,
     _token_cache,
     get_access_token,
     get_cdrs,
@@ -161,13 +162,13 @@ class TestGetAccessToken:
 
 
 class TestGetCdrs:
-    async def test_returns_empty_on_http_error(self):
+    async def test_raises_on_http_error(self):
         factory = _mock_async_client(get=httpx.HTTPError("connection refused"))
         since = datetime(2026, 3, 1, tzinfo=UTC)
         until = datetime(2026, 3, 2, tzinfo=UTC)
         with patch("app.services.eight_by_eight_service.http", factory):
-            result = await get_cdrs("token", FAKE_SETTINGS, since, until)
-        assert result == []
+            with pytest.raises(CdrFetchError):
+                await get_cdrs("token", FAKE_SETTINGS, since, until)
 
     async def test_stops_when_all_records_fetched(self):
         """Stops paginating when all records are already in all_records."""
