@@ -481,3 +481,40 @@ class TestCallClaudeForMatching:
         assert len(result) == 2
         assert result[1]["entity_type"] == "company"
         assert result[2]["entity_type"] == "vendor"
+
+
+# ── QC 2026-08-14: AI pass fires (was dead under the async job's running loop) ──
+
+
+def test_threadsafe_wrapper_owns_and_closes_its_session():
+    """run_auto_attribution_threadsafe creates its own Session, runs, and closes it — so
+    it can be handed to run_in_executor without sharing a Session across threads."""
+    from unittest.mock import MagicMock, patch
+
+    from app.services import auto_attribution_service as aas
+
+    fake_db = MagicMock()
+    stats = {"rule_matched": 1, "ai_matched": 2, "auto_dismissed": 0, "skipped": 0}
+    with (
+        patch("app.database.SessionLocal", return_value=fake_db),
+        patch.object(aas, "run_auto_attribution", return_value=stats) as mock_run,
+    ):
+        out = aas.run_auto_attribution_threadsafe()
+    mock_run.assert_called_once_with(fake_db)
+    fake_db.close.assert_called_once()  # session lifecycle owned by this thread
+    assert out["ai_matched"] == 2
+
+
+@pytest.mark.anyio
+async def test_job_runs_attribution_in_executor_so_ai_pass_fires():
+    """The async maintenance job offloads to a worker thread (no running loop), so
+    run_auto_attribution's AI pass — which skips when a loop is present — actually
+    runs."""
+    from unittest.mock import patch
+
+    from app.jobs import maintenance_jobs
+
+    stats = {"rule_matched": 0, "ai_matched": 0, "auto_dismissed": 0, "skipped": 0}
+    with patch("app.services.auto_attribution_service.run_auto_attribution_threadsafe", return_value=stats) as mock_ts:
+        await maintenance_jobs._job_auto_attribute_activities()
+    mock_ts.assert_called_once()
