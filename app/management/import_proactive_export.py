@@ -15,7 +15,7 @@ report (2026-08-06 spec, appendix A):
   the original ask date. Rep names map to users.name case-insensitively;
   unmatched reps fall back to the actor and are logged. Status maps:
   requisition Requirement→open, Quoted→quoted, Won→won, Archived→cancelled;
-  per-part sourcing_status identical except Archived→archived.
+  per-part sourcing_status identical except Archived→lost (no archived value since migration 210).
 
   availabilities.csv → one live Offer per SF Sourcing Item (idempotency key =
   the SRC# stored in Offer.notes), vendor name + qty + outright price +
@@ -67,7 +67,7 @@ _SOURCING_STATUS_MAP = {
     "Requirement": "open",
     "Quoted": "quoted",
     "Won": "won",
-    "Archived": "archived",
+    "Archived": "lost",
 }
 
 

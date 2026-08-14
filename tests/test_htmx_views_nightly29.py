@@ -1,19 +1,16 @@
-"""tests/test_htmx_views_nightly29.py — Direct-async coverage for bulk_archive /
-bulk_unarchive.
+"""tests/test_htmx_views_nightly29.py — Direct-async coverage for bulk_outcome /
+bulk_reopen.
 
-Target: Push app/routers/htmx_views.py from 84.9% → 85%+ by covering the
-lines that TestClient cannot reach due to async-continuation tracking gaps:
-
-  bulk_archive   lines 9866–9889  (requirement_ids + requisition_ids branches)
-  bulk_unarchive lines 9902–9929  (requirement_ids + requisition_ids branches)
-
-TestClient tests for these routes exist in test_htmx_views_nightly12.py, but
-Python coverage.py does not reliably attribute async-continuation lines (the
-statements immediately after ``await request.json()``) when tests run via WSGI.
-Calling the coroutine directly (as in test_htmx_views_nightly27.py) fixes this.
+Target: cover the async-continuation lines (the statements immediately after
+``await request.json()``) that TestClient runs cannot reliably attribute in
+coverage.py. Migration 210 replaced bulk_archive/bulk_unarchive (and their
+requisition_ids cascade) with bulk_outcome (won/lost/hotlist via the sourcing
+state machine) and bulk_reopen (requirement_ids only), so the direct calls now
+target those handlers. TestClient tests for the same routes live in
+tests/test_archive_system.py and tests/test_parts_bulk_outcome.py.
 
 Called by: pytest autodiscovery (asyncio_mode = auto)
-Depends on: conftest.py fixtures (db_session, test_user), app.routers.htmx_views
+Depends on: conftest.py fixtures (db_session, test_user), app.routers.htmx.parts
 """
 
 import os
@@ -35,7 +32,7 @@ from app.models import Requirement, Requisition, User
 def _json_request(payload: dict) -> MagicMock:
     """Return a minimal Request mock whose .json() coroutine returns *payload*."""
     req = MagicMock(spec=Request)
-    req.url.path = "/v2/partials/parts/bulk-archive"
+    req.url.path = "/v2/partials/parts/bulk-outcome"
     req.headers = {}
     req.query_params = MagicMock()
     req.query_params.get = lambda k, d=None: d
@@ -44,7 +41,7 @@ def _json_request(payload: dict) -> MagicMock:
 
 
 async def _call_bulk(handler, payload, user, db):
-    """Invoke a bulk_archive/unarchive coroutine with parts_list_partial mocked.
+    """Invoke a bulk_outcome/bulk_reopen coroutine with parts_list_partial mocked.
 
     Returns ``(result, mock_list)`` so callers can assert on both the response and
     the patched partial.
@@ -75,132 +72,85 @@ def _make_requirement(db: Session, requisition: Requisition) -> Requirement:
     return r
 
 
-# ── bulk_archive ──────────────────────────────────────────────────────────────
+# ── bulk_outcome ──────────────────────────────────────────────────────────────
 
 
-class TestBulkArchiveDirect:
-    """Direct coroutine calls for bulk_archive covering lines 9866–9889."""
+class TestBulkOutcomeDirect:
+    """Direct coroutine calls for bulk_outcome's post-json body lines."""
 
     async def test_empty_payload_covers_body_lines(self, db_session: Session, test_user: User):
-        """Lines 9866–9868: body parsed; empty lists skip both if-branches."""
-        from app.routers.htmx.parts import bulk_archive
+        """Body parsed; empty requirement_ids skips the transition loop entirely."""
+        from app.routers.htmx.parts import bulk_outcome
 
         result, mock_list = await _call_bulk(
-            bulk_archive, {"requirement_ids": [], "requisition_ids": []}, test_user, db_session
+            bulk_outcome, {"requirement_ids": [], "outcome": "hotlist"}, test_user, db_session
         )
 
         assert result.status_code == 200
         mock_list.assert_awaited_once()
 
-    async def test_requirement_ids_branch_covered(self, db_session: Session, test_user: User):
-        """Lines 9871–9874: requirement_ids is non-empty → bulk UPDATE executed."""
-        from app.routers.htmx.parts import bulk_archive
+    async def test_hotlist_branch_covered(self, db_session: Session, test_user: User):
+        """Non-empty requirement_ids → state-machine transition to hotlist."""
+        from app.routers.htmx.parts import bulk_outcome
 
         req = _make_requisition(db_session, test_user)
         part = _make_requirement(db_session, req)
 
         result, _ = await _call_bulk(
-            bulk_archive, {"requirement_ids": [part.id], "requisition_ids": []}, test_user, db_session
+            bulk_outcome, {"requirement_ids": [part.id], "outcome": "hotlist"}, test_user, db_session
         )
 
         assert result.status_code == 200
         db_session.refresh(part)
-        assert part.sourcing_status == SourcingStatus.ARCHIVED
+        assert part.sourcing_status == SourcingStatus.HOTLIST
 
-    async def test_requisition_ids_branch_covered(self, db_session: Session, test_user: User):
-        """Lines 9877–9884: requisition_ids non-empty → status ARCHIVED + cascade."""
-        from app.routers.htmx.parts import bulk_archive
+    async def test_terminal_branch_stamps_reason(self, db_session: Session, test_user: User):
+        """Terminal outcome (lost) → transition + shared reason stamped."""
+        from app.routers.htmx.parts import bulk_outcome
 
         req = _make_requisition(db_session, test_user)
         part = _make_requirement(db_session, req)
 
         result, _ = await _call_bulk(
-            bulk_archive, {"requirement_ids": [], "requisition_ids": [req.id]}, test_user, db_session
+            bulk_outcome,
+            {"requirement_ids": [part.id], "outcome": "lost", "reason": "priced out"},
+            test_user,
+            db_session,
         )
 
         assert result.status_code == 200
         db_session.refresh(part)
-        assert part.sourcing_status == SourcingStatus.ARCHIVED
-
-    async def test_both_branches_covered(self, db_session: Session, test_user: User):
-        """Lines 9866–9889: both requirement_ids and requisition_ids populated."""
-        from app.routers.htmx.parts import bulk_archive
-
-        req = _make_requisition(db_session, test_user)
-        part = _make_requirement(db_session, req)
-
-        result, _ = await _call_bulk(
-            bulk_archive, {"requirement_ids": [part.id], "requisition_ids": [req.id]}, test_user, db_session
-        )
-
-        assert result.status_code == 200
+        assert part.sourcing_status == SourcingStatus.LOST
+        assert part.outcome_reason == "priced out"
 
 
-# ── bulk_unarchive ────────────────────────────────────────────────────────────
+# ── bulk_reopen ───────────────────────────────────────────────────────────────
 
 
-class TestBulkUnarchiveDirect:
-    """Direct coroutine calls for bulk_unarchive covering lines 9902–9929."""
+class TestBulkReopenDirect:
+    """Direct coroutine calls for bulk_reopen's post-json body lines."""
 
     async def test_empty_payload_covers_body_lines(self, db_session: Session, test_user: User):
-        """Lines 9902–9904: body parsed; empty lists skip both if-branches."""
-        from app.routers.htmx.parts import bulk_unarchive
+        """Body parsed; empty requirement_ids skips the transition loop entirely."""
+        from app.routers.htmx.parts import bulk_reopen
 
-        result, mock_list = await _call_bulk(
-            bulk_unarchive, {"requirement_ids": [], "requisition_ids": []}, test_user, db_session
-        )
+        result, mock_list = await _call_bulk(bulk_reopen, {"requirement_ids": []}, test_user, db_session)
 
         assert result.status_code == 200
         mock_list.assert_awaited_once()
 
     async def test_requirement_ids_branch_covered(self, db_session: Session, test_user: User):
-        """Lines 9907–9911: requirement_ids non-empty → archived parts restored to
-        open."""
-        from app.routers.htmx.parts import bulk_unarchive
+        """Non-empty requirement_ids → hotlist part restored to open."""
+        from app.routers.htmx.parts import bulk_reopen
 
         req = _make_requisition(db_session, test_user)
         part = _make_requirement(db_session, req)
-        # Pre-archive the part so the unarchive UPDATE actually matches
-        part.sourcing_status = SourcingStatus.ARCHIVED
+        # Pre-hotlist the part so the reopen transition actually fires
+        part.sourcing_status = SourcingStatus.HOTLIST
         db_session.commit()
 
-        result, _ = await _call_bulk(
-            bulk_unarchive, {"requirement_ids": [part.id], "requisition_ids": []}, test_user, db_session
-        )
+        result, _ = await _call_bulk(bulk_reopen, {"requirement_ids": [part.id]}, test_user, db_session)
 
         assert result.status_code == 200
         db_session.refresh(part)
         assert part.sourcing_status == SourcingStatus.OPEN
-
-    async def test_requisition_ids_branch_covered(self, db_session: Session, test_user: User):
-        """Lines 9914–9922: requisition_ids non-empty → archived parts restored to
-        open."""
-        from app.routers.htmx.parts import bulk_unarchive
-
-        req = _make_requisition(db_session, test_user)
-        part = _make_requirement(db_session, req)
-        part.sourcing_status = SourcingStatus.ARCHIVED
-        db_session.commit()
-
-        result, _ = await _call_bulk(
-            bulk_unarchive, {"requirement_ids": [], "requisition_ids": [req.id]}, test_user, db_session
-        )
-
-        assert result.status_code == 200
-        db_session.refresh(part)
-        assert part.sourcing_status == SourcingStatus.OPEN
-
-    async def test_both_branches_covered(self, db_session: Session, test_user: User):
-        """Lines 9902–9929: both requirement_ids and requisition_ids populated."""
-        from app.routers.htmx.parts import bulk_unarchive
-
-        req = _make_requisition(db_session, test_user)
-        part = _make_requirement(db_session, req)
-        part.sourcing_status = SourcingStatus.ARCHIVED
-        db_session.commit()
-
-        result, _ = await _call_bulk(
-            bulk_unarchive, {"requirement_ids": [part.id], "requisition_ids": [req.id]}, test_user, db_session
-        )
-
-        assert result.status_code == 200

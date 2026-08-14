@@ -168,5 +168,6 @@ def test_list_status_hotlist_filters_and_renders_pill(client, db_session):
     assert resp.status_code == 200
     assert "Hotlist Only" in resp.text
     assert "Open Only" not in resp.text
-    # The additive filter pill is present in the list chrome.
-    assert "Hot List" in resp.text
+    # The additive filter pill is present in the list chrome ("Hotlist", one
+    # word — copy standardized with the part-level hotlist, migration 210).
+    assert "Hotlist" in resp.text

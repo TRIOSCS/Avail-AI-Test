@@ -262,10 +262,15 @@ def test_part_tasks_blocks_non_owner_sales(client, db_session, foreign_req, test
     assert resp.status_code == 404
 
 
-def test_part_archive_blocks_non_owner_sales(client, db_session, foreign_req, test_user):
+def test_part_bulk_outcome_blocks_non_owner_sales(client, db_session, foreign_req, test_user):
+    # Migration 210: the single-part archive route is gone; bulk-outcome carries
+    # the same non-owner 404 contract for part status changes.
     rid = _requirement_id(db_session, foreign_req)
     _make_sales(db_session, test_user)
-    resp = client.patch(f"/v2/partials/parts/{rid}/archive")
+    resp = client.post(
+        "/v2/partials/parts/bulk-outcome",
+        json={"requirement_ids": [rid], "outcome": "hotlist"},
+    )
     assert resp.status_code == 404
 
 

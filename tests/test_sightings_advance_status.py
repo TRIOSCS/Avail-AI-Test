@@ -42,11 +42,11 @@ class TestAdvanceStatusValid:
         db_session.refresh(requirement_open)
         assert requirement_open.sourcing_status == SourcingStatus.SOURCING
 
-    def test_open_to_archived(self, client: TestClient, db_session: Session, requirement_open: Requirement):
-        resp = advance_status(client, requirement_open.id, SourcingStatus.ARCHIVED)
+    def test_open_to_hotlist(self, client: TestClient, db_session: Session, requirement_open: Requirement):
+        resp = advance_status(client, requirement_open.id, SourcingStatus.HOTLIST)
         assert resp.status_code == 200
         db_session.refresh(requirement_open)
-        assert requirement_open.sourcing_status == SourcingStatus.ARCHIVED
+        assert requirement_open.sourcing_status == SourcingStatus.HOTLIST
 
     def test_sourcing_to_offered(self, client: TestClient, db_session: Session, requirement_open: Requirement):
         requirement_open.sourcing_status = SourcingStatus.SOURCING
@@ -64,9 +64,9 @@ class TestAdvanceStatusValid:
         db_session.refresh(requirement_open)
         assert requirement_open.sourcing_status == SourcingStatus.WON
 
-    def test_archived_reopens_to_open(self, client: TestClient, db_session: Session, requirement_open: Requirement):
-        """A requirement is re-openable: archived → open (un-archive) succeeds."""
-        requirement_open.sourcing_status = SourcingStatus.ARCHIVED
+    def test_hotlist_reopens_to_open(self, client: TestClient, db_session: Session, requirement_open: Requirement):
+        """A monitored requirement is re-openable: hotlist → open succeeds."""
+        requirement_open.sourcing_status = SourcingStatus.HOTLIST
         db_session.commit()
 
         resp = advance_status(client, requirement_open.id, SourcingStatus.OPEN)
@@ -79,7 +79,7 @@ class TestAdvanceStatusInvalid:
     """Invalid transitions return 409."""
 
     def test_won_to_sourcing_rejected(self, client: TestClient, db_session: Session, requirement_open: Requirement):
-        """Won only transitions to lost/archived — won → sourcing is illegal."""
+        """Won only transitions to open/lost — won → sourcing is illegal."""
         requirement_open.sourcing_status = SourcingStatus.WON
         db_session.commit()
 
@@ -89,14 +89,12 @@ class TestAdvanceStatusInvalid:
         db_session.refresh(requirement_open)
         assert requirement_open.sourcing_status == SourcingStatus.WON
 
-    def test_archived_only_reopens_to_open(
-        self, client: TestClient, db_session: Session, requirement_open: Requirement
-    ):
-        """Archived only transitions to open — archived → sourcing is illegal."""
-        requirement_open.sourcing_status = SourcingStatus.ARCHIVED
+    def test_won_to_hotlist_rejected(self, client: TestClient, db_session: Session, requirement_open: Requirement):
+        """Won never goes straight to the monitor state — reopen first."""
+        requirement_open.sourcing_status = SourcingStatus.WON
         db_session.commit()
 
-        resp = advance_status(client, requirement_open.id, SourcingStatus.SOURCING)
+        resp = advance_status(client, requirement_open.id, SourcingStatus.HOTLIST)
         assert resp.status_code == 409
 
 

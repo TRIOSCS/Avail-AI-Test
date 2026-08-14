@@ -374,7 +374,9 @@ aggregated internally by `htmx_views.py` itself so `main.py` needed zero new mou
   the legacy send/convert routes, scorecard, badge, and do-not-offer.
 - `app/routers/htmx/parts.py` — **tail split (parts-workspace body slice)**: the parts list, the
   detail tabs (offers/sourcing/req-details/quotes/activity/comms/notes), the header + inline cell +
-  spec editors, notes save, per-part tasks, and the part archive/unarchive (single + bulk) actions.
+  spec editors, notes save, per-part tasks, and the bulk outcome/reopen actions
+  (Won/Lost/Hotlist — the "Arc" view is a lens over those statuses; migration 210 removed the
+  archived status value).
   **Trap:** the workspace SHELL entry (`GET /v2/partials/parts/workspace`) stays in `htmx_views.py`.
 - `app/routers/htmx/archive.py` — **tail split (tasks/tickets lifecycle slice)**: trouble-ticket
   workspace/list/detail, account + contact + vendor tasks (add-form/create/list), task

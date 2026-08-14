@@ -1,8 +1,8 @@
-"""tests/test_htmx_views_nightly12.py — Coverage for parts tabs, tasks, archive, and buy
-plan routes.
+"""tests/test_htmx_views_nightly12.py — Coverage for parts tabs, tasks, bulk outcome,
+and buy plan routes.
 
 Targets: parts list (with filters), parts tabs (offers/sourcing/req-details/activity/comms/notes),
-save-notes, create-task, mark-task-done/reopen, archive/unarchive single + bulk,
+save-notes, create-task, mark-task-done/reopen, bulk-outcome/reopen (migration 210),
 buy plan list/detail/cancel/reset.
 
 Called by: pytest autodiscovery
@@ -258,47 +258,14 @@ class TestReopenTask:
         assert resp.status_code == 404
 
 
-# ── Archive / unarchive ───────────────────────────────────────────────────
+# ── Bulk outcome / reopen (migration 210) ─────────────────────────────────
+# The single-part archive/unarchive routes and the requisition_ids cascade
+# were removed with migration 210; end-to-end coverage of the replacement
+# routes and route retirement lives in tests/test_archive_system.py.
 
 
-class TestArchiveSinglePart:
-    def test_archive_part(
-        self,
-        client: TestClient,
-        db_session: Session,
-        test_requisition: Requisition,
-    ) -> None:
-        req = _first_requirement(db_session, test_requisition)
-        resp = client.patch(f"/v2/partials/parts/{req.id}/archive")
-        assert resp.status_code == 200
-        db_session.refresh(req)
-        assert req.sourcing_status == "archived"
-
-    def test_archive_part_not_found(self, client: TestClient) -> None:
-        resp = client.patch("/v2/partials/parts/99999/archive")
-        assert resp.status_code == 404
-
-    def test_unarchive_part(
-        self,
-        client: TestClient,
-        db_session: Session,
-        test_requisition: Requisition,
-    ) -> None:
-        req = _first_requirement(db_session, test_requisition)
-        req.sourcing_status = "archived"
-        db_session.commit()
-        resp = client.patch(f"/v2/partials/parts/{req.id}/unarchive")
-        assert resp.status_code == 200
-        db_session.refresh(req)
-        assert req.sourcing_status == "open"
-
-    def test_unarchive_part_not_found(self, client: TestClient) -> None:
-        resp = client.patch("/v2/partials/parts/99999/unarchive")
-        assert resp.status_code == 404
-
-
-class TestBulkArchive:
-    def test_bulk_archive_requirements(
+class TestBulkOutcome:
+    def test_bulk_outcome_hotlist(
         self,
         client: TestClient,
         db_session: Session,
@@ -306,14 +273,14 @@ class TestBulkArchive:
     ) -> None:
         req = _first_requirement(db_session, test_requisition)
         resp = client.post(
-            "/v2/partials/parts/bulk-archive",
-            json={"requirement_ids": [req.id], "requisition_ids": []},
+            "/v2/partials/parts/bulk-outcome",
+            json={"requirement_ids": [req.id], "outcome": "hotlist"},
         )
         assert resp.status_code == 200
         db_session.refresh(req)
-        assert req.sourcing_status == "archived"
+        assert req.sourcing_status == "hotlist"
 
-    def test_bulk_archive_requisitions(
+    def test_bulk_outcome_lost_with_reason(
         self,
         client: TestClient,
         db_session: Session,
@@ -321,36 +288,37 @@ class TestBulkArchive:
     ) -> None:
         req = _first_requirement(db_session, test_requisition)
         resp = client.post(
-            "/v2/partials/parts/bulk-archive",
-            json={"requirement_ids": [], "requisition_ids": [test_requisition.id]},
+            "/v2/partials/parts/bulk-outcome",
+            json={"requirement_ids": [req.id], "outcome": "lost", "reason": "priced out"},
         )
         assert resp.status_code == 200
         db_session.refresh(req)
-        assert req.sourcing_status == "archived"
+        assert req.sourcing_status == "lost"
 
-    def test_bulk_unarchive_requirements(
+    def test_bulk_reopen_requirements(
         self,
         client: TestClient,
         db_session: Session,
         test_requisition: Requisition,
     ) -> None:
         req = _first_requirement(db_session, test_requisition)
-        req.sourcing_status = "archived"
+        req.sourcing_status = "hotlist"
         db_session.commit()
         resp = client.post(
-            "/v2/partials/parts/bulk-unarchive",
-            json={"requirement_ids": [req.id], "requisition_ids": []},
+            "/v2/partials/parts/bulk-reopen",
+            json={"requirement_ids": [req.id]},
         )
         assert resp.status_code == 200
         db_session.refresh(req)
         assert req.sourcing_status == "open"
 
-    def test_bulk_unarchive_empty_body(self, client: TestClient) -> None:
+    def test_bulk_reopen_empty_body(self, client: TestClient) -> None:
         resp = client.post(
-            "/v2/partials/parts/bulk-unarchive",
-            json={"requirement_ids": [], "requisition_ids": []},
+            "/v2/partials/parts/bulk-reopen",
+            json={"requirement_ids": []},
         )
         assert resp.status_code == 200
+        assert "0 part(s) reopened" in resp.headers.get("HX-Trigger", "")
 
 
 # ── Buy plan routes ───────────────────────────────────────────────────────

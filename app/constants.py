@@ -140,7 +140,16 @@ class RequisitionStatus(StrEnum):
 
 class SourcingStatus(StrEnum):
     """Status lifecycle for Requirement sourcing progress (per-part within a
-    requisition)."""
+    requisition).
+
+    Pipeline: OPEN -> SOURCING -> OFFERED -> QUOTED -> WON/LOST. HOTLIST is an
+    off-pipeline *monitor* state: the customer uses the part but doesn't need
+    it now — sightings/offers keep accruing and the Proactive matcher treats
+    it as a standing ask with no time window. There is no archive status —
+    the "Archive" view is a lens over WON/LOST/HOTLIST parts (mirrors the
+    requisition-level design; the old `archived` value was remapped to LOST
+    in migration 210).
+    """
 
     OPEN = "open"
     SOURCING = "sourcing"
@@ -148,7 +157,14 @@ class SourcingStatus(StrEnum):
     QUOTED = "quoted"
     WON = "won"
     LOST = "lost"
-    ARCHIVED = "archived"
+    HOTLIST = "hotlist"
+
+    # Terminal (done) — reason required on entry (see routers/htmx/parts.bulk_outcome).
+    TERMINAL = nonmember(frozenset({"won", "lost"}))
+    # Off-pipeline monitor state (no reason required).
+    MONITOR = nonmember(frozenset({"hotlist"}))
+    # What the parts workspace "Arc" view shows. Single source of truth.
+    ARCHIVE_VIEW = nonmember(frozenset({"won", "lost", "hotlist"}))
 
 
 class ExcessListStatus(StrEnum):
@@ -869,6 +885,7 @@ class ActivityType(StrEnum):
     OWNERSHIP_WARNING = "ownership_warning"
     PROACTIVE_MATCH = "proactive_match"
     PART_STATUS_CHANGE = "part_status_change"
+    PART_CLONED = "part_cloned"
     TEAMS_MESSAGE = "teams_message"
     WECHAT_MESSAGE = "wechat_message"
     MEETING = "meeting"

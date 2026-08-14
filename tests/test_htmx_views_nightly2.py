@@ -186,8 +186,10 @@ class TestPartsListPartial:
         assert resp.status_code == 200
 
     def test_parts_list_filter_archived(self, client, db_session: Session, test_user: User):
+        # Since migration 210 "archived" is a legacy alias for the archive view
+        # (won/lost/hotlist parts); the archived sourcing status itself is gone.
         req = _req(db_session, test_user)
-        _requirement(db_session, req, sourcing_status=SourcingStatus.ARCHIVED)
+        _requirement(db_session, req, sourcing_status=SourcingStatus.HOTLIST)
         db_session.commit()
 
         resp = client.get("/v2/partials/parts?status=archived")
@@ -519,58 +521,48 @@ class TestPartTasks:
         assert task.status == TaskStatus.TODO, "Task must not have transitioned"
 
 
-# ── Archive System ────────────────────────────────────────────────────
+# ── Archive System (post-migration-210: bulk-outcome / bulk-reopen) ───
+# The single-part archive/unarchive routes and the requisition_ids cascade
+# were removed with migration 210; end-to-end coverage for the replacement
+# routes lives in tests/test_archive_system.py + tests/test_parts_bulk_outcome.py.
 
 
 class TestArchiveSystem:
-    def test_archive_single_part(self, client, db_session: Session, test_user: User):
-        item = _part(db_session, test_user)
-
-        resp = client.patch(f"/v2/partials/parts/{item.id}/archive")
-        assert resp.status_code == 200
-
-    def test_archive_single_part_not_found(self, client, db_session: Session):
-        resp = client.patch("/v2/partials/parts/999999/archive")
-        assert resp.status_code == 404
-
-    def test_unarchive_single_part(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        item = _requirement(db_session, req, sourcing_status=SourcingStatus.ARCHIVED)
-        db_session.commit()
-
-        resp = client.patch(f"/v2/partials/parts/{item.id}/unarchive")
-        assert resp.status_code == 200
-
-    def test_bulk_archive(self, client, db_session: Session, test_user: User):
+    def test_bulk_outcome_hotlist(self, client, db_session: Session, test_user: User):
         item = _part(db_session, test_user)
 
         resp = client.post(
-            "/v2/partials/parts/bulk-archive",
-            json={"requirement_ids": [item.id], "requisition_ids": []},
+            "/v2/partials/parts/bulk-outcome",
+            json={"requirement_ids": [item.id], "outcome": "hotlist"},
         )
         assert resp.status_code == 200
+        db_session.refresh(item)
+        assert item.sourcing_status == SourcingStatus.HOTLIST
 
-    def test_bulk_unarchive(self, client, db_session: Session, test_user: User):
+    def test_bulk_outcome_lost_with_reason(self, client, db_session: Session, test_user: User):
+        item = _part(db_session, test_user)
+
+        resp = client.post(
+            "/v2/partials/parts/bulk-outcome",
+            json={"requirement_ids": [item.id], "outcome": "lost", "reason": "priced out"},
+        )
+        assert resp.status_code == 200
+        db_session.refresh(item)
+        assert item.sourcing_status == SourcingStatus.LOST
+        assert item.outcome_reason == "priced out"
+
+    def test_bulk_reopen(self, client, db_session: Session, test_user: User):
         req = _req(db_session, test_user)
-        item = _requirement(db_session, req, sourcing_status=SourcingStatus.ARCHIVED)
+        item = _requirement(db_session, req, sourcing_status=SourcingStatus.HOTLIST)
         db_session.commit()
 
         resp = client.post(
-            "/v2/partials/parts/bulk-unarchive",
-            json={"requirement_ids": [item.id], "requisition_ids": [req.id]},
+            "/v2/partials/parts/bulk-reopen",
+            json={"requirement_ids": [item.id]},
         )
         assert resp.status_code == 200
-
-    def test_bulk_archive_requisitions(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        _requirement(db_session, req)
-        db_session.commit()
-
-        resp = client.post(
-            "/v2/partials/parts/bulk-archive",
-            json={"requirement_ids": [], "requisition_ids": [req.id]},
-        )
-        assert resp.status_code == 200
+        db_session.refresh(item)
+        assert item.sourcing_status == SourcingStatus.OPEN
 
 
 # ── Trouble Tickets ───────────────────────────────────────────────────

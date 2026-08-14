@@ -41,7 +41,7 @@ def auto_progress_status(
         current_idx = _STATUS_ORDER.index(current)
         target_idx = _STATUS_ORDER.index(target_status)
     except ValueError:
-        return False  # Status not in progression (e.g., LOST, ARCHIVED)
+        return False  # Status not in progression (e.g., LOST, HOTLIST)
 
     if current_idx >= target_idx:
         return False  # Already at or ahead

@@ -123,19 +123,29 @@ requisitions list (`requisitions/list.html`) surfaces created monitor deals.
 ### 1b. Sales-Hub per-part Won/Lost (replaced the bulk Archive)
 
 The Sales-Hub parts workspace selection bar offers **Mark Won** / **Mark Lost**
-in place of the removed bulk Archive. `POST /v2/partials/parts/bulk-outcome`
-(`bulk_outcome`, `routers/htmx/parts.py`) takes
-`{requirement_ids, outcome: "won"|"lost", reason}` and resolves each selected
-line at the **part level**: every `Requirement` is transitioned to
-`SourcingStatus.WON`/`LOST` via the sourcing state machine
-(`transition_requirement`) and stamped with the one shared `outcome_reason`
-(migration 185; see APP_MAP_DATABASE § requirements). A **blank reason 400s** the
-whole request; ids missing or not in a legal source state are logged and skipped
-(never 500 the batch); the handler commits once and re-renders the parts list
-with a "N part(s) marked Won/Lost" toast. Ownership is guarded per line via
-`require_requisition_access` (mirrors the retired `bulk_archive`). This is the
-per-line analogue of the requisition-level required-reason close to Won/Lost
-(§ 1) — there is no part-line archive.
+/ **Hotlist**. `POST /v2/partials/parts/bulk-outcome` (`bulk_outcome`,
+`routers/htmx/parts.py`) takes
+`{requirement_ids, outcome: "won"|"lost"|"hotlist", reason, status}` and
+resolves each selected line at the **part level**: every `Requirement` is
+transitioned via the sourcing state machine (`transition_requirement`).
+Won/Lost stamp the one shared `outcome_reason` (migration 185; blank reason
+400s); **Hotlist takes no reason** — it is the off-pipeline monitor state
+(migration 210: "customer uses the part but doesn't need it now"), and the
+transition clears any stale close reason. Ids missing or not in a legal source
+state are logged and skipped (never 500 the batch); the handler commits once
+and re-renders the parts list with a "N part(s) marked X, M skipped" toast.
+The `status` field echoes the caller's current list filter so a bulk action
+never bounces the user out of their view. Ownership is guarded per line via
+`require_requisition_access`. `POST /v2/partials/parts/bulk-reopen`
+(`bulk_reopen`, same body shape minus outcome/reason) is the inverse — it
+returns won/lost/hotlist parts to OPEN (clearing the reason via the state
+machine). **There is no part-line archive status**: the parts list's "Arc"
+pill (`?status=archive`, legacy alias `archived`) is a VIEW over
+`sourcing_status IN (won, lost, hotlist)` across ANY requisition status, and a
+"Hot" pill filters to hotlist alone; the default list excludes all three
+(NULL-safe — legacy NULL-status rows stay visible). Won/lost/hotlist parts
+remain fully editable (the pre-210 archived read-only freeze is gone); the REQ
+Detail tab renders the Won/Lost close reason as a read-only "Outcome:" line.
 
 ## 2. Search (User-Initiated Only)
 

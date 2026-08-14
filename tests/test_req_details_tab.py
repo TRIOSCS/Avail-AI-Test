@@ -306,20 +306,42 @@ def test_spec_save_clears_empty_value(client, db_session, test_user):
     assert updated.condition is None
 
 
-def test_spec_edit_blocked_on_archived_part(client, db_session, test_user):
-    """Spec edit and save return 403 for archived parts."""
-    reqn, parts = _make_requisition_and_parts(db_session, test_user, num_parts=1)
-    parts[0].sourcing_status = "archived"
+def test_spec_edit_works_on_closed_and_hotlist_parts(client, db_session, test_user):
+    """Won/hotlist parts stay editable — the pre-210 archived read-only freeze is
+    gone."""
+    reqn, parts = _make_requisition_and_parts(db_session, test_user, num_parts=2)
+    parts[0].sourcing_status = "won"
+    parts[0].outcome_reason = "po received"
+    parts[1].sourcing_status = "hotlist"
     db_session.commit()
 
-    resp = client.get(f"/v2/partials/parts/{parts[0].id}/edit-spec/firmware")
-    assert resp.status_code == 403
+    for part in parts:
+        resp = client.get(f"/v2/partials/parts/{part.id}/edit-spec/firmware")
+        assert resp.status_code == 200
 
-    resp = client.patch(
-        f"/v2/partials/parts/{parts[0].id}/save-spec",
-        data={"field": "firmware", "value": "v3.0"},
-    )
-    assert resp.status_code == 403
+        resp = client.patch(
+            f"/v2/partials/parts/{part.id}/save-spec",
+            data={"field": "firmware", "value": "v3.0"},
+        )
+        assert resp.status_code == 200
+
+    from app.models import Requirement
+
+    db_session.expire_all()
+    assert db_session.get(Requirement, parts[0].id).firmware == "v3.0"
+
+
+def test_req_details_shows_outcome_reason(client, db_session, test_user):
+    """The REQ Detail tab renders the Won/Lost close reason (no tooltip — touch)."""
+    reqn, parts = _make_requisition_and_parts(db_session, test_user, num_parts=1)
+    parts[0].sourcing_status = "lost"
+    parts[0].outcome_reason = "priced out by broker"
+    db_session.commit()
+
+    resp = client.get(f"/v2/partials/parts/{parts[0].id}/tab/req-details")
+    assert resp.status_code == 200
+    assert "priced out by broker" in resp.text
+    assert "Outcome:" in resp.text
 
 
 def test_spec_save_whitespace_only_becomes_null(client, db_session, test_user):

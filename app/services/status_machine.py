@@ -124,8 +124,14 @@ REQUISITION_TRANSITIONS: dict[str, set[str]] = {
 # had an RFQ sent — e.g. inbound email mining). Under the old restrictive table
 # those transitions were rejected and silently skipped, leaving a part that is
 # on a confirmed offer or customer quote still displayed as "open" — a data
-# integrity bug. Un-archive (archived → open) is likewise legal because a
-# requirement is re-openable (unlike a terminal offer).
+# integrity bug.
+#
+# HOTLIST (migration 210, replaces the removed ARCHIVED value): an off-pipeline
+# monitor state. Reachable from every non-WON state (mirrors the requisition
+# table above — a won part re-opens first); leaves to anywhere, because a
+# monitored part re-enters the pipeline the moment the customer needs it.
+# WON → OPEN is the reopen correction path (mirrors requisition won → open) so
+# the Archive view's Reopen action works uniformly.
 SOURCING_TRANSITIONS: dict[str, set[str]] = {
     SourcingStatus.OPEN: {
         SourcingStatus.SOURCING,
@@ -133,7 +139,7 @@ SOURCING_TRANSITIONS: dict[str, set[str]] = {
         SourcingStatus.QUOTED,
         SourcingStatus.WON,
         SourcingStatus.LOST,
-        SourcingStatus.ARCHIVED,
+        SourcingStatus.HOTLIST,
     },
     SourcingStatus.SOURCING: {
         SourcingStatus.OFFERED,
@@ -141,24 +147,35 @@ SOURCING_TRANSITIONS: dict[str, set[str]] = {
         SourcingStatus.WON,
         SourcingStatus.LOST,
         SourcingStatus.OPEN,
-        SourcingStatus.ARCHIVED,
+        SourcingStatus.HOTLIST,
     },
     SourcingStatus.OFFERED: {
         SourcingStatus.QUOTED,
         SourcingStatus.WON,
         SourcingStatus.LOST,
         SourcingStatus.SOURCING,
-        SourcingStatus.ARCHIVED,
+        SourcingStatus.HOTLIST,
     },
     SourcingStatus.QUOTED: {
         SourcingStatus.WON,
         SourcingStatus.LOST,
         SourcingStatus.OFFERED,
-        SourcingStatus.ARCHIVED,
+        SourcingStatus.HOTLIST,
     },
-    SourcingStatus.WON: {SourcingStatus.LOST, SourcingStatus.ARCHIVED},
-    SourcingStatus.LOST: {SourcingStatus.OPEN, SourcingStatus.SOURCING, SourcingStatus.ARCHIVED},
-    SourcingStatus.ARCHIVED: {SourcingStatus.OPEN},  # re-openable (un-archive)
+    SourcingStatus.WON: {SourcingStatus.OPEN, SourcingStatus.LOST},
+    SourcingStatus.LOST: {
+        SourcingStatus.OPEN,
+        SourcingStatus.SOURCING,
+        SourcingStatus.HOTLIST,
+    },
+    SourcingStatus.HOTLIST: {
+        SourcingStatus.OPEN,
+        SourcingStatus.SOURCING,
+        SourcingStatus.OFFERED,
+        SourcingStatus.QUOTED,
+        SourcingStatus.WON,
+        SourcingStatus.LOST,
+    },
 }
 
 
