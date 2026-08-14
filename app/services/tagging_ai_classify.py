@@ -11,6 +11,7 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.models.intelligence import MaterialCard
+from app.services.spec_tiers import set_manufacturer
 from app.services.tagging import (
     get_or_create_brand_tag,
     get_or_create_commodity_tag,
@@ -133,6 +134,6 @@ def _apply_ai_results(classified: list[dict], batch: list, db: Session) -> tuple
             matched += 1
             card = db.get(MaterialCard, card_id)
             if card and not card.manufacturer:
-                card.manufacturer = manufacturer
+                set_manufacturer(card, manufacturer, source="claude_haiku", confidence=confidence)
 
     return matched, unknown

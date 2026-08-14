@@ -119,8 +119,8 @@ class TestGetMaterial:
         resp = client.get(f"/api/materials/{card.id}")
         assert resp.status_code == 404
 
-    def test_get_infers_manufacturer_when_missing(self, client, db_session):
-        """Card with no manufacturer should trigger infer_manufacturer path."""
+    def test_get_missing_manufacturer_stays_missing(self, client, db_session):
+        """GET is read-only — no lazy manufacturer inference on view."""
         card = MaterialCard(
             normalized_mpn="lm358dr",
             display_mpn="LM358DR",
@@ -130,9 +130,9 @@ class TestGetMaterial:
         db_session.add(card)
         db_session.commit()
 
-        with patch("app.routers.materials._infer_manufacturer_from_prefix", return_value="TI"):
-            resp = client.get(f"/api/materials/{card.id}")
+        resp = client.get(f"/api/materials/{card.id}")
         assert resp.status_code == 200
+        assert resp.json()["manufacturer"] is None
 
 
 # -- GET /api/materials/by-mpn/{mpn} ------------------------------------------
@@ -149,7 +149,8 @@ class TestGetMaterialByMpn:
         assert resp.status_code == 404
         assert "error" in resp.json()
 
-    def test_get_by_mpn_infers_manufacturer(self, client, db_session):
+    def test_get_by_mpn_missing_manufacturer_stays_missing(self, client, db_session):
+        """GET by-mpn is read-only — no lazy manufacturer inference on view."""
         card = MaterialCard(
             normalized_mpn="ne555",
             display_mpn="NE555",
@@ -159,9 +160,9 @@ class TestGetMaterialByMpn:
         db_session.add(card)
         db_session.commit()
 
-        with patch("app.routers.materials._infer_manufacturer_from_prefix", return_value="Philips"):
-            resp = client.get("/api/materials/by-mpn/NE555")
+        resp = client.get("/api/materials/by-mpn/NE555")
         assert resp.status_code == 200
+        assert resp.json()["manufacturer"] is None
 
 
 # -- PUT /api/materials/{card_id} ---------------------------------------------

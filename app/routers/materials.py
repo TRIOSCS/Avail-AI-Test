@@ -31,9 +31,6 @@ from ..services.material_card_service import (
     backfill_missing_manufacturers,
 )
 from ..services.material_card_service import (
-    infer_manufacturer as _infer_manufacturer_from_prefix,
-)
-from ..services.material_card_service import (
     merge_material_cards as _merge_material_cards_service,
 )
 from ..services.material_card_service import (
@@ -73,22 +70,6 @@ def _stamp_manual_provenance(card: MaterialCard, fields: list[str]) -> None:
 def _actor_email(user: User) -> str:
     """Audit/merge actor label — the user's email, or ``"admin"`` if it's unset."""
     return user.email if hasattr(user, "email") else "admin"
-
-
-def _backfill_manufacturer(card: MaterialCard, db: Session) -> None:
-    """Fill a card's missing manufacturer from its MPN prefix, committing on a hit.
-
-    Shared by the two single-card read endpoints (by-id and by-mpn) so a card surfaced
-    without a manufacturer gets one inferred lazily on first view.
-    """
-    if card.manufacturer:
-        return
-    inferred = _infer_manufacturer_from_prefix(db, card.normalized_mpn)
-    if inferred:
-        card.manufacturer = inferred
-        db.add(card)
-        db.commit()
-        invalidate_prefix("material_list")
 
 
 def render_add_modal(
@@ -352,7 +333,6 @@ async def get_material(card_id: int, user: User = Depends(require_user), db: Ses
     card = db.get(MaterialCard, card_id)
     if not card or card.deleted_at is not None:
         raise HTTPException(404, "Material not found")
-    _backfill_manufacturer(card, db)
     return material_card_to_dict(card, db)
 
 
@@ -388,7 +368,6 @@ async def get_material_by_mpn(mpn: str, user: User = Depends(require_user), db: 
     card = db.query(MaterialCard).filter_by(normalized_mpn=norm).filter(MaterialCard.deleted_at.is_(None)).first()
     if not card:
         raise HTTPException(404, "No material card found for this MPN")
-    _backfill_manufacturer(card, db)
     return material_card_to_dict(card, db)
 
 

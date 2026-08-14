@@ -104,12 +104,26 @@ SOURCE_TIER: dict[str, int] = {
     "psref": 80,
     "oem_official": 80,
     "web_search": 70,
+    # Staff-typed manufacturer on a requisition/excess form, recorded as a side effect
+    # of card lookup (resolve_material_card) — human-entered but un-reviewed, so it
+    # ranks with web_search (70), well below manual (100) which requires an explicit
+    # edit on the card itself.
+    "form_entry": 70,
     "brokerbin": 65,
+    # Broker-listing evidence classes (same trust class as brokerbin):
+    # sighting_consensus = majority vote across >=2 agreeing sightings (tagging_backfill);
+    # sighting_reported = first non-empty maker on a card's own sightings (upsert path).
+    "sighting_consensus": 65,
+    "sighting_reported": 65,
     "spec_extraction": 60,
     "legacy_backfill": 50,
     "ai_guess": 40,
     "claude_opus_inferred": 40,
     "claude_haiku": 40,
+    # MPN-prefix walk over donor cards (infer_manufacturer) — a guess that can propagate
+    # another card's junk, so it ranks with ai_guess (40): fills blanks, never beats
+    # anything with real provenance (even the legacy_backfill 50 floor).
+    "prefix_infer": 40,
 }
 
 # Provenance stamped on valued-but-unprovenanced data (categories that pre-date the
@@ -566,7 +580,10 @@ def _set_provenanced_column(
     current = getattr(card, attr)
     existing_tier = getattr(card, f"{attr}_tier")
     existing_source = getattr(card, f"{attr}_source")
-    if current is None:
+    if current is None or (isinstance(current, str) and not current.strip()):
+        # NULL or blank/whitespace — a blank can only come from an un-routed writer
+        # (the ladder itself rejects blank incoming values), so treat it as absent
+        # rather than ranking it at the legacy floor: any real value beats nothing.
         existing = None
     elif existing_tier is None and existing_source is None:
         # Valued but unprovenanced — written before the ladder or by an un-routed writer.

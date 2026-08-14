@@ -54,6 +54,7 @@ from .services.ics_worker.queue_manager import enqueue_for_ics_search
 from .services.nc_worker.queue_manager import enqueue_for_nc_search
 from .services.price_snapshot_service import record_price_snapshot
 from .services.sourcing_leads import get_vendor_feedback_adjustment, sync_leads_for_sightings
+from .services.spec_tiers import set_manufacturer
 from .services.tbf_worker.queue_manager import enqueue_for_tbf_search
 from .services.vendor_affinity_service import find_vendor_affinity
 from .services.vendor_unavailability import apply_to_fresh_sightings
@@ -2667,7 +2668,7 @@ def resolve_material_card(mpn: str, db: Session, manufacturer: str = "") -> Mate
     card = db.query(MaterialCard).filter_by(normalized_mpn=norm).filter(MaterialCard.deleted_at.is_(None)).first()
     if card:
         if manufacturer and not card.manufacturer:
-            card.manufacturer = manufacturer
+            set_manufacturer(card, manufacturer, source="form_entry", confidence=0.7)
         logger.debug("MC_METRIC: action=resolved mpn={} card_id={}", norm, card.id)
         return card
 
@@ -2755,8 +2756,7 @@ def _upsert_material_card(pn: str, sightings: list[Sighting], db: Session, now: 
     card.last_searched_at = now
     if not card.manufacturer:
         for s in pn_sightings:
-            if s.manufacturer:
-                card.manufacturer = s.manufacturer
+            if s.manufacturer and set_manufacturer(card, s.manufacturer, source="sighting_reported", confidence=0.7):
                 break
 
     # Batch fetch all existing vendor histories for this card (avoids N+1).

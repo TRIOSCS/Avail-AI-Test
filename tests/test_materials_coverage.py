@@ -139,30 +139,10 @@ class TestListMaterialsWithBrandAndOfferStats:
         assert "materials" in data
 
 
-class TestGetMaterialWithManufacturerInference:
-    """Manufacturer inference in get_material (lines 171-176)."""
+class TestGetMaterialReadOnly:
+    """get_material is read-only — the old lazy manufacturer inference is gone."""
 
-    def test_get_material_infers_manufacturer(self, client, db_session):
-        """GET /api/materials/{id} triggers manufacturer inference when missing."""
-        mc = MaterialCard(
-            normalized_mpn="infer001",
-            display_mpn="INFER001",
-            manufacturer="",  # Empty manufacturer
-            search_count=0,
-            created_at=datetime.now(UTC),
-        )
-        db_session.add(mc)
-        db_session.commit()
-
-        with patch(
-            "app.routers.materials._infer_manufacturer_from_prefix",
-            return_value="Inferred Corp",
-        ):
-            resp = client.get(f"/api/materials/{mc.id}")
-        assert resp.status_code == 200
-
-    def test_get_material_no_inference_when_manufacturer_set(self, client, db_session, test_material_card):
-        """GET /api/materials/{id} skips inference when manufacturer is set."""
+    def test_get_material_returns_manufacturer(self, client, db_session, test_material_card):
         resp = client.get(f"/api/materials/{test_material_card.id}")
         assert resp.status_code == 200
         assert resp.json()["manufacturer"] == "Texas Instruments"
@@ -194,30 +174,6 @@ class TestQuickSearch:
         """POST /api/quick-search with no mpn key returns 400."""
         resp = client.post("/api/quick-search", json={})
         assert resp.status_code == 400
-
-
-class TestGetMaterialByMpnWithManufacturerInference:
-    """Manufacturer inference in get_material_by_mpn (lines 213-218)."""
-
-    def test_by_mpn_infers_manufacturer_when_missing(self, client, db_session):
-        """GET /api/materials/by-mpn/{mpn} triggers inference when manufacturer
-        empty."""
-        mc = MaterialCard(
-            normalized_mpn="infer002",
-            display_mpn="INFER002",
-            manufacturer=None,
-            search_count=0,
-            created_at=datetime.now(UTC),
-        )
-        db_session.add(mc)
-        db_session.commit()
-
-        with patch(
-            "app.routers.materials._infer_manufacturer_from_prefix",
-            return_value="By-MPN Corp",
-        ):
-            resp = client.get("/api/materials/by-mpn/INFER002")
-        assert resp.status_code == 200
 
 
 class TestEnrichMaterial:
