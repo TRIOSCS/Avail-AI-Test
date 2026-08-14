@@ -109,70 +109,68 @@ class TestJobProactiveMatching:
 
     @patch("app.jobs.offers_jobs.logger")
     def test_happy_path(self, mock_logger):
+        """All DB work runs in the executor fn, which owns + closes its own Session."""
         from app.jobs.offers_jobs import _job_proactive_matching
 
         mock_db = _mock_db()
         mock_db.query.return_value.filter.return_value.count.return_value = 5
 
-        scan_result = {"matches_created": 3, "scanned_offers": 10}
-        expired_count = 2
+        with (
+            patch(
+                "app.services.proactive_matching.run_proactive_scan",
+                return_value={"matches_created": 3, "scanned_offers": 10},
+            ) as mock_scan,
+            patch("app.services.proactive_matching.expire_old_matches", return_value=2),
+            patch("app.services.part_equivalence.windowed_spellings_by_key", return_value={}),
+            patch("app.services.part_equivalence.classify_new_pairs", new=AsyncMock(return_value=0)),
+            patch("app.database.SessionLocal", return_value=mock_db),
+        ):
+            _run(_job_proactive_matching.__wrapped__())
 
-        # run_in_executor is called twice: first result goes via wait_for, second awaited directly
-        run_exec_mock = AsyncMock(side_effect=[MagicMock(), expired_count])
+        mock_scan.assert_called_once()
+        mock_db.close.assert_called_once()  # session lifecycle owned by the executor fn
 
+    @patch("app.jobs.offers_jobs.logger")
+    def test_timeout_does_no_cross_thread_session_op(self, mock_logger):
+        """QC 2026-08-14: on a wait_for timeout the job must NOT roll back / close a
+        Session — the worker thread owns it; the job holds none."""
+        from app.jobs.offers_jobs import _job_proactive_matching
+
+        mock_db = _mock_db()
         with patch("app.jobs.offers_jobs.asyncio.get_running_loop") as mock_loop_fn:
             mock_loop = MagicMock()
             mock_loop_fn.return_value = mock_loop
-            mock_loop.run_in_executor = run_exec_mock
+            mock_loop.run_in_executor.return_value = MagicMock()  # dummy future; the fn never runs
 
-            with patch(
-                "app.jobs.offers_jobs.asyncio.wait_for",
-                new=AsyncMock(return_value=scan_result),
+            with (
+                patch("app.jobs.offers_jobs.asyncio.wait_for", side_effect=asyncio.TimeoutError),
+                patch("app.database.SessionLocal", return_value=mock_db),
             ):
-                with patch("app.database.SessionLocal", return_value=mock_db):
+                with pytest.raises(asyncio.TimeoutError):
                     _run(_job_proactive_matching.__wrapped__())
 
-        mock_db.close.assert_called_once()
+        mock_db.rollback.assert_not_called()  # the fix — no cross-thread rollback
+        mock_db.close.assert_not_called()
 
     @patch("app.jobs.offers_jobs.logger")
-    def test_timeout_error(self, mock_logger):
+    def test_generic_exception_propagates_no_session_op(self, mock_logger):
         from app.jobs.offers_jobs import _job_proactive_matching
 
         mock_db = _mock_db()
-
         with patch("app.jobs.offers_jobs.asyncio.get_running_loop") as mock_loop_fn:
             mock_loop = MagicMock()
             mock_loop_fn.return_value = mock_loop
+            mock_loop.run_in_executor.return_value = MagicMock()
 
-            future = asyncio.Future()
-            future.set_result({"matches_created": 0, "scanned_offers": 0})
-            mock_loop.run_in_executor.return_value = future
+            with (
+                patch("app.jobs.offers_jobs.asyncio.wait_for", side_effect=RuntimeError("boom")),
+                patch("app.database.SessionLocal", return_value=mock_db),
+            ):
+                with pytest.raises(RuntimeError, match="boom"):
+                    _run(_job_proactive_matching.__wrapped__())
 
-            with patch("app.jobs.offers_jobs.asyncio.wait_for", side_effect=asyncio.TimeoutError):
-                with patch("app.database.SessionLocal", return_value=mock_db):
-                    with pytest.raises(asyncio.TimeoutError):
-                        _run(_job_proactive_matching.__wrapped__())
-
-        mock_db.rollback.assert_called()  # classification pass may add a guarded rollback
-        mock_db.close.assert_called_once()
-
-    @patch("app.jobs.offers_jobs.logger")
-    def test_generic_exception(self, mock_logger):
-        from app.jobs.offers_jobs import _job_proactive_matching
-
-        mock_db = _mock_db()
-
-        with patch("app.jobs.offers_jobs.asyncio.get_running_loop") as mock_loop_fn:
-            mock_loop = MagicMock()
-            mock_loop_fn.return_value = mock_loop
-
-            with patch("app.jobs.offers_jobs.asyncio.wait_for", side_effect=RuntimeError("boom")):
-                with patch("app.database.SessionLocal", return_value=mock_db):
-                    with pytest.raises(RuntimeError, match="boom"):
-                        _run(_job_proactive_matching.__wrapped__())
-
-        mock_db.rollback.assert_called()  # classification pass may add a guarded rollback
-        mock_db.close.assert_called_once()
+        mock_db.rollback.assert_not_called()
+        mock_db.close.assert_not_called()
 
 
 class TestJobPerformanceTracking:
