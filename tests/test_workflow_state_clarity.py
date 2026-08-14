@@ -228,9 +228,18 @@ class TestSourcingStatusTransitions:
         sourcing step, so open → won is a valid transition."""
         assert validate_transition("requirement", "open", "won", raise_on_invalid=False) is True
 
-    def test_archived_can_reopen(self):
-        """A requirement is re-openable: archived → open (un-archive) is valid."""
-        assert validate_transition("requirement", "archived", "open", raise_on_invalid=False) is True
+    def test_hotlist_round_trip(self):
+        """Hotlist (migration 210, replaces archived) is a monitor state: any non-won
+        state can enter it, and it re-enters the pipeline anywhere."""
+        assert validate_transition("requirement", "open", "hotlist", raise_on_invalid=False) is True
+        assert validate_transition("requirement", "lost", "hotlist", raise_on_invalid=False) is True
+        assert validate_transition("requirement", "hotlist", "open", raise_on_invalid=False) is True
+        assert validate_transition("requirement", "hotlist", "won", raise_on_invalid=False) is True
+
+    def test_won_cannot_go_straight_to_hotlist(self):
+        """A won part reopens first — won → hotlist is illegal, won → open legal."""
+        assert validate_transition("requirement", "won", "hotlist", raise_on_invalid=False) is False
+        assert validate_transition("requirement", "won", "open", raise_on_invalid=False) is True
 
     def test_noop_same_status_valid(self):
         assert validate_transition("requirement", "open", "open") is True

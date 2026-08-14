@@ -416,13 +416,15 @@ class TestPartSpecEdit:
         resp = client.get("/v2/partials/parts/99999/edit-spec/condition")
         assert resp.status_code == 404
 
-    def test_spec_edit_archived_returns_403(self, client: TestClient, db_session: Session, test_user: User):
+    def test_spec_edit_hotlist_part_allowed(self, client: TestClient, db_session: Session, test_user: User):
+        # Migration 210 removed the archived status and its read-only 403 guard:
+        # archive-view parts (won/lost/hotlist) stay editable inline.
         req = _req(db_session, test_user)
-        requirement = _requirement(db_session, req, sourcing_status=SourcingStatus.ARCHIVED)
+        requirement = _requirement(db_session, req, sourcing_status=SourcingStatus.HOTLIST)
         db_session.commit()
 
         resp = client.get(f"/v2/partials/parts/{requirement.id}/edit-spec/condition")
-        assert resp.status_code == 403
+        assert resp.status_code == 200
 
     def test_spec_save_invalid_field(self, client: TestClient, db_session: Session, test_user: User):
         req = _req(db_session, test_user)
@@ -442,16 +444,18 @@ class TestPartSpecEdit:
         )
         assert resp.status_code == 404
 
-    def test_spec_save_archived_returns_403(self, client: TestClient, db_session: Session, test_user: User):
+    def test_spec_save_hotlist_part_allowed(self, client: TestClient, db_session: Session, test_user: User):
+        # Migration 210 removed the archived status and its read-only 403 guard:
+        # archive-view parts (won/lost/hotlist) stay editable inline.
         req = _req(db_session, test_user)
-        requirement = _requirement(db_session, req, sourcing_status=SourcingStatus.ARCHIVED)
+        requirement = _requirement(db_session, req, sourcing_status=SourcingStatus.HOTLIST)
         db_session.commit()
 
         resp = client.patch(
             f"/v2/partials/parts/{requirement.id}/save-spec",
             data={"field": "condition", "value": "New"},
         )
-        assert resp.status_code == 403
+        assert resp.status_code == 200
 
 
 # ── Tests: Part tab routes ────────────────────────────────────────────

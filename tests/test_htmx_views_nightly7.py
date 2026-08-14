@@ -13,7 +13,7 @@ Targets uncovered sections:
 - buy_plan_flag_issue_partial (POST /v2/partials/buy-plans/{plan_id}/lines/{line_id}/issue)
 - proactive_draft_for_prepare (POST /v2/partials/proactive/draft)
 - proactive_send_offer (POST /v2/proactive/send)
-- bulk_archive (POST /v2/partials/parts/bulk-archive)
+- bulk_outcome (POST /v2/partials/parts/bulk-outcome; migration 210)
 
 Called by: pytest
 Depends on: conftest.py (client, db_session, test_user, test_requisition, test_vendor_card)
@@ -818,51 +818,42 @@ class TestProactiveSendOffer:
         assert resp.status_code == expected_status
 
 
-# ── Section 13: bulk_archive ─────────────────────────────────────────
+# ── Section 13: bulk_outcome ─────────────────────────────────────────
+# Migration 210 replaced bulk-archive with bulk-outcome (won/lost/hotlist);
+# the requisition_ids cascade was removed with it (requirement_ids only).
 
 
-class TestBulkArchive:
-    """Tests for POST /v2/partials/parts/bulk-archive."""
+class TestBulkOutcome:
+    """Tests for POST /v2/partials/parts/bulk-outcome."""
 
-    def test_archive_requirements_returns_200(self, client, db_session, test_user):
+    def test_outcome_hotlist_returns_200(self, client, db_session, test_user):
         req = _make_requisition(db_session, test_user)
         req_item = req.requirements[0]
 
         resp = client.post(
-            "/v2/partials/parts/bulk-archive",
-            json={"requirement_ids": [req_item.id], "requisition_ids": []},
+            "/v2/partials/parts/bulk-outcome",
+            json={"requirement_ids": [req_item.id], "outcome": "hotlist"},
         )
         assert resp.status_code == 200
         db_session.refresh(req_item)
-        assert req_item.sourcing_status == SourcingStatus.ARCHIVED
+        assert req_item.sourcing_status == SourcingStatus.HOTLIST
 
-    def test_archive_requisitions_returns_200(self, client, db_session, test_user):
+    def test_outcome_lost_with_reason_returns_200(self, client, db_session, test_user):
         req = _make_requisition(db_session, test_user)
         req_item = req.requirements[0]
 
         resp = client.post(
-            "/v2/partials/parts/bulk-archive",
-            json={"requirement_ids": [], "requisition_ids": [req.id]},
+            "/v2/partials/parts/bulk-outcome",
+            json={"requirement_ids": [req_item.id], "outcome": "lost", "reason": "priced out"},
         )
         assert resp.status_code == 200
         db_session.refresh(req_item)
-        assert req_item.sourcing_status == SourcingStatus.ARCHIVED
+        assert req_item.sourcing_status == SourcingStatus.LOST
 
-    def test_archive_empty_body_returns_200(self, client, db_session):
+    def test_outcome_empty_body_returns_200(self, client, db_session):
         resp = client.post(
-            "/v2/partials/parts/bulk-archive",
-            json={"requirement_ids": [], "requisition_ids": []},
+            "/v2/partials/parts/bulk-outcome",
+            json={"requirement_ids": [], "outcome": "hotlist"},
         )
         assert resp.status_code == 200
-
-    def test_archive_cascades_to_requirements(self, client, db_session, test_user):
-        req = _make_requisition(db_session, test_user)
-        req_item = req.requirements[0]
-
-        resp = client.post(
-            "/v2/partials/parts/bulk-archive",
-            json={"requirement_ids": [], "requisition_ids": [req.id]},
-        )
-        assert resp.status_code == 200
-        db_session.refresh(req_item)
-        assert req_item.sourcing_status == SourcingStatus.ARCHIVED
+        assert "0 part(s) marked Hotlist" in resp.headers.get("HX-Trigger", "")

@@ -52,10 +52,11 @@ def test_reload_no_longer_reads_empty_location_search(client, db_session, test_u
 
 
 def test_reload_handlers_go_through_reload_helper(client, db_session, test_user):
-    """@part-updated / @part-archived reload via _reload() (filter-state query)."""
+    """@part-updated reloads via _reload() (filter-state query). The old
+    @part-archived event died with the archived status (migration 210)."""
     html = _render(client, db_session, test_user)
     assert '@part-updated.window="_reload()"' in html
-    assert '@part-archived.window="_reload()"' in html
+    assert "@part-archived" not in html
 
 
 def test_reload_builds_query_from_filter_state_and_preserves_page(client, db_session, test_user):

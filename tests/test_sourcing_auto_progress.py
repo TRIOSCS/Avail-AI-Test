@@ -100,13 +100,13 @@ class TestAutoProgressStatus:
             (SourcingStatus.SOURCING, SourcingStatus.OPEN),
             (SourcingStatus.OFFERED, SourcingStatus.SOURCING),
             (SourcingStatus.LOST, SourcingStatus.SOURCING),
-            (SourcingStatus.ARCHIVED, SourcingStatus.SOURCING),
+            (SourcingStatus.HOTLIST, SourcingStatus.SOURCING),
         ],
         ids=[
             "ahead_sourcing_not_downgraded_to_open",
             "ahead_offered_not_downgraded_to_sourcing",
             "non_progression_lost",
-            "non_progression_archived",
+            "non_progression_hotlist",
         ],
     )
     def test_no_progression_returns_false(

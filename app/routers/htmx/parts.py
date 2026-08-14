@@ -2,8 +2,9 @@
 
 Server-rendered HTML partials for the parts split-panel workspace body: the parts
 list, the detail tabs (offers/sourcing/req-details/quotes/activity/comms/notes), the
-header + inline cell + spec editors, notes save, per-part tasks, and the part
-archive/unarchive (single + bulk) actions. Extracted verbatim from htmx_views.py
+header + inline cell + spec editors, notes save, per-part tasks, and the bulk
+outcome/reopen actions (Won/Lost/Hotlist — the Archive view is a lens over those
+statuses, migration 210). Extracted from htmx_views.py
 (same `/v2/partials/parts` paths, same `htmx-views` tag). The workspace SHELL entry
 (`/v2/partials/parts/workspace`) stays in htmx_views.py.
 
@@ -90,12 +91,20 @@ def _filtered_parts_query(
     """
     query = db.query(Requirement).join(Requisition, Requirement.requisition_id == Requisition.id)
 
-    # Archive visibility logic:
-    # - status=archived  → show only archived parts (any requisition status)
-    # - include_archived → show everything (no filtering)
-    # - default          → exclude archived parts AND archived requisitions
-    if status == "archived":
-        query = query.filter(Requirement.sourcing_status == SourcingStatus.ARCHIVED)
+    # Archive visibility logic (the Archive view is a lens over closed/monitor
+    # statuses — there is no archived status value since migration 210):
+    # - status=archive        → won/lost/hotlist parts, ANY requisition status
+    #                           ("archived" kept as a legacy bookmark alias)
+    # - status=won|lost|hotlist → just that status, ANY requisition status
+    #                           (a hotlist part on a won deal must be findable)
+    # - include_archived      → show everything (no filtering)
+    # - default               → open requisitions only, minus won/lost/hotlist
+    #                           parts. NULL-safe: legacy rows have NULL
+    #                           sourcing_status and `notin_` alone drops them.
+    if status in ("archive", "archived"):
+        query = query.filter(Requirement.sourcing_status.in_(SourcingStatus.ARCHIVE_VIEW))
+    elif status in SourcingStatus.ARCHIVE_VIEW:
+        query = query.filter(Requirement.sourcing_status == status)
     elif not include_archived:
         query = query.filter(
             Requisition.status.in_(
@@ -104,7 +113,12 @@ def _filtered_parts_query(
                 ]
             )
         )
-        query = query.filter(Requirement.sourcing_status != SourcingStatus.ARCHIVED)
+        query = query.filter(
+            or_(
+                Requirement.sourcing_status.is_(None),
+                Requirement.sourcing_status.notin_(SourcingStatus.ARCHIVE_VIEW),
+            )
+        )
 
     if q:
         query = query.filter(
@@ -123,7 +137,9 @@ def _filtered_parts_query(
         query = query.filter(SearchBuilder(customer).ilike_filter(Requisition.customer_name))
     if brand:
         query = query.filter(SearchBuilder(brand).ilike_filter(Requirement.brand))
-    if status and status != "archived":
+    if status and status not in ("archive", "archived") and status not in SourcingStatus.ARCHIVE_VIEW:
+        # Archive-view statuses were already handled above (with no
+        # requisition-status filter); only open/sourcing/offered/quoted land here.
         query = query.filter(Requirement.sourcing_status == status)
     if owner:
         query = query.filter(Requisition.claimed_by_id == owner)
@@ -613,7 +629,7 @@ async def part_header_edit_cell(
         swap_target = "#part-detail"
 
     if field == "sourcing_status":
-        statuses = ["open", "sourcing", "offered", "quoted", "won", "lost", "archived"]
+        statuses = ["open", "sourcing", "offered", "quoted", "won", "lost", "hotlist"]
         options = "".join(
             f'<option value="{s}" {"selected" if s == current else ""}>{s.capitalize()}</option>' for s in statuses
         )
@@ -901,9 +917,6 @@ async def part_spec_edit(
     if not req:
         raise HTTPException(404, "Part not found")
 
-    if req.sourcing_status == SourcingStatus.ARCHIVED:
-        return HTMLResponse("Cannot edit archived part", status_code=403)
-
     ctx = _base_ctx(request, user, "requisitions")
     ctx.update(
         {
@@ -934,9 +947,6 @@ async def part_spec_save(
     if not req:
         raise HTTPException(404, "Part not found")
     require_requisition_access(db, req.requisition_id, user, label="Part")
-
-    if req.sourcing_status == SourcingStatus.ARCHIVED:
-        return HTMLResponse("Cannot edit archived part", status_code=403)
 
     clean = (value or "").strip() or None
     setattr(req, field, clean)
@@ -1164,178 +1174,101 @@ async def reopen_task(
 # ── Archive system ────────────────────────────────────────────────────
 
 
-@router.patch("/v2/partials/parts/{requirement_id}/archive", response_class=HTMLResponse)
-async def archive_single_part(
-    requirement_id: int,
-    request: Request,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Archive a single part (requirement) by setting sourcing_status to archived."""
-    part = db.get(Requirement, requirement_id)
-    if not part:
-        raise HTTPException(404, "Part not found")
-    require_requisition_access(db, part.requisition_id, user, label="Part")
-
-    part.sourcing_status = SourcingStatus.ARCHIVED
-    db.commit()
-    logger.info("Part {} archived by {}", requirement_id, user.email)
-
-    response = await parts_list_partial(request=request, user=user, db=db)
-    response.headers["HX-Trigger"] = json.dumps({"part-archived": {"id": requirement_id}})
-    return response
-
-
-@router.patch("/v2/partials/parts/{requirement_id}/unarchive", response_class=HTMLResponse)
-async def unarchive_single_part(
-    requirement_id: int,
-    request: Request,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Unarchive a single part — restores sourcing_status to open."""
-    part = db.get(Requirement, requirement_id)
-    if not part:
-        raise HTTPException(404, "Part not found")
-    require_requisition_access(db, part.requisition_id, user, label="Part")
-
-    part.sourcing_status = SourcingStatus.OPEN
-    db.commit()
-    logger.info("Part {} unarchived by {}", requirement_id, user.email)
-
-    return await parts_list_partial(request=request, user=user, db=db)
-
-
-@router.post("/v2/partials/parts/bulk-archive", response_class=HTMLResponse)
-async def bulk_archive(
-    request: Request,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Bulk-archive parts and/or requisitions.
-
-    Body: {"requirement_ids": [], "requisition_ids": []}.
-    """
-    body = await request.json()
-    requirement_ids = body.get("requirement_ids", [])
-    requisition_ids = body.get("requisition_ids", [])
-
-    # Ownership guard (no-op for buyer/manager/admin; 404 for a restricted non-owner)
-    for _rid in requisition_ids:
-        require_requisition_access(db, _rid, user)
-    if requirement_ids:
-        for _r in db.query(Requirement).filter(Requirement.id.in_(requirement_ids)).all():
-            require_requisition_access(db, _r.requisition_id, user, label="Requirement")
-
-    # Bulk-update parts in a single query instead of N+1
-    if requirement_ids:
-        db.query(Requirement).filter(
-            Requirement.id.in_(requirement_ids),
-        ).update({"sourcing_status": SourcingStatus.ARCHIVED}, synchronize_session="fetch")
-
-    # Archive every part belonging to the named requisitions (part-level
-    # sourcing_status — there is no requisition-level archive/hide flag).
-    if requisition_ids:
-        db.query(Requirement).filter(
-            Requirement.requisition_id.in_(requisition_ids),
-        ).update({"sourcing_status": SourcingStatus.ARCHIVED}, synchronize_session="fetch")
-
-    db.commit()
-    logger.info("Bulk archive by {}: {} parts, {} requisitions", user.email, len(requirement_ids), len(requisition_ids))
-
-    return await parts_list_partial(request=request, user=user, db=db)
-
-
 @router.post("/v2/partials/parts/bulk-outcome", response_class=HTMLResponse)
 async def bulk_outcome(
     request: Request,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Mark selected part-lines Won or Lost with one shared, required reason.
+    """Mark selected part-lines Won, Lost, or Hotlist.
 
-    Body: {"requirement_ids": [int], "outcome": "won"|"lost", "reason": str}.
+    Body: {"requirement_ids": [int], "outcome": "won"|"lost"|"hotlist",
+    "reason": str, "status": str}.
 
-    Per-part replacement for the removed bulk Archive: each selected Requirement is
-    transitioned to SourcingStatus.WON/LOST via the sourcing state machine and stamped
-    with the shared reason. Ids that are missing or not in a legal source state are
-    logged and skipped (never 500 the whole batch). Commits once.
+    Won/Lost require one shared reason (stamped on each part); Hotlist is the
+    off-pipeline monitor state and takes none (the transition clears any stale
+    close reason). Each Requirement moves via the sourcing state machine; ids
+    that are missing or not in a legal source state are logged and skipped
+    (never 500 the whole batch) and reported in the toast. Commits once.
+    `status` echoes the caller's current list filter so the re-render keeps
+    the user in the view they acted from.
     """
     body = await request.json()
     requirement_ids = body.get("requirement_ids", [])
     outcome = body.get("outcome")
     reason = (body.get("reason") or "").strip()
 
-    if outcome not in (SourcingStatus.WON, SourcingStatus.LOST):
-        raise HTTPException(400, "Outcome must be 'won' or 'lost'")
-    if not reason:
+    if outcome not in (SourcingStatus.WON, SourcingStatus.LOST, SourcingStatus.HOTLIST):
+        raise HTTPException(400, "Outcome must be 'won', 'lost', or 'hotlist'")
+    if outcome in SourcingStatus.TERMINAL and not reason:
         raise HTTPException(400, "A reason is required to mark a part Won or Lost")
 
-    # Ownership guard — mirrors bulk_archive (no-op for buyer/manager/admin; 404 for a
-    # restricted non-owner).
+    # Ownership guard (no-op for buyer/manager/admin; 404 for a restricted non-owner).
     parts = db.query(Requirement).filter(Requirement.id.in_(requirement_ids)).all() if requirement_ids else []
     for part in parts:
         require_requisition_access(db, part.requisition_id, user, label="Requirement")
 
     changed = 0
+    skipped = 0
     for part in parts:
         try:
             if transition_requirement(part, outcome, db, actor=user):
-                part.outcome_reason = reason
+                if outcome in SourcingStatus.TERMINAL:
+                    part.outcome_reason = reason
                 changed += 1
         except ValueError as e:
+            skipped += 1
             logger.debug("Skipping part {} outcome={}: {}", part.id, outcome, e)
 
     db.commit()
-    logger.info("Bulk outcome by {}: {} part(s) marked {}", user.email, changed, outcome)
+    logger.info("Bulk outcome by {}: {} part(s) marked {}, {} skipped", user.email, changed, outcome, skipped)
 
-    response = await parts_list_partial(request=request, user=user, db=db)
-    label = "Won" if outcome == SourcingStatus.WON else "Lost"
-    response.headers["HX-Trigger"] = json.dumps(
-        {"showToast": {"message": f"{changed} part(s) marked {label}", "type": "success"}}
-    )
+    response = await parts_list_partial(request=request, user=user, db=db, status=body.get("status", ""))
+    label = {"won": "Won", "lost": "Lost", "hotlist": "Hotlist"}[outcome]
+    message = f"{changed} part(s) marked {label}"
+    if skipped:
+        message += f", {skipped} skipped"
+    response.headers["HX-Trigger"] = json.dumps({"showToast": {"message": message, "type": "success"}})
     return response
 
 
-@router.post("/v2/partials/parts/bulk-unarchive", response_class=HTMLResponse)
-async def bulk_unarchive(
+@router.post("/v2/partials/parts/bulk-reopen", response_class=HTMLResponse)
+async def bulk_reopen(
     request: Request,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Bulk-unarchive parts and/or requisitions.
+    """Reopen selected won/lost/hotlist parts back to OPEN (the Archive view's inverse
+    action, replacing the removed unarchive).
 
-    Body: {"requirement_ids": [], "requisition_ids": []}.
+    Body: {"requirement_ids": [int], "status": str}. Each part moves via the
+    sourcing state machine (which clears any stale outcome_reason); illegal or
+    no-op transitions are skipped and reported. Commits once. `status` echoes
+    the caller's current list filter so the re-render keeps their view.
     """
     body = await request.json()
     requirement_ids = body.get("requirement_ids", [])
-    requisition_ids = body.get("requisition_ids", [])
 
-    # Ownership guard (no-op for buyer/manager/admin; 404 for a restricted non-owner)
-    for _rid in requisition_ids:
-        require_requisition_access(db, _rid, user)
-    if requirement_ids:
-        for _r in db.query(Requirement).filter(Requirement.id.in_(requirement_ids)).all():
-            require_requisition_access(db, _r.requisition_id, user, label="Requirement")
+    parts = db.query(Requirement).filter(Requirement.id.in_(requirement_ids)).all() if requirement_ids else []
+    for part in parts:
+        require_requisition_access(db, part.requisition_id, user, label="Requirement")
 
-    # Bulk-update parts in a single query instead of N+1
-    if requirement_ids:
-        db.query(Requirement).filter(
-            Requirement.id.in_(requirement_ids),
-            Requirement.sourcing_status == SourcingStatus.ARCHIVED,
-        ).update({"sourcing_status": SourcingStatus.OPEN}, synchronize_session="fetch")
-
-    # Restore every archived part belonging to the named requisitions
-    # (part-level sourcing_status — there is no requisition-level archive flag).
-    if requisition_ids:
-        db.query(Requirement).filter(
-            Requirement.requisition_id.in_(requisition_ids),
-            Requirement.sourcing_status == SourcingStatus.ARCHIVED,
-        ).update({"sourcing_status": SourcingStatus.OPEN}, synchronize_session="fetch")
+    changed = 0
+    skipped = 0
+    for part in parts:
+        try:
+            if transition_requirement(part, SourcingStatus.OPEN, db, actor=user):
+                changed += 1
+        except ValueError as e:
+            skipped += 1
+            logger.debug("Skipping part {} reopen: {}", part.id, e)
 
     db.commit()
-    logger.info(
-        "Bulk unarchive by {}: {} parts, {} requisitions", user.email, len(requirement_ids), len(requisition_ids)
-    )
+    logger.info("Bulk reopen by {}: {} part(s) reopened, {} skipped", user.email, changed, skipped)
 
-    return await parts_list_partial(request=request, user=user, db=db)
+    response = await parts_list_partial(request=request, user=user, db=db, status=body.get("status", ""))
+    message = f"{changed} part(s) reopened"
+    if skipped:
+        message += f", {skipped} skipped"
+    response.headers["HX-Trigger"] = json.dumps({"showToast": {"message": message, "type": "success"}})
+    return response

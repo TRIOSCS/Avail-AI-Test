@@ -6,8 +6,6 @@
 {% from "htmx/partials/shared/_macros.html" import status_badge, urgency_badge %}
 
 {% set req = requisition %}
-{# Part-level archive only — a requisition has no archive status (it ends Won/Lost). #}
-{% set is_archived = requirement.sourcing_status == 'archived' %}
 
 {# ── Part detail + Requisition fields ──────────────────────── #}
 <div id="req-details-fields"
@@ -31,7 +29,6 @@
     {% for field_key, field_label, field_value in spec_fields %}
     <div class="flex items-center gap-1">
       <span class="text-xs text-gray-600 whitespace-nowrap">{{ field_label }}:</span>
-      {% if not is_archived %}
       <div id="reqd-spec-{{ field_key }}"
            class="cursor-pointer hover:bg-brand-50 rounded px-1 py-0.5 transition-colors min-w-0"
            hx-get="/v2/partials/parts/{{ requirement.id }}/edit-spec/{{ field_key }}"
@@ -39,19 +36,23 @@
            hx-swap="innerHTML">
         <span class="{{ 'font-medium text-gray-900' if field_value else 'text-gray-400 italic' }} truncate">{{ field_value or '—' }}</span>
       </div>
-      {% else %}
-      <div class="px-1 py-0.5 min-w-0">
-        <span class="{{ 'font-medium text-gray-900' if field_value else 'text-gray-400' }} truncate">{{ field_value or '—' }}</span>
-      </div>
-      {% endif %}
     </div>
     {% endfor %}
   </div>
 
+  {# ── Close-out reason — required at Won/Lost, rendered nowhere else (touch-
+     friendly: no tooltip). #}
+  {% if requirement.sourcing_status in ('won', 'lost') and requirement.outcome_reason %}
+  <div class="mt-2 text-sm">
+    <span class="text-xs text-gray-600">Outcome:</span>
+    <span class="font-medium {{ 'text-emerald-700' if requirement.sourcing_status == 'won' else 'text-rose-600' }}">{{ requirement.sourcing_status|capitalize }}</span>
+    <span class="text-gray-700">— {{ requirement.outcome_reason }}</span>
+  </div>
+  {% endif %}
+
   {# ── Description (click-to-edit, full width) ─────────────── #}
   <div class="mt-2">
     <span class="text-xs text-gray-600">Description:</span>
-    {% if not is_archived %}
     <div id="reqd-description"
          class="cursor-pointer hover:bg-brand-50 rounded px-1 py-0.5 transition-colors mt-0.5"
          hx-get="/v2/partials/parts/{{ requirement.id }}/header/edit/description?context=tab"
@@ -59,11 +60,6 @@
          hx-swap="innerHTML">
       <span class="{{ 'text-sm text-gray-900' if requirement|part_description else 'text-gray-400 italic text-sm' }}">{{ requirement|part_description or '+ Add description' }}</span>
     </div>
-    {% else %}
-    <div class="px-1 py-0.5 mt-0.5">
-      <span class="{{ 'text-sm text-gray-900' if requirement|part_description else 'text-gray-400' }}">{{ requirement|part_description or '—' }}</span>
-    </div>
-    {% endif %}
   </div>
 
   <hr class="my-2">
@@ -75,7 +71,6 @@
     {# Name #}
     <div class="flex items-center gap-1">
       <span class="text-xs text-gray-600 whitespace-nowrap">Name:</span>
-      {% if not is_archived %}
       <div id="reqd-name"
            class="cursor-pointer hover:bg-brand-50 rounded px-1 py-0.5 transition-colors min-w-0"
            hx-get="/v2/partials/requisitions/{{ req.id }}/edit/name?context=tab"
@@ -83,15 +78,11 @@
            hx-swap="innerHTML">
         <span class="font-medium text-gray-900 truncate">{{ req.name or '—' }}</span>
       </div>
-      {% else %}
-      <div class="px-1 py-0.5 min-w-0"><span class="font-medium text-gray-900 truncate">{{ req.name or '—' }}</span></div>
-      {% endif %}
     </div>
 
     {# Status #}
     <div class="flex items-center gap-1">
       <span class="text-xs text-gray-600 whitespace-nowrap">Status:</span>
-      {% if not is_archived %}
       <div id="reqd-status"
            class="cursor-pointer hover:bg-brand-50 rounded px-1 py-0.5 transition-colors"
            hx-get="/v2/partials/requisitions/{{ req.id }}/edit/status?context=tab"
@@ -99,9 +90,6 @@
            hx-swap="innerHTML">
         {{ status_badge(req.status) }}
       </div>
-      {% else %}
-      <div class="px-1 py-0.5">{{ status_badge(req.status) }}</div>
-      {% endif %}
     </div>
 
     {# Customer (read-only) #}
@@ -115,7 +103,6 @@
     {# Urgency #}
     <div class="flex items-center gap-1">
       <span class="text-xs text-gray-600 whitespace-nowrap">Urgency:</span>
-      {% if not is_archived %}
       <div id="reqd-urgency"
            class="cursor-pointer hover:bg-brand-50 rounded px-1 py-0.5 transition-colors"
            hx-get="/v2/partials/requisitions/{{ req.id }}/edit/urgency?context=tab"
@@ -123,15 +110,11 @@
            hx-swap="innerHTML">
         {{ urgency_badge(req.urgency or 'normal') }}
       </div>
-      {% else %}
-      <div class="px-1 py-0.5">{{ urgency_badge(req.urgency or 'normal') }}</div>
-      {% endif %}
     </div>
 
     {# Deadline #}
     <div class="flex items-center gap-1">
       <span class="text-xs text-gray-600 whitespace-nowrap">Deadline:</span>
-      {% if not is_archived %}
       <div id="reqd-deadline"
            class="cursor-pointer hover:bg-brand-50 rounded px-1 py-0.5 transition-colors"
            hx-get="/v2/partials/requisitions/{{ req.id }}/edit/deadline?context=tab"
@@ -139,15 +122,11 @@
            hx-swap="innerHTML">
         <span class="text-gray-900">{{ req.deadline or '—' }}</span>
       </div>
-      {% else %}
-      <div class="px-1 py-0.5"><span class="text-gray-900">{{ req.deadline or '—' }}</span></div>
-      {% endif %}
     </div>
 
     {# Owner #}
     <div class="flex items-center gap-1">
       <span class="text-xs text-gray-600 whitespace-nowrap">Owner:</span>
-      {% if not is_archived %}
       <div id="reqd-owner"
            class="cursor-pointer hover:bg-brand-50 rounded px-1 py-0.5 transition-colors"
            hx-get="/v2/partials/requisitions/{{ req.id }}/edit/owner?context=tab"
@@ -155,9 +134,6 @@
            hx-swap="innerHTML">
         <span class="text-gray-900">{{ req.creator.name if req.creator else '—' }}</span>
       </div>
-      {% else %}
-      <div class="px-1 py-0.5"><span class="text-gray-900">{{ req.creator.name if req.creator else '—' }}</span></div>
-      {% endif %}
     </div>
   </div>
 
@@ -166,21 +142,53 @@
   {# ── Sibling parts table ──────────────────────────────────── #}
   <h3 class="text-sm font-semibold text-gray-700 mb-2">Parts on this Requisition</h3>
 
-  <div x-data="{ selectedSiblings: [] }">
+  {# sibSend posts imperatively (htmx.ajax) — the static-vs-reactive hx-post
+     capture bug rules out :hx-vals here. Response re-renders the left parts
+     list; reqDetailsRefresh re-fetches this tab so both panes stay honest. #}
+  <div x-data="{ selectedSiblings: [], sibPrompt: null, sibReason: '',
+         sibSend(outcome, reason) {
+           htmx.ajax('POST', '/v2/partials/parts/bulk-outcome', {
+             target: '#parts-list', swap: 'innerHTML', indicator: '#parts-list',
+             headers: {'Content-Type': 'application/json'},
+             values: {requirement_ids: this.selectedSiblings.slice(), outcome: outcome, reason: reason || ''}
+           }).then(function() { htmx.trigger(document.body, 'reqDetailsRefresh'); });
+           this.sibPrompt = null; this.selectedSiblings = [];
+         } }">
     {# Bulk actions bar #}
     <div x-show="selectedSiblings.length > 0" x-cloak
-         class="flex items-center gap-3 mb-2 px-3 py-1.5 bg-brand-50 rounded-lg border border-brand-200 text-xs">
+         class="relative flex items-center gap-3 mb-2 px-3 py-1.5 bg-brand-50 rounded-lg border border-brand-200 text-xs">
       <span class="text-gray-600" x-text="selectedSiblings.length + ' selected'"></span>
-      <button type="button"
-              class="px-2 py-0.5 text-xs font-medium rounded-lg bg-red-100 text-red-700 hover:bg-red-200 transition-colors"
-              hx-post="/v2/partials/parts/bulk-archive"
-              :hx-vals="JSON.stringify({requirement_ids: selectedSiblings})"
-              hx-target="#part-detail"
-              hx-swap="innerHTML"
-              hx-confirm="Archive selected parts?"
-              data-loading-disable>
-        Archive
+      <button type="button" @click="sibReason = ''; sibPrompt = 'won'"
+              class="px-2 py-0.5 text-xs font-semibold rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 transition-colors">
+        Mark Won
       </button>
+      <button type="button" @click="sibReason = ''; sibPrompt = 'lost'"
+              class="px-2 py-0.5 text-xs font-semibold rounded-lg bg-rose-500 text-white hover:bg-rose-600 transition-colors">
+        Mark Lost
+      </button>
+      <button type="button"
+              @click="confirm('Hotlist selected part(s)? AVAIL keeps watching and offers proactively when stock appears.') && sibSend('hotlist')"
+              class="px-2 py-0.5 text-xs font-semibold rounded-lg bg-orange-500 text-white hover:bg-orange-600 transition-colors">
+        Hotlist
+      </button>
+      <div x-show="sibPrompt" x-cloak x-transition
+           @keydown.escape.stop="sibPrompt = null"
+           class="absolute left-0 top-full mt-1 w-64 bg-white border border-line-base rounded-lg shadow-float z-50 p-3">
+        <p class="text-xs font-semibold text-gray-700 mb-1">
+          <span x-text="sibPrompt === 'won' ? 'Why won?' : 'Why lost?'"></span>
+          <span class="text-rose-500">*</span>
+        </p>
+        <textarea x-model="sibReason" rows="2" aria-label="Outcome reason"
+                  class="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-accent-500"
+                  placeholder="Reason (required)"></textarea>
+        <div class="mt-2 flex justify-end gap-2">
+          <button type="button" class="px-2 py-1 text-xs text-gray-500 hover:text-gray-700"
+                  @click="sibPrompt = null">Cancel</button>
+          <button type="button" :disabled="!sibReason.trim()"
+                  class="px-2 py-1 text-xs font-semibold bg-accent-500 text-white rounded hover:bg-accent-600 disabled:opacity-50"
+                  @click="sibSend(sibPrompt, sibReason.trim())">Confirm</button>
+        </div>
+      </div>
     </div>
 
     {% if sibling_parts %}

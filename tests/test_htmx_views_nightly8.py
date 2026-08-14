@@ -3,7 +3,8 @@
 Targets missing lines: requisition bulk-assign, add_offer, edit_offer,
 log_activity, rfq_send test-mode, follow_up_send, mark_response_reviewed,
 edit_requirement, add_search_result_to_req, buy_plans_list, buy-plan workflow,
-sourcing workspace filters, bulk-archive/unarchive, log-phone, rfq-prepare.
+sourcing workspace filters, bulk-outcome/reopen (migration 210), log-phone,
+rfq-prepare.
 
 Called by: pytest
 Depends on: conftest.py fixtures, app.routers.htmx_views
@@ -846,69 +847,62 @@ class TestSourcingWorkspaceFilters:
         assert resp.status_code == 200
 
 
-# ── Section 16: bulk-archive and bulk-unarchive parts ─────────────────
+# ── Section 16: bulk-outcome and bulk-reopen parts ────────────────────
+# Migration 210: bulk-archive/bulk-unarchive replaced by bulk-outcome
+# (won/lost/hotlist) and bulk-reopen; the requisition_ids cascade is gone
+# (requirement_ids only).
 
 
-class TestBulkArchiveParts:
-    """Covers lines 9867-9929 (bulk archive and unarchive parts)."""
+class TestBulkOutcomeParts:
+    """Covers the bulk-outcome and bulk-reopen part routes."""
 
-    def test_bulk_archive_requirements(self, client: TestClient, db_session: Session, test_user: User):
+    def test_bulk_outcome_requirements(self, client: TestClient, db_session: Session, test_user: User):
         req = _req(db_session, test_user)
         item = _requirement(db_session, req, sourcing_status=SourcingStatus.OPEN)
         resp = client.post(
-            "/v2/partials/parts/bulk-archive",
-            json={"requirement_ids": [item.id], "requisition_ids": []},
+            "/v2/partials/parts/bulk-outcome",
+            json={"requirement_ids": [item.id], "outcome": "hotlist"},
         )
         assert resp.status_code == 200
         db_session.refresh(item)
-        assert item.sourcing_status == SourcingStatus.ARCHIVED
+        assert item.sourcing_status == SourcingStatus.HOTLIST
 
-    def test_bulk_archive_requisitions(self, client: TestClient, db_session: Session, test_user: User):
+    def test_bulk_outcome_lost_with_reason(self, client: TestClient, db_session: Session, test_user: User):
         req = _req(db_session, test_user, status=RequisitionStatus.OPEN)
         item = _requirement(db_session, req)
         resp = client.post(
-            "/v2/partials/parts/bulk-archive",
-            json={"requirement_ids": [], "requisition_ids": [req.id]},
+            "/v2/partials/parts/bulk-outcome",
+            json={"requirement_ids": [item.id], "outcome": "lost", "reason": "priced out"},
         )
         assert resp.status_code == 200
         db_session.refresh(item)
-        assert item.sourcing_status == SourcingStatus.ARCHIVED
+        assert item.sourcing_status == SourcingStatus.LOST
 
-    def test_bulk_archive_empty_body(self, client: TestClient):
+    def test_bulk_outcome_empty_body(self, client: TestClient):
         resp = client.post(
-            "/v2/partials/parts/bulk-archive",
-            json={"requirement_ids": [], "requisition_ids": []},
+            "/v2/partials/parts/bulk-outcome",
+            json={"requirement_ids": [], "outcome": "hotlist"},
         )
         assert resp.status_code == 200
 
-    def test_bulk_unarchive_requirements(self, client: TestClient, db_session: Session, test_user: User):
+    def test_bulk_reopen_requirements(self, client: TestClient, db_session: Session, test_user: User):
         req = _req(db_session, test_user)
-        item = _requirement(db_session, req, sourcing_status=SourcingStatus.ARCHIVED)
+        item = _requirement(db_session, req, sourcing_status=SourcingStatus.HOTLIST)
         resp = client.post(
-            "/v2/partials/parts/bulk-unarchive",
-            json={"requirement_ids": [item.id], "requisition_ids": []},
+            "/v2/partials/parts/bulk-reopen",
+            json={"requirement_ids": [item.id]},
         )
         assert resp.status_code == 200
         db_session.refresh(item)
         assert item.sourcing_status == SourcingStatus.OPEN
 
-    def test_bulk_unarchive_requisitions(self, client: TestClient, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        item = _requirement(db_session, req, sourcing_status=SourcingStatus.ARCHIVED)
+    def test_bulk_reopen_empty(self, client: TestClient):
         resp = client.post(
-            "/v2/partials/parts/bulk-unarchive",
-            json={"requirement_ids": [], "requisition_ids": [req.id]},
+            "/v2/partials/parts/bulk-reopen",
+            json={"requirement_ids": []},
         )
         assert resp.status_code == 200
-        db_session.refresh(item)
-        assert item.sourcing_status == SourcingStatus.OPEN
-
-    def test_bulk_unarchive_empty(self, client: TestClient):
-        resp = client.post(
-            "/v2/partials/parts/bulk-unarchive",
-            json={"requirement_ids": [], "requisition_ids": []},
-        )
-        assert resp.status_code == 200
+        assert "0 part(s) reopened" in resp.headers.get("HX-Trigger", "")
 
 
 # ── Section 17: log_phone_call ────────────────────────────────────────

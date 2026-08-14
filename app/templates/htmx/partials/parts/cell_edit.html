@@ -12,7 +12,7 @@
             @keydown.escape.prevent="htmx.ajax('GET', '/v2/partials/parts/{{ requirement.id }}/cell/display/{{ field }}', {target: '#{{ cell_id }}', swap: 'outerHTML'})"
             class="text-[11px] px-1 py-0.5 rounded border border-brand-300 input-focus"
             x-init="$el.focus()" autofocus>
-      {% for s in ['open', 'sourcing', 'offered', 'quoted', 'won', 'lost', 'archived'] %}
+      {% for s in ['open', 'sourcing', 'offered', 'quoted', 'won', 'lost', 'hotlist'] %}
         <option value="{{ s }}" {{ 'selected' if s == requirement.sourcing_status }}>{{ s|capitalize }}</option>
       {% endfor %}
     </select>

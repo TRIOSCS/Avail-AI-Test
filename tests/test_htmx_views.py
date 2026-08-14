@@ -2418,51 +2418,38 @@ class TestPartTasks:
         assert task.created_by == test_user.id
 
 
-class TestPartArchive:
-    """Test archive/unarchive single parts and bulk."""
+class TestPartOutcome:
+    """Bulk outcome/reopen for parts.
 
-    def test_archive_part(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        item = _make_requirement(db_session, req)
-        db_session.commit()
-        resp = client.patch(f"/v2/partials/parts/{item.id}/archive")
-        assert resp.status_code == 200
-        assert json.loads(resp.headers["HX-Trigger"]) == {"part-archived": {"id": item.id}}
-        db_session.expire_all()
-        assert db_session.get(Requirement, item.id).sourcing_status == SourcingStatus.ARCHIVED
+    Migration 210 removed the `archived` sourcing status and the four archive
+    routes (single archive/unarchive coverage moved to
+    tests/test_archive_system.py). Bulk actions now go through
+    bulk-outcome (won/lost/hotlist) and bulk-reopen.
+    """
 
-    def test_unarchive_part(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        item = _make_requirement(db_session, req, sourcing_status="archived")
-        db_session.commit()
-        resp = client.patch(f"/v2/partials/parts/{item.id}/unarchive")
-        assert resp.status_code == 200
-        assert "LM317T" in resp.text  # restored part is back in the default list
-        db_session.expire_all()
-        assert db_session.get(Requirement, item.id).sourcing_status == SourcingStatus.OPEN
-
-    def test_bulk_archive(self, client: TestClient, db_session: Session, test_user: User):
+    def test_bulk_outcome_hotlist(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
         item = _make_requirement(db_session, req)
         db_session.commit()
         resp = client.post(
-            "/v2/partials/parts/bulk-archive",
-            json={"requirement_ids": [item.id], "requisition_ids": []},
+            "/v2/partials/parts/bulk-outcome",
+            json={"requirement_ids": [item.id], "outcome": "hotlist"},
         )
         assert resp.status_code == 200
+        assert "1 part(s) marked Hotlist" in resp.headers.get("HX-Trigger", "")
         db_session.expire_all()
-        assert db_session.get(Requirement, item.id).sourcing_status == SourcingStatus.ARCHIVED
+        assert db_session.get(Requirement, item.id).sourcing_status == SourcingStatus.HOTLIST
 
-    def test_bulk_unarchive(self, client: TestClient, db_session: Session, test_user: User):
+    def test_bulk_reopen(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
-        item = _make_requirement(db_session, req, sourcing_status="archived")
+        item = _make_requirement(db_session, req, sourcing_status="hotlist")
         db_session.commit()
         resp = client.post(
-            "/v2/partials/parts/bulk-unarchive",
-            json={"requirement_ids": [item.id], "requisition_ids": []},
+            "/v2/partials/parts/bulk-reopen",
+            json={"requirement_ids": [item.id]},
         )
         assert resp.status_code == 200
-        assert "LM317T" in resp.text  # restored part renders in the refreshed list
+        assert "LM317T" in resp.text  # reopened part renders in the refreshed default list
         db_session.expire_all()
         assert db_session.get(Requirement, item.id).sourcing_status == SourcingStatus.OPEN
 

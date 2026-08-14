@@ -461,9 +461,11 @@ def test_advance_status_invalid_transition_returns_409(client, db_session, test_
     requirement.sourcing_status = "won"
     db_session.commit()
 
+    # won -> open is the legal reopen path since migration 210; won -> hotlist
+    # remains illegal.
     resp = client.patch(
         f"/v2/partials/sightings/{requirement.id}/advance-status",
-        data={"status": "open"},
+        data={"status": "hotlist"},
     )
     assert resp.status_code in (409, 400)
 

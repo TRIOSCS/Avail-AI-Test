@@ -8,8 +8,7 @@
      x-data="{ ...partsListSelection(), pStatus: '{{ status }}', pSort: '{{ sort }}', pDir: '{{ dir }}', pArchived: {{ 'true' if include_archived else 'false' }}, pOffset: {{ offset }}, pQ: '',
        _fp(extra) { return JSON.stringify({q: this.pQ || undefined, status: this.pStatus, sort: this.pSort, dir: this.pDir, include_archived: this.pArchived || undefined, ...extra}); },
        get filterVals() { return this._fp(); } }"
-     @part-updated.window="_reload()"
-     @part-archived.window="_reload()">
+     @part-updated.window="_reload()">
 
   {# ── Filter bar + top scrollbar ──────────────────────────── #}
   <div class="panel-header flex-wrap gap-y-1">
@@ -43,7 +42,7 @@
         </div>
 
         {# Status filter pills — accent active state, .chip pattern (findings 1, 2, 5) #}
-        {% for s_val, s_label in [('', 'All'), ('open', 'Open'), ('sourcing', 'Src'), ('offered', 'Ofd'), ('quoted', 'Qtd'), ('archived', 'Arc')] %}
+        {% for s_val, s_label in [('', 'All'), ('open', 'Open'), ('sourcing', 'Src'), ('offered', 'Ofd'), ('quoted', 'Qtd'), ('hotlist', 'Hot'), ('archive', 'Arc')] %}
         <button type="button"
                 @click="pStatus = '{{ s_val }}'"
                 hx-get="/v2/partials/parts"
@@ -81,12 +80,17 @@
   <div x-show="selectedIds.length > 0" x-cloak
        class="px-3 py-1.5 bg-accent-50 border-b border-accent-200 flex items-center gap-2 flex-shrink-0">
     <span class="text-[11px] font-semibold text-accent-700" x-text="selectedIds.length + ' selected'"></span>
-    {% if status == 'archived' %}
-    <button type="button" @click="bulkUnarchive()"
+    {# The Archive view (Arc pill = won/lost/hotlist lens, Hot pill = hotlist lens)
+       gets Reopen; pipeline views get Hotlist. Mark Won / Mark Lost render in
+       BOTH — a hotlist part whose customer never came back is closed Lost (with
+       reason) right from the archive. #}
+    {% set is_archive_view = status in ('archive', 'archived', 'won', 'lost', 'hotlist') %}
+    {% if is_archive_view %}
+    <button type="button" @click="bulkReopen()"
             class="px-2 py-0.5 text-[11px] font-semibold bg-accent-500 text-white rounded hover:bg-accent-600">
-      Unarchive
+      Reopen
     </button>
-    {% else %}
+    {% endif %}
     {# Mark Won / Mark Lost — each opens a shared required-reason popover; ONE reason
        applies to all selected lines. Mirrors the requisitions/req_row.html outcome
        popover; Confirm posts imperatively (see confirmOutcome) to dodge the
@@ -100,6 +104,13 @@
               class="px-2 py-0.5 text-[11px] font-semibold bg-rose-500 text-white rounded hover:bg-rose-600">
         Mark Lost
       </button>
+      {% if not is_archive_view %}
+      <button type="button" @click="bulkHotlist()"
+              class="px-2 py-0.5 text-[11px] font-semibold bg-orange-500 text-white rounded hover:bg-orange-600"
+              title="Monitor this part — keep collecting sightings and offer proactively when stock appears">
+        Hotlist
+      </button>
+      {% endif %}
       <div x-show="outcomePrompt" x-cloak x-transition
            @keydown.escape.stop="outcomePrompt = null"
            class="absolute left-0 top-full mt-1 w-64 bg-white border border-line-base rounded-lg shadow-float z-50 p-3">
@@ -119,7 +130,6 @@
         </div>
       </div>
     </div>
-    {% endif %}
     <button type="button" @click="clearSelection()"
             class="px-2 py-0.5 text-[11px] font-semibold text-gray-500 hover:text-gray-700">
       Clear
@@ -292,14 +302,6 @@
   </div>
   {% endif %}
 
-  {# ── Undo toast for archive actions ──────────────────────── #}
-  <div x-data="undoToast()" @part-archived.window="showUndo($event.detail)"
-       x-show="visible" x-cloak
-       class="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-gray-800 text-white px-4 py-2 rounded-lg shadow-float flex items-center gap-3 text-xs">
-    <span x-text="message"></span>
-    <button @click="undo()" class="font-semibold text-accent-300 hover:text-accent-100 underline">Undo</button>
-    <span class="text-gray-400 text-[11px]" x-text="countdown + 's'"></span>
-  </div>
 </div>
 
 {# ── Initialize left panel scroll sync + Alpine components ── #}
@@ -378,43 +380,15 @@
         var ids = this.selectedIds.slice();
         var outcome = this.outcomePrompt;
         this.outcomePrompt = null;
-        this._postJson('/v2/partials/parts/bulk-outcome', {requirement_ids: ids, outcome: outcome, reason: reason});
+        this._postJson('/v2/partials/parts/bulk-outcome', {requirement_ids: ids, outcome: outcome, reason: reason, status: this.pStatus});
       },
-      bulkUnarchive: function() {
-        if (!confirm('Unarchive ' + this.selectedIds.length + ' selected items?')) return;
-        this._postJson('/v2/partials/parts/bulk-unarchive', {requirement_ids: this.selectedIds.slice(), requisition_ids: []});
-      }
-    };
-  }
-
-  /* Undo toast — dispatched via @part-archived event */
-  function undoToast() {
-    return {
-      visible: false,
-      message: '',
-      countdown: 5,
-      _timer: null,
-      _partId: null,
-      showUndo: function(detail) {
-        this._partId = detail.id;
-        this.message = 'Part archived';
-        this.countdown = 5;
-        this.visible = true;
-        clearInterval(this._timer);
-        var self = this;
-        this._timer = setInterval(function() {
-          self.countdown--;
-          if (self.countdown <= 0) { self.visible = false; clearInterval(self._timer); }
-        }, 1000);
+      bulkHotlist: function() {
+        if (!confirm('Hotlist ' + this.selectedIds.length + ' part(s)? AVAIL keeps watching and offers proactively when stock appears.')) return;
+        this._postJson('/v2/partials/parts/bulk-outcome', {requirement_ids: this.selectedIds.slice(), outcome: 'hotlist', status: this.pStatus});
       },
-      undo: function() {
-        clearInterval(this._timer);
-        this.visible = false;
-        if (!this._partId) return;
-        htmx.ajax('PATCH', '/v2/partials/parts/' + this._partId + '/unarchive', {
-          target: '#parts-list',
-          swap: 'innerHTML'
-        });
+      bulkReopen: function() {
+        if (!confirm('Reopen ' + this.selectedIds.length + ' part(s) back to Open?')) return;
+        this._postJson('/v2/partials/parts/bulk-reopen', {requirement_ids: this.selectedIds.slice(), status: this.pStatus});
       }
     };
   }

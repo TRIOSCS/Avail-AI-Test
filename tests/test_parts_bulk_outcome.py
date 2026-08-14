@@ -1,10 +1,10 @@
-"""test_parts_bulk_outcome.py — Sales-Hub per-part Mark Won / Mark Lost bulk action.
+"""test_parts_bulk_outcome.py — per-part Mark Won / Mark Lost / Hotlist bulk action.
 
-Exercises POST /v2/partials/parts/bulk-outcome (the replacement for the removed
-bulk Archive): required shared reason, per-part SourcingStatus.WON/LOST transition,
-skip-illegal-state, bad-outcome / blank-reason 400s, and auth parity with
-bulk_archive. Plus a template render assertion that the bulk bar now shows
-Mark Won / Mark Lost and no Archive button.
+Exercises POST /v2/partials/parts/bulk-outcome: required shared reason for the
+terminal outcomes, no-reason Hotlist (the off-pipeline monitor state), per-part
+state-machine transitions, skip-illegal-state with skip reporting, bad-outcome /
+blank-reason 400s, and auth parity with bulk_reopen. Plus a template render
+assertion that the bulk bar shows Mark Won / Mark Lost / Hotlist.
 
 Depends on: conftest fixtures (client, db_session, test_user, test_requisition).
 """
@@ -123,23 +123,66 @@ def test_multiple_ids_one_call(client, db_session, test_user):
 
 
 def test_illegal_state_skipped_not_500(client, db_session, test_user):
-    """An archived part (archived -> won is illegal) is skipped; open part still
-    wins."""
+    """A won part (won -> lost is legal but won -> hotlist is not) is skipped; the open
+    part still moves.
+
+    Skips are reported in the toast.
+    """
     req = _make_requisition(db_session, test_user)
     ok = _make_requirement(db_session, req.id, "PART-OK")
-    archived = _make_requirement(db_session, req.id, "PART-ARC", status=SourcingStatus.ARCHIVED)
+    won = _make_requirement(db_session, req.id, "PART-WONALREADY", status=SourcingStatus.WON)
 
     resp = client.post(
         BULK_OUTCOME_URL,
-        json={"requirement_ids": [ok.id, archived.id], "outcome": "won", "reason": "Won it"},
+        json={"requirement_ids": [ok.id, won.id], "outcome": "hotlist"},
     )
 
     assert resp.status_code == 200
-    assert "1 part" in resp.headers.get("HX-Trigger", "")
-    assert db_session.get(Requirement, ok.id).sourcing_status == SourcingStatus.WON
-    # Archived one untouched — no partial write, no crash.
-    assert db_session.get(Requirement, archived.id).sourcing_status == SourcingStatus.ARCHIVED
-    assert db_session.get(Requirement, archived.id).outcome_reason is None
+    trigger = resp.headers.get("HX-Trigger", "")
+    assert "1 part(s) marked Hotlist" in trigger
+    assert "1 skipped" in trigger
+    assert db_session.get(Requirement, ok.id).sourcing_status == SourcingStatus.HOTLIST
+    # Won one untouched — no partial write, no crash.
+    assert db_session.get(Requirement, won.id).sourcing_status == SourcingStatus.WON
+
+
+def test_hotlist_needs_no_reason(client, db_session, test_user):
+    """Hotlist is a monitor state: no reason required, none stamped."""
+    req = _make_requisition(db_session, test_user)
+    part = _make_requirement(db_session, req.id, "PART-HOT")
+
+    resp = client.post(BULK_OUTCOME_URL, json={"requirement_ids": [part.id], "outcome": "hotlist"})
+
+    assert resp.status_code == 200
+    refreshed = db_session.get(Requirement, part.id)
+    assert refreshed.sourcing_status == SourcingStatus.HOTLIST
+    assert refreshed.outcome_reason is None
+
+
+def test_hotlist_clears_stale_reason(client, db_session, test_user):
+    """Moving a lost part to hotlist drops its stale close reason."""
+    req = _make_requisition(db_session, test_user)
+    part = _make_requirement(db_session, req.id, "PART-STALE", status=SourcingStatus.LOST)
+    part.outcome_reason = "priced out"
+    db_session.commit()
+
+    resp = client.post(BULK_OUTCOME_URL, json={"requirement_ids": [part.id], "outcome": "hotlist"})
+
+    assert resp.status_code == 200
+    refreshed = db_session.get(Requirement, part.id)
+    assert refreshed.sourcing_status == SourcingStatus.HOTLIST
+    assert refreshed.outcome_reason is None
+
+
+def test_won_lost_still_require_reason(client, db_session, test_user):
+    """The terminal outcomes keep their required reason even with hotlist allowed."""
+    req = _make_requisition(db_session, test_user)
+    part = _make_requirement(db_session, req.id, "PART-TERMREASON")
+
+    resp = client.post(BULK_OUTCOME_URL, json={"requirement_ids": [part.id], "outcome": "lost"})
+
+    assert resp.status_code == 400
+    assert db_session.get(Requirement, part.id).sourcing_status == SourcingStatus.OPEN
 
 
 def _auth_deps(fn):
@@ -149,18 +192,18 @@ def _auth_deps(fn):
     }
 
 
-def test_auth_parity_with_bulk_archive():
-    """Bulk-outcome must use the exact same auth/dependency set as bulk_archive."""
+def test_auth_parity_with_bulk_reopen():
+    """Bulk-outcome must use the exact same auth/dependency set as bulk_reopen."""
     from app.dependencies import require_user
-    from app.routers.htmx.parts import bulk_archive, bulk_outcome
+    from app.routers.htmx.parts import bulk_outcome, bulk_reopen
 
     outcome_deps = _auth_deps(bulk_outcome)
-    archive_deps = _auth_deps(bulk_archive)
+    reopen_deps = _auth_deps(bulk_reopen)
     assert require_user in outcome_deps
-    assert outcome_deps == archive_deps
+    assert outcome_deps == reopen_deps
 
 
-def test_bulk_bar_shows_mark_won_lost_no_archive(client, db_session, test_user):
+def test_bulk_bar_shows_mark_won_lost_hotlist(client, db_session, test_user):
     req = _make_requisition(db_session, test_user)
     _make_requirement(db_session, req.id, "PART-RENDER")
 
@@ -170,5 +213,7 @@ def test_bulk_bar_shows_mark_won_lost_no_archive(client, db_session, test_user):
     html = resp.text
     assert "Mark Won" in html
     assert "Mark Lost" in html
+    assert "bulkHotlist" in html
     # The old bulk Archive action + its JS handler are gone.
     assert "bulkArchive" not in html
+    assert "bulk-archive" not in html

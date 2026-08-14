@@ -1,7 +1,7 @@
 """Proactive matching engine — matches live vendor supply to customer demand history.
 
 Seeding (2026-08-06 rework): a customer's requirement history inside the
-requirement window (any requisition status — a won/lost/archived ask is exactly
+requirement window (any requisition status — a won/lost/closed ask is exactly
 the dormant demand this feature exists to catch) plus HOTLIST requisitions
 (standing monitors, no window). Purchase history (CPH) no longer seeds matches;
 it enriches them as a context signal ("bought Nx, last paid $X").
@@ -181,7 +181,7 @@ def compute_offer_rollup(db: Session, *, part: str) -> dict:
 
 
 def _score_ask_recency(last_asked_at: datetime | None) -> int:
-    """Newer asks score higher, but old asks FLOOR at 40 — an archived requirement that
+    """Newer asks score higher, but old asks FLOOR at 40 — a closed requirement that
     suddenly has supply is interesting, not stale."""
     if not last_asked_at:
         return 40

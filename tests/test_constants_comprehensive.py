@@ -171,7 +171,9 @@ def test_sourcing_status():
     assert SourcingStatus.QUOTED == "quoted"
     assert SourcingStatus.WON == "won"
     assert SourcingStatus.LOST == "lost"
-    assert SourcingStatus.ARCHIVED == "archived"
+    assert SourcingStatus.HOTLIST == "hotlist"
+    assert "archived" not in {s.value for s in SourcingStatus}
+    assert SourcingStatus.ARCHIVE_VIEW == frozenset({"won", "lost", "hotlist"})
 
 
 # ---------------------------------------------------------------------------

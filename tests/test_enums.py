@@ -74,9 +74,22 @@ def test_user_role_values(member, value):
     assert member == value
 
 
-def test_sourcing_status_has_archived():
-    assert SourcingStatus.ARCHIVED == "archived"
-    assert "archived" in [s.value for s in SourcingStatus]
+def test_sourcing_status_has_hotlist_not_archived():
+    """Migration 210: hotlist replaced archived; the Archive view is a lens."""
+    assert SourcingStatus.HOTLIST == "hotlist"
+    values = [s.value for s in SourcingStatus]
+    assert "hotlist" in values
+    assert "archived" not in values
+
+
+def test_sourcing_status_nonmember_sets():
+    """TERMINAL / MONITOR / ARCHIVE_VIEW are constants, not enum members."""
+    assert SourcingStatus.TERMINAL == frozenset({"won", "lost"})
+    assert SourcingStatus.MONITOR == frozenset({"hotlist"})
+    assert SourcingStatus.ARCHIVE_VIEW == frozenset({"won", "lost", "hotlist"})
+    members = {s.value for s in SourcingStatus}
+    assert "TERMINAL" not in SourcingStatus.__members__
+    assert SourcingStatus.ARCHIVE_VIEW <= members
 
 
 def test_enum_is_str():

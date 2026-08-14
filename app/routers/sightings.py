@@ -100,13 +100,29 @@ _EXCLUDED_REQ_STATUSES: Final = (
     RequisitionStatus.WON,
     RequisitionStatus.LOST,
 )
-# Per-part terminal states — a closed requirement (won/lost/archived) drops off the active
+# Per-part terminal states — a closed requirement (won/lost) drops off the active
 # sourcing board even when its parent requisition is still open (multi-part deals).
+# HOTLIST parts stay ON the board: they are standing monitors whose sighting/offer
+# catalog is the point (migration 210).
 _EXCLUDED_SOURCING_STATUSES: Final = (
     SourcingStatus.WON,
     SourcingStatus.LOST,
-    SourcingStatus.ARCHIVED,
 )
+
+
+def _board_requisition_clause():
+    """Requisition-status predicate for the active board.
+
+    Closed/cancelled deals are excluded — EXCEPT when the requirement itself is
+    a HOTLIST monitor: "customer uses this part but doesn't need it now" lives
+    on won/lost deals by design, and the board is where its catalog accrues.
+    Pair with :func:`_active_sourcing_status_clause` (both are applied together
+    at every call site).
+    """
+    return or_(
+        Requisition.status.notin_(_EXCLUDED_REQ_STATUSES),
+        Requirement.sourcing_status == SourcingStatus.HOTLIST,
+    )
 
 
 def _active_sourcing_status_clause():
@@ -391,7 +407,7 @@ def build_board_requirement_query(db: Session, user: User, filters: SightingsLis
     query = (
         db.query(Requirement)
         .join(Requisition, Requirement.requisition_id == Requisition.id)
-        .filter(Requisition.status.notin_(_EXCLUDED_REQ_STATUSES))
+        .filter(_board_requisition_clause())
         .filter(_active_sourcing_status_clause())
         # Exclude the resell mirror's system-owned "Customer Excess (list N)" scratch
         # requisition — supply advertising, not buyer demand a human should source
@@ -494,7 +510,7 @@ async def _render_sightings_table(
         lambda: dict(
             db.query(Requirement.sourcing_status, sqlfunc.count())
             .join(Requisition, Requirement.requisition_id == Requisition.id)
-            .filter(Requisition.status.notin_(_EXCLUDED_REQ_STATUSES))
+            .filter(_board_requisition_clause())
             .filter(_active_sourcing_status_clause())
             .filter(Requisition.is_scratch.is_(False))
             .group_by(Requirement.sourcing_status)
@@ -559,7 +575,7 @@ async def _render_sightings_table(
     active_req_select = (
         db.query(Requirement.id)
         .join(Requisition, Requirement.requisition_id == Requisition.id)
-        .filter(Requisition.status.notin_(_EXCLUDED_REQ_STATUSES))
+        .filter(_board_requisition_clause())
         .filter(_active_sourcing_status_clause())
         # Mirror's virtual "Customer Excess" requirement never has an assigned buyer or
         # ActivityLog, which would otherwise inflate the Unassigned/Stale badges the board
@@ -1009,7 +1025,7 @@ async def sightings_detail(
         )
         .join(Requirement, VendorSightingSummary.requirement_id == Requirement.id)
         .join(Requisition, Requirement.requisition_id == Requisition.id)
-        .filter(Requisition.status.notin_(_EXCLUDED_REQ_STATUSES))
+        .filter(_board_requisition_clause())
         .filter(_active_sourcing_status_clause())
         .group_by(VendorSightingSummary.vendor_name)
         .having(sqlfunc.count(sqlfunc.distinct(VendorSightingSummary.requirement_id)) > 1)

@@ -294,37 +294,36 @@ class TestLeadStatusUpdate:
         assert resp.status_code == 200
 
 
-# ── Bulk Archive / Unarchive ──────────────────────────────────────────────
+# ── Bulk Outcome / Reopen (migration 210) ─────────────────────────────────
+# bulk-archive/bulk-unarchive and their requisition_ids cascade are gone;
+# the replacements accept requirement_ids only.
 
 
-class TestBulkArchive:
-    @pytest.mark.parametrize("path", ["bulk-archive", "bulk-unarchive"])
-    def test_bulk_requirement_ids(self, client: TestClient, db_session: Session, test_user: User, path: str):
+class TestBulkOutcome:
+    @pytest.mark.parametrize(
+        ("path", "extra"),
+        [
+            ("bulk-outcome", {"outcome": "hotlist"}),
+            ("bulk-outcome", {"outcome": "lost", "reason": "priced out"}),
+            ("bulk-reopen", {}),
+        ],
+    )
+    def test_bulk_requirement_ids(self, client: TestClient, db_session: Session, test_user: User, path: str, extra):
         from app.models import Requirement
 
         req = _make_req(db_session, test_user)
         r = db_session.query(Requirement).filter(Requirement.requisition_id == req.id).first()
         resp = client.post(
             f"/v2/partials/parts/{path}",
-            content=json.dumps({"requirement_ids": [r.id], "requisition_ids": []}),
+            content=json.dumps({"requirement_ids": [r.id], **extra}),
             headers={"Content-Type": "application/json"},
         )
         assert resp.status_code == 200
 
-    @pytest.mark.parametrize("path", ["bulk-archive", "bulk-unarchive"])
-    def test_bulk_requisition_ids(self, client: TestClient, db_session: Session, test_user: User, path: str):
-        req = _make_req(db_session, test_user)
+    def test_bulk_outcome_empty(self, client: TestClient):
         resp = client.post(
-            f"/v2/partials/parts/{path}",
-            content=json.dumps({"requirement_ids": [], "requisition_ids": [req.id]}),
-            headers={"Content-Type": "application/json"},
-        )
-        assert resp.status_code == 200
-
-    def test_bulk_archive_empty(self, client: TestClient):
-        resp = client.post(
-            "/v2/partials/parts/bulk-archive",
-            content=json.dumps({"requirement_ids": [], "requisition_ids": []}),
+            "/v2/partials/parts/bulk-outcome",
+            content=json.dumps({"requirement_ids": [], "outcome": "hotlist"}),
             headers={"Content-Type": "application/json"},
         )
         assert resp.status_code == 200

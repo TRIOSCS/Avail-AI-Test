@@ -265,7 +265,7 @@ class Settings(BaseSettings):
     proactive_min_margin_pct: float = 10.0
     proactive_match_expiry_days: int = 30
     # Matching windows (2026-08-06 rework): demand = any requirement asked within
-    # the requirement window (all statuses — won/lost/archived asks are exactly the
+    # the requirement window (all statuses — won/lost/closed asks are exactly the
     # dormant demand this feature exists to catch) plus HOTLIST requisitions (no
     # window; a hotlist is a standing monitor). Supply = live offers created within
     # the offer window. Price-history anchors (last quote / last win) share the

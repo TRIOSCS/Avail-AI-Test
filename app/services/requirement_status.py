@@ -59,6 +59,12 @@ def transition_requirement(
 
     requirement.sourcing_status = new_val
 
+    # Non-terminal transitions clear any stale close reason (mirrors
+    # requisition_state.transition) — a reopened/hotlisted part is no longer
+    # "lost because X".
+    if new_val not in RequirementSourcingStatus.TERMINAL:
+        requirement.outcome_reason = None
+
     try:
         actor_id = actor.id if actor else None
         log_entry = ActivityLog(

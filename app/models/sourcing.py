@@ -153,7 +153,7 @@ class Requirement(Base):
     oem_hint = Column(String(64), nullable=True)  # which OEM's spec-code vocabulary applies; null → "IBM"
     need_by_date = Column(Date)  # When customer needs the parts
     sale_notes = Column(Text)
-    sourcing_status = Column(String(20), default="open")  # open | sourcing | offered | quoted | won | lost
+    sourcing_status = Column(String(20), default="open")  # open | sourcing | offered | quoted | won | lost | hotlist
     # Required Won/Lost close reason (migration 185). Nullable at the DB level —
     # the app enforces it only on a per-part transition to WON or LOST (see
     # routers/htmx/parts.bulk_outcome), so non-closed parts stay valid. Mirrors
@@ -161,6 +161,10 @@ class Requirement(Base):
     outcome_reason = Column(Text)
     priority_score = Column(Float, nullable=True)  # AI-computed 0-100 for sort order
     assigned_buyer_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    # Source part when this requirement was created via Clone-to-Active
+    # (migration 210). Reference only — no relationship(), mirroring
+    # Requisition.cloned_from_id; the PART_CLONED activity rows carry the story.
+    cloned_from_id = Column(Integer, ForeignKey("requirements.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
     last_searched_at = Column(UTCDateTime)
 
@@ -205,6 +209,7 @@ class Requirement(Base):
         Index("ix_req_primary_mpn", "primary_mpn"),
         Index("ix_requirements_material_card", "material_card_id"),
         Index("ix_requirements_sourcing_status", "sourcing_status"),
+        Index("ix_requirements_cloned_from", "cloned_from_id"),
         # Filtered on every buyer's default sightings board (routers/sightings.py:413,585)
         # and the offers alert source (services/alerts/sources/offers.py:58-60) — no
         # index anywhere before this (P3.1).

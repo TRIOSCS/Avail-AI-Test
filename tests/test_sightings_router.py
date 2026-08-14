@@ -127,9 +127,9 @@ class TestSightingsListPartial:
         resp = client.get("/v2/partials/sightings?page=1")
         assert resp.status_code == 200
 
-    def test_hides_won_lost_archived_requirements(self, client, db_session):
-        """Closed parts (won/lost/archived sourcing_status) never appear on the
-        sightings board — it is for actively sourcing OPEN work.
+    def test_hides_won_lost_shows_hotlist_requirements(self, client, db_session):
+        """Closed parts (won/lost) never appear on the sightings board, but a HOTLIST
+        part DOES — it is a standing monitor whose catalog accrues here.
 
         The open part still shows.
         """
@@ -140,7 +140,7 @@ class TestSightingsListPartial:
             ("OPEN-PART-1", "open"),
             ("WON-PART-1", "won"),
             ("LOST-PART-1", "lost"),
-            ("ARCH-PART-1", "archived"),
+            ("HOT-PART-1", "hotlist"),
         ]:
             db_session.add(Requirement(requisition_id=req.id, primary_mpn=mpn, target_qty=10, sourcing_status=ss))
         db_session.commit()
@@ -150,7 +150,22 @@ class TestSightingsListPartial:
         assert "OPEN-PART-1" in resp.text
         assert "WON-PART-1" not in resp.text
         assert "LOST-PART-1" not in resp.text
-        assert "ARCH-PART-1" not in resp.text
+        assert "HOT-PART-1" in resp.text
+
+    def test_hotlist_part_on_closed_deal_stays_on_board(self, client, db_session):
+        """The core hotlist case: the customer's deal closed (won/lost) but the
+        hotlist part keeps its place on the board — supply keeps accruing."""
+        req = Requisition(name="Closed deal", status="won", customer_name="Acme Corp")
+        db_session.add(req)
+        db_session.flush()
+        db_session.add(
+            Requirement(requisition_id=req.id, primary_mpn="HOT-ON-WON", target_qty=10, sourcing_status="hotlist")
+        )
+        db_session.commit()
+
+        resp = client.get("/v2/partials/sightings")
+        assert resp.status_code == 200
+        assert "HOT-ON-WON" in resp.text
 
     def test_hides_parts_of_closed_deals(self, client, db_session):
         """A won/lost/cancelled requisition is a closed deal — none of its parts appear,

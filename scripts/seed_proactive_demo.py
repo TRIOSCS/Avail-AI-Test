@@ -276,7 +276,7 @@ def main():
     # 2. Holding requisition for the vendor offers (FK container only)
     holding = db.query(Requisition).filter(Requisition.name == f"AVAIL Vendor Stock — {SEED_TAG}").first()
     if not holding:
-        holding = Requisition(name=f"AVAIL Vendor Stock — {SEED_TAG}", status="archived", created_by=viewer.id)
+        holding = Requisition(name=f"AVAIL Vendor Stock — {SEED_TAG}", status="lost", created_by=viewer.id)
         db.add(holding)
         db.flush()
 

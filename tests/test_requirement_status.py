@@ -57,10 +57,12 @@ class TestTransitionRequirement:
         assert req_item.sourcing_status == "offered"
 
     def test_illegal_transition_raises(self, db_session, test_requisition, test_user):
+        # won -> open became the legal reopen path in migration 210; won -> hotlist
+        # stays illegal (a won part reopens first, mirroring the requisition table).
         req_item = _first_requirement(test_requisition, db_session, "won")
 
         with pytest.raises(ValueError, match="Invalid requirement transition"):
-            transition_requirement(req_item, "open", db_session, actor=test_user)
+            transition_requirement(req_item, "hotlist", db_session, actor=test_user)
 
     def test_noop_when_same_status(self, db_session, test_requisition, test_user):
         req_item = _first_requirement(test_requisition, db_session, "sourcing")
