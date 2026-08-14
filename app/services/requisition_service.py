@@ -281,7 +281,9 @@ def clone_parts_to_active(db: Session, parts: list[Requirement], user: User) -> 
             logger.warning("clone_parts_to_active: source requisition {} not found; skipping", source_req_id)
             continue
         new_req = Requisition(
-            name=f"{source_req.customer_name or source_req.name} — Reorder {today}",
+            # [:255] — customer_name can itself be 255 chars; the suffix would overflow
+            # requisitions.name String(255) into a PG DataError 500 (SQLite masks it).
+            name=f"{source_req.customer_name or source_req.name} — Reorder {today}"[:255],
             customer_name=source_req.customer_name,
             customer_site_id=source_req.customer_site_id,
             company_id=source_req.company_id,
@@ -364,6 +366,10 @@ def clone_parts_to_active(db: Session, parts: list[Requirement], user: User) -> 
                 assigned_to_id=part.assigned_buyer_id or user.id,
             )
         except Exception:  # noqa: BLE001 — non-critical side effect: a task failure must never undo the committed clone
+            # Roll back the poisoned transaction, or every later use of this session
+            # (including rendering the response) raises PendingRollbackError and the
+            # user sees a 500 for a clone that DID commit — then retries a duplicate.
+            db.rollback()
             logger.warning("Task auto-gen failed for cloned requirement {}", new_r.id, exc_info=True)
 
     logger.info(

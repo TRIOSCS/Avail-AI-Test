@@ -190,6 +190,22 @@ Every MPN whose card was searched within 48h is skipped; prior sightings
 on those MPNs (across all requirements) are surfaced via the
 `material_card_id` linkage on Sighting rows.
 
+## 2. Search (User-Initiated Only)
+
+Sourcing is strictly user-initiated. There is no background cron, no
+auto-enqueue on requirement creation, and no row-click POST. Two entry
+points trigger a search:
+
+- Per-row search icon on `/v2/sightings`
+- Detail-panel "Search" button (`m.search_button` macro)
+
+Both POST `/v2/partials/sightings/{requirement_id}/refresh?source=user`.
+
+A 48-hour per-MPN cooldown is enforced via `MaterialCard.last_searched_at`.
+Every MPN whose card was searched within 48h is skipped; prior sightings
+on those MPNs (across all requirements) are surfaced via the
+`material_card_id` linkage on Sighting rows.
+
 ### 2a. Search-page part-history panel ("What we know")
 
 The `/v2/search` results shell (`results_shell.html`) renders a two-column
@@ -2711,23 +2727,38 @@ NO history:
 
 ```
 find_matches_for_offer(offer, db)
-    +---> _find_matches(...)            # CPH-gated (purchase history)
-    +---> _find_hotlist_matches(...)    # NEW: seeds from active HOTLIST reqs
-            |   JOIN Requisition(status='hotlist')
-            |        -> Requirement(material_card_id == offer.material_card_id)
-            |        -> CustomerSite(is_active) -> Company(account_owner_id NOT NULL)
-            +---> reuse suppression (do_not_offer) + dedup (company_id)
-            +---> baseline match_score=60 (explicit monitor, no history to weight)
+    +---> _find_requirement_matches(...)     # windowed ask history (hotlist parts excluded, NULL-safe)
+    +---> _find_part_hotlist_matches(...)    # HOTLIST PARTS (migration 210): sourcing_status='hotlist',
+            |                                #   NO window, ANY requisition status (won/lost incl.),
+            |                                #   real signals: requirement_id / last_asked_at / qty / count,
+            |                                #   score = max(60, computed); company via requisition/site
+            |                                #   (log+skip when unresolvable — no back-order fallback)
+    +---> _find_hotlist_matches(...)         # HOTLIST REQUISITIONS: standing deal-level monitor,
+            |                                #   requirement_id NULL, flat baseline 60
+            +---> all passes reuse suppression (do_not_offer) + dedup (company_id)
             +---> DB: INSERT proactive_matches (status=NEW), ActivityLog
-    return cph_matches + hot_matches    # deduped on company_id across both passes
+    return req + part_hot + hot              # skip_company_ids accumulates across passes —
+                                             # one active match per (part, company)
 ```
 
-The seeded `ProactiveMatch` carries the hotlist `requisition_id` and the company's
-`account_owner_id` as salesperson, and surfaces on the **existing Proactive list**
-with the same one-click-send pipeline (`proactive_email.py` → Graph sendMail) — no
-new surface. So a HOTLIST req turns "an offer arrived for the part you're watching"
-into a one-click outbound, even for a customer with zero purchase history. (Auto-send
-on a hotlist hit is intentionally out of scope — the salesperson confirms the send.)
+Both hotlist levels share `match_source='hotlist'` (disambiguate by
+`requirement_id` NULL-ness). The seeded `ProactiveMatch` routes to
+`company.account_owner_id or requisition.created_by` and surfaces on the
+**existing Proactive list** with the same human-in-loop send pipeline — no new
+surface. The digest line for a part-hotlist match reads "on your hotlist — last
+asked {date} for {qty} pcs" (`proactive_digest._render_line` branches on
+match_source); `_match_row.html` shows the orange hotlist tag independent of ask
+history. Flipping a part INTO hotlist retro-matches immediately against the
+newest live in-window offer (`trigger_rematch_on_part_hotlist`, called inside
+`transition_requirement`; SAVEPOINT-only, never commits — the status-change
+caller owns the transaction). The vendor stock-list ingest matcher
+(`inventory_jobs.py`) now also supplies hotlist demand: `OR(Requisition.status
+IN (open, offers, hotlist), Requirement.sourcing_status='hotlist')`. (Auto-send
+on a hotlist hit is intentionally out of scope — the salesperson confirms the
+send.) A weekly ACTIVE re-search job exists but ships **flag-OFF**
+(`app/jobs/hotlist_jobs.py`, `hotlist_research_enabled=False`, Sun 02:00, cap
+`hotlist_research_max_parts`, ICS/NC/TBF via the workers' 7-day dedup) — owner
+enables it later; see the master backlog.
 
 ### Unified AI Email Drafting (RFQ rephrase · vendor reply · follow-up)
 

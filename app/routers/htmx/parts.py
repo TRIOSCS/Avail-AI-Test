@@ -1299,8 +1299,13 @@ async def bulk_clone(
     if not requirement_ids:
         raise HTTPException(400, "No parts selected")
 
-    # Load parts preserving request order; missing ids are dropped.
-    int_ids = [int(rid) for rid in requirement_ids]
+    # Load parts preserving request order; missing ids are dropped. Dedup (the UI
+    # can't send duplicates but a direct API call can — each dup cloned a part twice)
+    # and reject non-numeric ids as a 400 rather than an unhandled 500.
+    try:
+        int_ids = list(dict.fromkeys(int(rid) for rid in requirement_ids))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "requirement_ids must be a list of integers") from None
     parts_by_id = {p.id: p for p in db.scalars(select(Requirement).where(Requirement.id.in_(int_ids)))}
     parts = [parts_by_id[rid] for rid in int_ids if rid in parts_by_id]
 

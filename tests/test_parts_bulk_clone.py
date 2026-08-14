@@ -153,3 +153,36 @@ def test_archive_view_status_passthrough(client, db_session, test_user):
     # The archive branch of the bulk bar (Reopen + Clone to Active) rendered.
     assert "bulkReopen" in resp.text
     assert "Clone to Active" in resp.text
+
+
+def test_duplicate_ids_clone_once(client, db_session, test_user):
+    """A direct API caller repeating an id must not clone the part twice (the UI dedups
+    selection; the route now dedups too)."""
+    req = _make_requisition(db_session, test_user)
+    part = _make_requirement(db_session, req.id, "DUP-MPN-1")
+    resp = client.post(BULK_CLONE_URL, json={"requirement_ids": [part.id, part.id, part.id], "status": ""})
+    assert resp.status_code == 200
+    clones = db_session.query(Requirement).filter(Requirement.cloned_from_id == part.id).all()
+    assert len(clones) == 1
+
+
+def test_non_integer_ids_rejected_400(client):
+    resp = client.post(BULK_CLONE_URL, json={"requirement_ids": ["abc"], "status": ""})
+    assert resp.status_code == 400
+
+
+def test_task_autogen_failure_still_returns_committed_clone(client, db_session, test_user, monkeypatch):
+    """A task auto-gen crash after the clone commit must not 500 the request (the
+    poisoned-session bug): the except rolls back and the response renders."""
+    from app.services import task_service
+
+    def _boom(*a, **k):
+        raise RuntimeError("task table exploded")
+
+    monkeypatch.setattr(task_service, "on_requirement_added", _boom)
+    req = _make_requisition(db_session, test_user)
+    part = _make_requirement(db_session, req.id, "TASKFAIL-1")
+    resp = client.post(BULK_CLONE_URL, json={"requirement_ids": [part.id], "status": ""})
+    assert resp.status_code == 200
+    clones = db_session.query(Requirement).filter(Requirement.cloned_from_id == part.id).all()
+    assert len(clones) == 1
