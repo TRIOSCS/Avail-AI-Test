@@ -884,6 +884,7 @@ class TestBulkOutcomeParts:
             json={"requirement_ids": [], "outcome": "hotlist"},
         )
         assert resp.status_code == 200
+        assert "0 part(s) marked Hotlist" in resp.headers.get("HX-Trigger", "")
 
     def test_bulk_reopen_requirements(self, client: TestClient, db_session: Session, test_user: User):
         req = _req(db_session, test_user)

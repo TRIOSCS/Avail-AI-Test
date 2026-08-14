@@ -536,6 +536,8 @@ class TestArchiveSystem:
             json={"requirement_ids": [item.id], "outcome": "hotlist"},
         )
         assert resp.status_code == 200
+        db_session.refresh(item)
+        assert item.sourcing_status == SourcingStatus.HOTLIST
 
     def test_bulk_outcome_lost_with_reason(self, client, db_session: Session, test_user: User):
         item = _part(db_session, test_user)
@@ -545,6 +547,9 @@ class TestArchiveSystem:
             json={"requirement_ids": [item.id], "outcome": "lost", "reason": "priced out"},
         )
         assert resp.status_code == 200
+        db_session.refresh(item)
+        assert item.sourcing_status == SourcingStatus.LOST
+        assert item.outcome_reason == "priced out"
 
     def test_bulk_reopen(self, client, db_session: Session, test_user: User):
         req = _req(db_session, test_user)
@@ -556,6 +561,8 @@ class TestArchiveSystem:
             json={"requirement_ids": [item.id]},
         )
         assert resp.status_code == 200
+        db_session.refresh(item)
+        assert item.sourcing_status == SourcingStatus.OPEN
 
 
 # ── Trouble Tickets ───────────────────────────────────────────────────

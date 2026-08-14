@@ -327,6 +327,7 @@ class TestBulkOutcome:
             headers={"Content-Type": "application/json"},
         )
         assert resp.status_code == 200
+        assert "0 part(s) marked Hotlist" in resp.headers.get("HX-Trigger", "")
 
 
 # ── Log Phone Call ────────────────────────────────────────────────────────

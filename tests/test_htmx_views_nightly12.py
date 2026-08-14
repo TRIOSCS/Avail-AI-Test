@@ -318,6 +318,7 @@ class TestBulkOutcome:
             json={"requirement_ids": []},
         )
         assert resp.status_code == 200
+        assert "0 part(s) reopened" in resp.headers.get("HX-Trigger", "")
 
 
 # ── Buy plan routes ───────────────────────────────────────────────────────
