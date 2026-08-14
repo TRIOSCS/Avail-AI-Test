@@ -50,6 +50,20 @@ def _vendor_ladder_source(connector_name: str) -> str:
     return f"{connector_name}_api"
 
 
+# String columns with a hard length bound — truncate on write so one oversized value
+# from a connector/web/OEM/AI source can't DataError the whole batch commit (QC 2026-08-13).
+_FIELD_MAXLEN = {"description": 1000, "datasheet_url": 1000}
+
+
+def _cap_field(field: str, value):
+    """Truncate a bounded string field to its DB column length; pass everything else
+    through."""
+    maxlen = _FIELD_MAXLEN.get(field)
+    if maxlen and isinstance(value, str) and len(value) > maxlen:
+        return value[:maxlen]
+    return value
+
+
 CORE_FIELDS = [
     "description",
     "manufacturer",
@@ -195,7 +209,7 @@ def _apply_merged_core_fields(card: MaterialCard, merged: dict, provenance: dict
             if not setter(card, value, source, confidence):
                 prov.pop(field, None)
         else:
-            setattr(card, field, value)
+            setattr(card, field, _cap_field(field, value))
     return prov
 
 
@@ -258,7 +272,7 @@ def _apply_evidence_fields(
             if not set_manufacturer(card, v, source, confidence):
                 continue
         else:
-            setattr(card, f, v)
+            setattr(card, f, _cap_field(f, v))
         prov[f] = {"source": source, "confidence": confidence, "fetched_at": fetched_at}
 
 
@@ -507,7 +521,7 @@ async def enrich_card(
         now = datetime.now(UTC)
         card.enriched_at = now
         if inf.status == "ai_inferred":
-            card.description = inf.description
+            card.description = _cap_field("description", inf.description)
             # Through the F1 ladder: an Opus inference (claude_opus_inferred, tier 40) fills
             # an empty category but can never overwrite decode/vendor/TRIO provenance, and
             # off-vocab junk is rejected instead of persisted.

@@ -974,6 +974,29 @@ async def test_dell_miss_is_not_found_not_catalogued(db_session):
     assert status == MaterialEnrichmentStatus.NOT_FOUND  # dell is excluded from HIGH_PRECISION_VENDORS
 
 
+def test_apply_truncates_oversized_bounded_fields(db_session):
+    """QC 2026-08-13: an oversized description / datasheet_url is truncated to its column
+    length on apply, so one huge connector value can't DataError the whole batch commit."""
+    card = _card(db_session, "TRUNC001")
+    apply_authoritative(
+        card,
+        {"description": "X" * 1500, "datasheet_url": "http://ex.com/" + "y" * 1500},
+        {"description": _prov_entry("digikey"), "datasheet_url": _prov_entry("digikey")},
+        ["digikey"],
+    )
+    assert len(card.description) == 1000
+    assert len(card.datasheet_url) == 1000
+
+
+def test_cap_field_helper():
+    from app.services.authoritative_enrichment_service import _cap_field
+
+    assert len(_cap_field("description", "z" * 2000)) == 1000
+    assert _cap_field("description", "short") == "short"
+    assert _cap_field("category", "z" * 2000) == "z" * 2000  # unbounded field untouched
+    assert _cap_field("description", None) is None
+
+
 def test_apply_authoritative_merges_provenance_not_replaces(db_session):
     """QC 2026-08-13: applying enrichment MERGES per-field provenance into the card's
     existing provenance — a prior manual entry for a field NOT touched this run is
