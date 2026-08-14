@@ -2678,13 +2678,15 @@ def resolve_material_card(mpn: str, db: Session, manufacturer: str = "") -> Mate
     if dialect == "postgresql":  # pragma: no cover
         from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+        # manufacturer deliberately NOT in the insert — the create path routes it
+        # through the ladder below like every other writer (garbage gate + alias
+        # canonicalization + form_entry provenance), same as the fast path above.
         stmt = (
             pg_insert(MaterialCard)
             .values(
                 normalized_mpn=norm,
                 display_mpn=display,
                 search_count=0,
-                manufacturer=manufacturer,
             )
             .on_conflict_do_nothing(
                 index_elements=["normalized_mpn"],
@@ -2707,18 +2709,19 @@ def resolve_material_card(mpn: str, db: Session, manufacturer: str = "") -> Mate
         else:
             logger.info("MC_METRIC: action=created mpn={} card_id={}", norm, card.id)
             _audit_card_created(db, card)
+        if card is not None and manufacturer and not card.manufacturer:
+            set_manufacturer(card, manufacturer, source="form_entry", confidence=0.7)
         return card
     else:
         # SQLite / test fallback — use try/except on IntegrityError
         from sqlalchemy.exc import IntegrityError
 
         try:
-            card = MaterialCard(normalized_mpn=norm, display_mpn=display, search_count=0, manufacturer=manufacturer)
+            card = MaterialCard(normalized_mpn=norm, display_mpn=display, search_count=0)
             db.add(card)
             db.flush()
             logger.info("MC_METRIC: action=created mpn={} card_id={}", norm, card.id)
             _audit_card_created(db, card)
-            return card
         except IntegrityError:
             db.rollback()
             logger.info("MC_METRIC: action=race_resolved mpn={}", norm)
@@ -2728,7 +2731,9 @@ def resolve_material_card(mpn: str, db: Session, manufacturer: str = "") -> Mate
                 card.deleted_at = None
                 db.flush()
                 logger.info("MC_METRIC: action=restored mpn={} card_id={}", norm, card.id)
-            return card
+        if card is not None and manufacturer and not card.manufacturer:
+            set_manufacturer(card, manufacturer, source="form_entry", confidence=0.7)
+        return card
 
 
 def _upsert_material_card(pn: str, sightings: list[Sighting], db: Session, now: datetime) -> MaterialCard | None:

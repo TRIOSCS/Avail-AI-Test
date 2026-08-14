@@ -99,10 +99,14 @@ def _apply_ai_results(classified: list[dict], batch: list, db: Session) -> tuple
 
     for card_id, normalized_mpn in batch:
         result = mpn_to_result.get(normalized_mpn.lower(), {})
-        manufacturer = result.get("manufacturer", "Unknown")
+        # `or "Unknown"` also coalesces an explicit null/"" from the model — the prompt
+        # allows `"manufacturer": null`, which used to crash get_or_create_brand_tag.
+        manufacturer = result.get("manufacturer") or "Unknown"
         category = result.get("category", "Miscellaneous")
 
-        is_unknown = manufacturer == "Unknown"
+        # None-safe + case-folded: the model returns null or "unknown"/"UNKNOWN" too;
+        # none of those may slip past as a real maker at 0.92 confidence.
+        is_unknown = not manufacturer or str(manufacturer).strip().lower() == "unknown"
         confidence = 0.3 if is_unknown else 0.92
 
         tags_to_apply = []

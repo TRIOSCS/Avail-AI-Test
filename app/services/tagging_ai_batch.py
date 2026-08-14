@@ -608,8 +608,9 @@ def _apply_chunked_batch(classifications: list[dict], db: Session) -> tuple[int,
         category = (item.get("category") or "").strip() or None
         model_confidence = item.get("confidence")
 
-        # v2 schema: skip null/Unknown manufacturers entirely (don't create 0.30 junk tags)
-        if not manufacturer or manufacturer == "Unknown":
+        # v2 schema: skip null/Unknown manufacturers entirely (don't create 0.30 junk
+        # tags); case-folded — the model sometimes returns "unknown"/"UNKNOWN".
+        if not manufacturer or manufacturer.lower() == "unknown":
             unknown += 1
             continue
 

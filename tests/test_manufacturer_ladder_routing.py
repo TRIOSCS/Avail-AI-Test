@@ -76,6 +76,32 @@ class TestAiClassifyRoutesThroughLadder:
         assert card.manufacturer_tier == 100
 
 
+class TestAiClassifyUnknownCaseFold:
+    def test_lowercase_unknown_is_not_a_maker(self, db_session):
+        """Model-returned 'unknown' (any case) routes to the unknown counter — no
+        manufacturer write at 0.92 (the gate used to be case-sensitive)."""
+        card = _make_card(db_session, "UNKCASE1")
+        matched, unknown = _apply_ai_results(
+            [{"mpn": "UNKCASE1", "manufacturer": "unknown", "category": "Miscellaneous"}],
+            [(card.id, "unkcase1")],
+            db_session,
+        )
+        db_session.refresh(card)
+        assert (matched, unknown) == (0, 1)
+        assert card.manufacturer is None
+
+    def test_null_manufacturer_is_not_a_maker(self, db_session):
+        card = _make_card(db_session, "UNKCASE2")
+        matched, unknown = _apply_ai_results(
+            [{"mpn": "UNKCASE2", "manufacturer": None, "category": "Miscellaneous"}],
+            [(card.id, "unkcase2")],
+            db_session,
+        )
+        db_session.refresh(card)
+        assert (matched, unknown) == (0, 1)
+        assert card.manufacturer is None
+
+
 class TestSightingConsensusProvenance:
     def test_consensus_backfill_stamps_sighting_consensus(self, db_session, test_requisition):
         from app.models.sourcing import Sighting
@@ -104,6 +130,38 @@ class TestSightingConsensusProvenance:
         assert card.manufacturer_source == "sighting_consensus"
         assert card.manufacturer_tier == 65
         assert abs(card.manufacturer_confidence - 0.95) < 1e-9
+
+
+class TestSightingConsensusGarbageWinner:
+    def test_rejected_winner_skips_tag_and_stays_in_pool(self, db_session, test_requisition):
+        """When the ladder rejects the consensus winner (garbage shape) on a maker-less
+        card, NO brand tag is created and the card is counted skipped — a junk tag would
+        strand the card outside the untagged pool with a clean manufacturer."""
+        from app.models.sourcing import Sighting
+        from app.models.tags import MaterialTag
+        from app.services.tagging_backfill import backfill_manufacturer_from_sightings
+
+        card = _make_card(db_session, "BF-JUNK-1")
+        req_item = test_requisition.requirements[0]
+        for i in range(3):
+            db_session.add(
+                Sighting(
+                    requirement_id=req_item.id,
+                    material_card_id=card.id,
+                    vendor_name=f"JunkVendor{i}",
+                    manufacturer="LF(T",  # garbage fragment: majority winner, ladder-rejected
+                    mpn_matched="BF-JUNK-1",
+                    source_type="test",
+                )
+            )
+        db_session.flush()
+
+        result = backfill_manufacturer_from_sightings(db_session)
+        db_session.refresh(card)
+
+        assert result["total_tagged"] == 0
+        assert card.manufacturer is None
+        assert db_session.query(MaterialTag).filter_by(material_card_id=card.id).count() == 0
 
 
 class TestBulkPrefixBackfill:
@@ -161,6 +219,26 @@ class TestGetEndpointsNoLongerWrite:
 
 
 class TestResolveMaterialCardFormEntry:
+    def test_create_path_routes_manufacturer_through_ladder(self, db_session):
+        """A brand-NEW card gets its manufacturer via the ladder too (form_entry), not
+        raw in the INSERT — so garbage is rejected and provenance is stamped."""
+        from app.search_service import resolve_material_card
+
+        created = resolve_material_card("NEWCARD77", db_session, manufacturer="Analog Devices")
+        assert created.manufacturer == "Analog Devices"
+        assert created.manufacturer_source == "form_entry"
+        assert created.manufacturer_tier == 70
+
+    def test_create_path_rejects_garbage_manufacturer(self, db_session):
+        """Garbage fragment on CREATE: card is still created, maker stays NULL (the old
+        raw INSERT persisted the junk verbatim with no provenance)."""
+        from app.search_service import resolve_material_card
+
+        created = resolve_material_card("NEWCARD88", db_session, manufacturer="LF(T")
+        assert created is not None
+        assert created.manufacturer is None
+        assert created.manufacturer_source is None
+
     def test_resolve_stamps_form_entry_on_existing_empty_card(self, db_session):
         from app.search_service import resolve_material_card
 
