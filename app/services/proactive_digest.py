@@ -118,13 +118,23 @@ def find_duplicate_material_groups(db: Session) -> list[list[str]]:
 
 
 def _render_line(line: dict) -> list[str]:
-    """One digest bullet + its indented anchor sub-lines (text form)."""
+    """One digest bullet + its indented anchor sub-lines (text form).
+
+    Hotlist matches keep the hotlist framing even when they carry real ask history
+    (part-level hotlist, migration 210) — the salesperson should read "standing
+    monitor", not "recent ask".
+    """
+    is_hotlist = line.get("match_source") == "hotlist"
     ask = ""
     if line["last_asked_at"]:
         ask = f"last asked {fmt_date(line['last_asked_at'])} for {fmt_qty(line['last_asked_qty'])} pcs"
         if (line["requirement_count"] or 0) > 1:
             ask += f" ({line['requirement_count']} requests on file)"
+        if is_hotlist:
+            ask = f"on your hotlist — {ask}"
     else:
+        # No ask history = requisition-level hotlist (the only source that
+        # seeds without a requirement).
         ask = "on your hotlist"
     avail = f"available {fmt_qty(line['available_qty'])} pcs"
     if line["low_cost"] is not None:
@@ -228,6 +238,7 @@ def generate_digests(db: Session) -> dict:
             "match_id": m.id,
             "mpn": m.mpn,
             "company_id": m.company_id,
+            "match_source": m.match_source or "requirement",
             "last_asked_at": m.last_asked_at,
             "last_asked_qty": m.last_asked_qty,
             "requirement_count": m.requirement_count or 0,
