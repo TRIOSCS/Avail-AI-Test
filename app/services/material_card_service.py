@@ -21,6 +21,7 @@ from ..models import (
 )
 from ..services.excess_mirror import mirror_sighting_filter
 from ..services.price_snapshot_service import record_price_snapshot
+from ..services.spec_tiers import set_manufacturer
 from ..vendor_utils import normalize_vendor_name
 
 MIN_MPN_PREFIX_LENGTH = 6  # Minimum prefix length for manufacturer inference
@@ -59,9 +60,7 @@ def backfill_missing_manufacturers(db: Session) -> int:
     updated = 0
     for part in null_parts:
         inferred = infer_manufacturer(db, part.normalized_mpn)
-        if inferred:
-            part.manufacturer = inferred
-            db.add(part)
+        if inferred and set_manufacturer(part, inferred, source="prefix_infer", confidence=0.6):
             updated += 1
     return updated
 

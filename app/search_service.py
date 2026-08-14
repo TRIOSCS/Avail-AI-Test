@@ -54,6 +54,7 @@ from .services.ics_worker.queue_manager import enqueue_for_ics_search
 from .services.nc_worker.queue_manager import enqueue_for_nc_search
 from .services.price_snapshot_service import record_price_snapshot
 from .services.sourcing_leads import get_vendor_feedback_adjustment, sync_leads_for_sightings
+from .services.spec_tiers import set_manufacturer
 from .services.tbf_worker.queue_manager import enqueue_for_tbf_search
 from .services.vendor_affinity_service import find_vendor_affinity
 from .services.vendor_unavailability import apply_to_fresh_sightings
@@ -2667,7 +2668,7 @@ def resolve_material_card(mpn: str, db: Session, manufacturer: str = "") -> Mate
     card = db.query(MaterialCard).filter_by(normalized_mpn=norm).filter(MaterialCard.deleted_at.is_(None)).first()
     if card:
         if manufacturer and not card.manufacturer:
-            card.manufacturer = manufacturer
+            set_manufacturer(card, manufacturer, source="form_entry", confidence=0.7)
         logger.debug("MC_METRIC: action=resolved mpn={} card_id={}", norm, card.id)
         return card
 
@@ -2677,13 +2678,15 @@ def resolve_material_card(mpn: str, db: Session, manufacturer: str = "") -> Mate
     if dialect == "postgresql":  # pragma: no cover
         from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+        # manufacturer deliberately NOT in the insert — the create path routes it
+        # through the ladder below like every other writer (garbage gate + alias
+        # canonicalization + form_entry provenance), same as the fast path above.
         stmt = (
             pg_insert(MaterialCard)
             .values(
                 normalized_mpn=norm,
                 display_mpn=display,
                 search_count=0,
-                manufacturer=manufacturer,
             )
             .on_conflict_do_nothing(
                 index_elements=["normalized_mpn"],
@@ -2706,18 +2709,19 @@ def resolve_material_card(mpn: str, db: Session, manufacturer: str = "") -> Mate
         else:
             logger.info("MC_METRIC: action=created mpn={} card_id={}", norm, card.id)
             _audit_card_created(db, card)
+        if card is not None and manufacturer and not card.manufacturer:
+            set_manufacturer(card, manufacturer, source="form_entry", confidence=0.7)
         return card
     else:
         # SQLite / test fallback — use try/except on IntegrityError
         from sqlalchemy.exc import IntegrityError
 
         try:
-            card = MaterialCard(normalized_mpn=norm, display_mpn=display, search_count=0, manufacturer=manufacturer)
+            card = MaterialCard(normalized_mpn=norm, display_mpn=display, search_count=0)
             db.add(card)
             db.flush()
             logger.info("MC_METRIC: action=created mpn={} card_id={}", norm, card.id)
             _audit_card_created(db, card)
-            return card
         except IntegrityError:
             db.rollback()
             logger.info("MC_METRIC: action=race_resolved mpn={}", norm)
@@ -2727,7 +2731,9 @@ def resolve_material_card(mpn: str, db: Session, manufacturer: str = "") -> Mate
                 card.deleted_at = None
                 db.flush()
                 logger.info("MC_METRIC: action=restored mpn={} card_id={}", norm, card.id)
-            return card
+        if card is not None and manufacturer and not card.manufacturer:
+            set_manufacturer(card, manufacturer, source="form_entry", confidence=0.7)
+        return card
 
 
 def _upsert_material_card(pn: str, sightings: list[Sighting], db: Session, now: datetime) -> MaterialCard | None:
@@ -2755,8 +2761,7 @@ def _upsert_material_card(pn: str, sightings: list[Sighting], db: Session, now: 
     card.last_searched_at = now
     if not card.manufacturer:
         for s in pn_sightings:
-            if s.manufacturer:
-                card.manufacturer = s.manufacturer
+            if s.manufacturer and set_manufacturer(card, s.manufacturer, source="sighting_reported", confidence=0.7):
                 break
 
     # Batch fetch all existing vendor histories for this card (avoids N+1).

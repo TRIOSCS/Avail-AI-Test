@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.models.intelligence import MaterialCard
 from app.models.tags import MaterialTag, Tag
+from app.services.spec_tiers import set_manufacturer
 from app.services.tagging import (
     get_or_create_brand_tag,
     get_or_create_commodity_tag,
@@ -607,8 +608,9 @@ def _apply_chunked_batch(classifications: list[dict], db: Session) -> tuple[int,
         category = (item.get("category") or "").strip() or None
         model_confidence = item.get("confidence")
 
-        # v2 schema: skip null/Unknown manufacturers entirely (don't create 0.30 junk tags)
-        if not manufacturer or manufacturer == "Unknown":
+        # v2 schema: skip null/Unknown manufacturers entirely (don't create 0.30 junk
+        # tags); case-folded — the model sometimes returns "unknown"/"UNKNOWN".
+        if not manufacturer or manufacturer.lower() == "unknown":
             unknown += 1
             continue
 
@@ -642,7 +644,7 @@ def _apply_chunked_batch(classifications: list[dict], db: Session) -> tuple[int,
         tag_material_card(card.id, tags_to_apply, db)
 
         if not card.manufacturer:
-            card.manufacturer = manufacturer
+            set_manufacturer(card, manufacturer, source="claude_haiku", confidence=confidence)
 
         matched += 1
 

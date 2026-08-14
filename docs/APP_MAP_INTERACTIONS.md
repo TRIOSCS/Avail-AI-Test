@@ -4804,13 +4804,26 @@ SOURCE_TIER  manual:100
                oem_crosswalk_enrich writer — decode channel 0.90, title channel 0.85 —
                and the broader oem_official umbrella is
                authoritative_enrichment_service's OEM-domain extractor; all the same
-               evidence class) · web_search:70 · brokerbin:65
+               evidence class) · web_search:70
+             · form_entry:70 (staff-typed maker on a requisition/excess form, recorded as
+               a side effect of resolve_material_card — human-entered but un-reviewed, so
+               web_search class, well below manual/100 which requires an explicit card edit)
+             · brokerbin:65 · {sighting_reported,sighting_consensus}:65 (broker-listing
+               evidence, same trust class as brokerbin: sighting_reported = first non-empty
+               maker on the card's own sightings at upsert; sighting_consensus = ≥2-agreeing
+               majority vote in tagging_backfill — brokers copy each other's listings, so
+               consensus is correlated, not independent, and stays in the same class)
              · spec_extraction:60 · legacy_backfill:50 (pre-ladder data; also the runtime
                floor for a valued category with NULL provenance) ·
-               {ai_guess,claude_opus_inferred,claude_haiku}:40
+               {ai_guess,claude_opus_inferred,claude_haiku}:40 · prefix_infer:40
+               (MPN-prefix donor walk in backfill_missing_manufacturers — a guess that can
+               propagate another card's junk: fills blanks, never beats real provenance)
              (unknown → 0 with a once-per-source WARNING — an unregistered writer loses
               every conflict; migration 096 carries a CASE snapshot of this map, pinned by
-              a sync test)
+              a sync test. ALL card.manufacturer writers route through set_manufacturer —
+              the single-card GET endpoints no longer lazily infer-and-commit on read, and
+              the ladder treats an existing blank/whitespace value as absent rather than
+              ranking it at the legacy floor)
 
 tier_for(source) -> int                 # SOURCE_TIER.get(source, 0); warns once on unknown
 

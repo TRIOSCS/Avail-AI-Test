@@ -111,8 +111,9 @@ class TestGetMaterial:
         resp = client.get(f"/api/materials/{card.id}")
         assert resp.status_code == 404
 
-    @patch("app.routers.materials._infer_manufacturer_from_prefix", return_value="Texas Instruments")
-    def test_get_material_infers_manufacturer(self, mock_infer, client: TestClient, db_session: Session):
+    def test_get_material_read_only_leaves_missing_manufacturer(self, client: TestClient, db_session: Session):
+        # GET is read-only: a card without a manufacturer stays that way (the old
+        # lazy prefix-inference wrote and committed on read).
         card = MaterialCard(
             normalized_mpn="lm7805",
             display_mpn="LM7805",
@@ -123,7 +124,7 @@ class TestGetMaterial:
         resp = client.get(f"/api/materials/{card.id}")
         assert resp.status_code == 200
         db_session.refresh(card)
-        assert card.manufacturer == "Texas Instruments"
+        assert card.manufacturer is None
 
 
 # ── Get Material by MPN ─────────────────────────────────────────────────

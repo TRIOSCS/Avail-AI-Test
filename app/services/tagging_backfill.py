@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from app.models.intelligence import MaterialCard
 from app.models.sourcing import Sighting
 from app.models.tags import MaterialTag
+from app.services.spec_tiers import set_manufacturer
 from app.services.tagging import (
     classify_material_card,
     get_or_create_brand_tag,
@@ -280,9 +281,13 @@ def backfill_manufacturer_from_sightings(db: Session, batch_size: int = 500) -> 
                 total_skipped += 1
                 continue
 
-            # Update card manufacturer if not set
-            if not card.manufacturer:
-                card.manufacturer = winner
+            # Update card manufacturer if not set. If the ladder REJECTS the winner
+            # (garbage shape / blank after canonicalization) on a maker-less card, skip
+            # the brand tag too — tagging would strand a junk tag on a clean card AND
+            # pop the card out of the untagged pool so it never gets reprocessed.
+            if not card.manufacturer and not set_manufacturer(card, winner, source=source, confidence=confidence):
+                total_skipped += 1
+                continue
 
             # Create brand tag
             brand_tag = get_or_create_brand_tag(winner, db)

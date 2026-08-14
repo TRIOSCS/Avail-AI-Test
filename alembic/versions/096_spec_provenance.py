@@ -74,12 +74,16 @@ _SOURCE_TIER_SQL_CASE = (
     "WHEN 'psref' THEN 80 "
     "WHEN 'oem_official' THEN 80 "
     "WHEN 'web_search' THEN 70 "
+    "WHEN 'form_entry' THEN 70 "
     "WHEN 'brokerbin' THEN 65 "
+    "WHEN 'sighting_consensus' THEN 65 "
+    "WHEN 'sighting_reported' THEN 65 "
     "WHEN 'spec_extraction' THEN 60 "
     "WHEN 'legacy_backfill' THEN 50 "
     "WHEN 'ai_guess' THEN 40 "
     "WHEN 'claude_opus_inferred' THEN 40 "
     "WHEN 'claude_haiku' THEN 40 "
+    "WHEN 'prefix_infer' THEN 40 "
     "ELSE 0 END"
 )
 
