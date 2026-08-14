@@ -147,6 +147,49 @@ pill (`?status=archive`, legacy alias `archived`) is a VIEW over
 remain fully editable (the pre-210 archived read-only freeze is gone); the REQ
 Detail tab renders the Won/Lost close reason as a read-only "Outcome:" line.
 
+### 1c. Clone-to-Active ("I need this part again")
+
+The same selection bar offers **Clone to Active** in BOTH branches (pipeline
+and Archive view — clone is allowed from ANY sourcing status).
+`POST /v2/partials/parts/bulk-clone` (`bulk_clone`, `routers/htmx/parts.py`)
+takes `{requirement_ids, status}` (400 on empty ids; per-line
+`require_requisition_access`) and calls
+`services/requisition_service.clone_parts_to_active`: one fresh **OPEN**
+requisition per SOURCE requisition (named
+`"{customer} — Reorder {YYYY-MM-DD}"`, claimed by the cloning user), each
+selected part copied in as a new OPEN requirement with provenance stamped via
+`Requirement.cloned_from_id` (migration 210) and `PART_CLONED` activity rows
+written on both the source and the new requisition. Active/selected offers on
+each source part are carried over as `status="reference"` offers, a
+"Source {MPN}" task lands with the part's assigned buyer (fallback: the
+cloning user), and the route schedules `run_search_and_publish`
+(`routers/sightings.py`) as a FastAPI background task so a sightings search
+fires on the clones immediately. Source parts are untouched. The response
+re-renders the parts list in the caller's current `status` view with a
+"N part(s) cloned → REQ-XXX" (or "→ M requisitions") toast. Field copying is
+shared with the requisition-level clone
+(`POST /api/requisitions/{id}/clone`, `routers/crm/clone.py`, now a thin
+wrapper over `clone_requisition`) via `_copy_requirement_fields`, which copies
+the full spec (incl. manufacturer/description/material_card_id/oem_hint/
+assigned buyer) but never need_by_date, sale_notes, outcome_reason,
+priority_score, last_searched_at, or sourcing_status.
+
+## 2. Search (User-Initiated Only)
+
+Sourcing is strictly user-initiated. There is no background cron, no
+auto-enqueue on requirement creation, and no row-click POST. Two entry
+points trigger a search:
+
+- Per-row search icon on `/v2/sightings`
+- Detail-panel "Search" button (`m.search_button` macro)
+
+Both POST `/v2/partials/sightings/{requirement_id}/refresh?source=user`.
+
+A 48-hour per-MPN cooldown is enforced via `MaterialCard.last_searched_at`.
+Every MPN whose card was searched within 48h is skipped; prior sightings
+on those MPNs (across all requirements) are surfaced via the
+`material_card_id` linkage on Sighting rows.
+
 ## 2. Search (User-Initiated Only)
 
 Sourcing is strictly user-initiated. There is no background cron, no

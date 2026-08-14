@@ -128,7 +128,7 @@ def test_batch_refresh_schedules_one_background_job_for_all_ids(client, db_sessi
     scheduled = MagicMock()
     real_search = AsyncMock()
     with (
-        patch("app.routers.sightings._run_search_and_publish", new=scheduled),
+        patch("app.routers.sightings.run_search_and_publish", new=scheduled),
         patch("app.search_service.search_requirement", new=real_search),
     ):
         resp = client.post(

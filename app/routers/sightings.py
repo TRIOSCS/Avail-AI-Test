@@ -1089,7 +1089,7 @@ async def sightings_detail(
     return resp
 
 
-async def _run_search_and_publish(
+async def run_search_and_publish(
     requirement_ids: list[int],
     user_id: int,
     source: str = "user",
@@ -1161,7 +1161,7 @@ async def sightings_refresh(
         return await sightings_detail(request, requirement_id, db, user)
 
     # User click: run the slow search off the request thread, acknowledge immediately.
-    background_tasks.add_task(_run_search_and_publish, [requirement_id], user.id)
+    background_tasks.add_task(run_search_and_publish, [requirement_id], user.id)
     resp = template_response(
         "htmx/partials/sightings/searching_panel.html",
         {"request": request, "requirement": requirement},
@@ -1213,7 +1213,7 @@ async def sightings_batch_refresh(
     # Schedule the slow fan-out off the request thread. Skip on the SSE path so an
     # SSE-triggered call can never re-publish and loop.
     if valid_ids and not is_sse:
-        background_tasks.add_task(_run_search_and_publish, valid_ids, user.id, source)
+        background_tasks.add_task(run_search_and_publish, valid_ids, user.id, source)
 
     if is_sse:
         return HTMLResponse("")

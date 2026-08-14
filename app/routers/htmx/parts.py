@@ -3,8 +3,9 @@
 Server-rendered HTML partials for the parts split-panel workspace body: the parts
 list, the detail tabs (offers/sourcing/req-details/quotes/activity/comms/notes), the
 header + inline cell + spec editors, notes save, per-part tasks, and the bulk
-outcome/reopen actions (Won/Lost/Hotlist — the Archive view is a lens over those
-statuses, migration 210). Extracted from htmx_views.py
+outcome/reopen/clone actions (Won/Lost/Hotlist — the Archive view is a lens over
+those statuses, migration 210; Clone-to-Active copies parts into a fresh OPEN
+requisition). Extracted from htmx_views.py
 (same `/v2/partials/parts` paths, same `htmx-views` tag). The workspace SHELL entry
 (`/v2/partials/parts/workspace`) stays in htmx_views.py.
 
@@ -15,7 +16,7 @@ Depends on: app.models, app.dependencies, app.database, app.services, ._shared
 import json
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from loguru import logger
 from sqlalchemy import case, or_, select
@@ -48,10 +49,12 @@ from ...models.vendor_sighting_summary import VendorSightingSummary
 from ...services import task_service
 from ...services.activity_service import log_activity as _log_activity
 from ...services.requirement_status import transition_requirement
+from ...services.requisition_service import clone_parts_to_active
 from ...services.sighting_aggregation import get_vendor_tier_map
 from ...template_env import _part_description, template_response
 from ...utils.csv_export import stream_csv
 from ...utils.search_builder import SearchBuilder
+from ..sightings import run_search_and_publish
 from ._shared import _base_ctx, _parse_task_due_date, _safe_int
 
 router = APIRouter(tags=["htmx-views"])
@@ -1270,5 +1273,58 @@ async def bulk_reopen(
     message = f"{changed} part(s) reopened"
     if skipped:
         message += f", {skipped} skipped"
+    response.headers["HX-Trigger"] = json.dumps({"showToast": {"message": message, "type": "success"}})
+    return response
+
+
+@router.post("/v2/partials/parts/bulk-clone", response_class=HTMLResponse)
+async def bulk_clone(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Clone selected parts into fresh OPEN requisitions ("I need this part again").
+
+    Body: {"requirement_ids": [int], "status": str}. Clone is allowed from ANY
+    sourcing status (won/lost/hotlist/open...); source parts are untouched. One
+    new OPEN requisition is created per source requisition (grouping preserves
+    selection order) via ``clone_parts_to_active``, and a background sightings
+    search fires on the new requirements so buyers get fresh market data
+    immediately. `status` echoes the caller's current list filter so the
+    re-render keeps their view.
+    """
+    body = await request.json()
+    requirement_ids = body.get("requirement_ids", [])
+    if not requirement_ids:
+        raise HTTPException(400, "No parts selected")
+
+    # Load parts preserving request order; missing ids are dropped. Dedup (the UI
+    # can't send duplicates but a direct API call can — each dup cloned a part twice)
+    # and reject non-numeric ids as a 400 rather than an unhandled 500.
+    try:
+        int_ids = list(dict.fromkeys(int(rid) for rid in requirement_ids))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "requirement_ids must be a list of integers") from None
+    parts_by_id = {p.id: p for p in db.scalars(select(Requirement).where(Requirement.id.in_(int_ids)))}
+    parts = [parts_by_id[rid] for rid in int_ids if rid in parts_by_id]
+
+    # Ownership guard (no-op for buyer/manager/admin; 404 for a restricted non-owner).
+    for part in parts:
+        require_requisition_access(db, part.requisition_id, user, label="Requirement")
+
+    new_reqs = clone_parts_to_active(db, parts, user)
+
+    new_requirement_ids = [r.id for req in new_reqs for r in req.requirements]
+    if new_requirement_ids:
+        background_tasks.add_task(run_search_and_publish, new_requirement_ids, user.id)
+
+    logger.info("Bulk clone by {}: {} part(s) → requisition(s) {}", user.email, len(parts), [r.id for r in new_reqs])
+
+    response = await parts_list_partial(request=request, user=user, db=db, status=body.get("status", ""))
+    if len(new_reqs) == 1:
+        message = f"{len(parts)} part(s) cloned → REQ-{new_reqs[0].id:03d}"
+    else:
+        message = f"{len(parts)} part(s) cloned → {len(new_reqs)} requisitions"
     response.headers["HX-Trigger"] = json.dumps({"showToast": {"message": message, "type": "success"}})
     return response
