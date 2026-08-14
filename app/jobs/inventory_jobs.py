@@ -13,7 +13,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from loguru import logger
 
-from ..constants import RequisitionStatus
+from ..constants import RequisitionStatus, SourcingStatus
 from ..scheduler import _traced_job
 from ..services.price_snapshot_service import record_price_snapshot
 
@@ -425,6 +425,7 @@ async def _download_and_import_stock_list(
     # Auto-create actionable sightings for open requirements that match imported stock.
     try:
         from sqlalchemy import func as sa_func
+        from sqlalchemy import or_ as sa_or
 
         from app.models import Requirement, Requisition, Sighting
         from app.utils import safe_float, safe_int
@@ -450,7 +451,16 @@ async def _download_and_import_stock_list(
                 )
                 .join(Requisition, Requirement.requisition_id == Requisition.id)
                 .filter(
-                    Requisition.status.in_([RequisitionStatus.OPEN, RequisitionStatus.OFFERS]),
+                    # Vendor stock now also supplies hotlist demand: HOTLIST
+                    # requisitions (deal-level monitor) and HOTLIST parts —
+                    # the latter on requisitions in ANY status incl. won/lost,
+                    # which is exactly what a standing part monitor means.
+                    sa_or(
+                        Requisition.status.in_(
+                            [RequisitionStatus.OPEN, RequisitionStatus.OFFERS, RequisitionStatus.HOTLIST]
+                        ),
+                        Requirement.sourcing_status == SourcingStatus.HOTLIST,
+                    ),
                     sa_func.upper(Requirement.primary_mpn).in_(imported_mpns_upper),
                 )
                 .all()

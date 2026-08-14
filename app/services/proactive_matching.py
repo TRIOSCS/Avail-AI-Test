@@ -29,11 +29,17 @@ Depends on: models, config, services/proactive_helpers
 from datetime import UTC, datetime, timedelta
 
 from loguru import logger
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from ..config import settings
-from ..constants import OfferStatus, ProactiveMatchSource, ProactiveMatchStatus, RequisitionStatus
+from ..constants import (
+    OfferStatus,
+    ProactiveMatchSource,
+    ProactiveMatchStatus,
+    RequisitionStatus,
+    SourcingStatus,
+)
 from ..models import (
     ActivityLog,
     Company,
@@ -334,31 +340,45 @@ def _aggregate_cph_by_company(cph_rows: list) -> dict[int, dict]:
 def find_matches_for_offer(offer_id: int, db: Session) -> list[ProactiveMatch]:
     """Find customer matches for a single offer.
 
-    Two seeding sources:
+    Three seeding sources:
       1. Requirement history inside the requirement window (any requisition
-         status) via ``_find_requirement_matches`` — the primary backbone.
-      2. Active HOTLIST requisitions via ``_find_hotlist_matches`` — surfaces a
+         status, hotlist parts excluded) via ``_find_requirement_matches`` —
+         the primary backbone.
+      2. HOTLIST *parts* (Requirement.sourcing_status, migration 210) via
+         ``_find_part_hotlist_matches`` — standing per-part monitors with real
+         ask history, no time window, any requisition status.
+      3. Active HOTLIST requisitions via ``_find_hotlist_matches`` — surfaces a
          part the customer never asked for recently but a salesperson
-         explicitly monitors.
+         explicitly monitors at the deal level.
 
-    Dedup stays one active match per (part, company). The requirement pass
-    ``db.add()``s rows that are still uncommitted when the hotlist pass runs, so
-    the hotlist pass's DB query can't see them — we pass the companies in via
-    ``skip_company_ids`` so the same customer never gets two matches in one call.
+    Dedup stays one active match per (part, company). Each pass ``db.add()``s
+    rows that are still uncommitted when the next pass runs, so a fresh DB
+    query can't see them — the accumulated companies ride ``skip_company_ids``
+    so the same customer never gets two matches in one call.
     """
     offer = db.get(Offer, offer_id)
     part = part_key(offer.mpn) if offer else None
     if not offer or not part:
         return []
+    our_cost = float(offer.unit_price) if offer.unit_price else None
     req_matches = _find_requirement_matches(db, part=part, source_offer=offer)
+    skip = {m.company_id for m in req_matches if m.company_id}
+    part_hot_matches = _find_part_hotlist_matches(
+        db,
+        part=part,
+        our_cost=our_cost,
+        source_offer=offer,
+        skip_company_ids=skip,
+    )
+    skip = skip | {m.company_id for m in part_hot_matches if m.company_id}
     hot_matches = _find_hotlist_matches(
         db,
         part=part,
-        our_cost=float(offer.unit_price) if offer.unit_price else None,
+        our_cost=our_cost,
         source_offer=offer,
-        skip_company_ids={m.company_id for m in req_matches if m.company_id},
+        skip_company_ids=skip,
     )
-    return req_matches + hot_matches
+    return req_matches + part_hot_matches + hot_matches
 
 
 def _existing_match_company_ids(db: Session, spellings: set[str]) -> set[int | None]:
@@ -427,6 +447,14 @@ def _find_requirement_matches(
             Requirement.created_at >= _requirement_window_start(),
             Requisition.is_scratch.is_(False),
             Requisition.status != RequisitionStatus.HOTLIST.value,
+            # Part-level hotlist rows belong to _find_part_hotlist_matches
+            # (standing monitor, no window). NULL-safe: sourcing_status is
+            # nullable and `!= 'hotlist'` would silently drop NULL-status rows
+            # (same trap as routers/sightings._active_sourcing_status_clause).
+            or_(
+                Requirement.sourcing_status.is_(None),
+                Requirement.sourcing_status != SourcingStatus.HOTLIST.value,
+            ),
         )
         .order_by(Requirement.created_at.desc())
         .all()
@@ -688,6 +716,202 @@ def _find_hotlist_matches(
             )
         )
     return out
+
+
+def _find_part_hotlist_matches(
+    db: Session,
+    *,
+    part: str,
+    our_cost: float | None,
+    source_offer: Offer | None,
+    skip_company_ids: set[int] | None = None,
+) -> list[ProactiveMatch]:
+    """Seed ProactiveMatch rows from HOTLIST *parts* (Requirement.sourcing_status,
+    migration 210) for this part.
+
+    The part-level sibling of :func:`_find_hotlist_matches`: NO time window (a
+    hotlist part is a standing "customer uses this, watch for stock" monitor)
+    and NO requisition-status filter — a hotlist part on a WON/LOST deal is
+    exactly the case this exists for. Unlike the requisition-level pass, the
+    match carries REAL demand signals (requirement_id, last asked date/qty,
+    count of hotlist rows), so the score is computed from them, floored at the
+    hotlist baseline 60 so an old hotlisted ask never ranks below a signal-less
+    requisition hotlist. Customer resolution mirrors the requirement pass
+    (requisition.company_id, else the site's company; active-site fallback) but
+    rows with no resolvable company are logged and skipped — a hotlist is
+    customer-specific by definition, there is no back-order fallback.
+
+    ``skip_company_ids`` carries companies already matched by the requirement
+    pass in THIS call (their ``db.add()``s are uncommitted and invisible to a
+    fresh query) so one customer never gets two matches per scan.
+    """
+    from .part_equivalence import expand_part, observed_spellings
+
+    fallback_offer_id = source_offer.id if source_offer else None
+    if not fallback_offer_id:
+        return []
+
+    rollup = compute_offer_rollup(db, part=part)
+    if not rollup["offer_count"]:
+        return []
+
+    eq = expand_part(db, part)
+    class_keys = set(eq["keys"])
+    class_spellings = {part} | {s for group in observed_spellings(db, class_keys).values() for s in group}
+
+    rows = (
+        db.query(Requirement, Requisition, CustomerSite)
+        .join(Requisition, Requirement.requisition_id == Requisition.id)
+        .outerjoin(CustomerSite, CustomerSite.id == Requisition.customer_site_id)
+        .filter(
+            Requirement.normalized_mpn.in_(class_keys),
+            Requirement.sourcing_status == SourcingStatus.HOTLIST.value,
+            Requisition.is_scratch.is_(False),
+        )
+        .order_by(Requirement.created_at.desc())
+        .all()
+    )
+    if not rows:
+        return []
+
+    # ── Group hotlist rows per company (newest first) — requirement-pass style. ──
+    groups: dict[int, dict] = {}
+    for req_item, requisition, ask_site in rows:
+        row_company_id = requisition.company_id or (ask_site.company_id if ask_site else None)
+        if not row_company_id:
+            logger.debug(
+                "Part-hotlist row skipped (no resolvable company): requirement {} on requisition {}",
+                req_item.id,
+                requisition.id,
+            )
+            continue
+        grp = groups.setdefault(
+            row_company_id,
+            {
+                "count": 0,
+                "newest_req": req_item,
+                "newest_requisition": requisition,
+                "newest_site": ask_site,
+            },
+        )
+        grp["count"] += 1
+    if not groups:
+        return []
+
+    company_ids = set(groups)
+    companies = {c.id: c for c in db.query(Company).filter(Company.id.in_(company_ids)).all()}
+
+    # First active site per company, preferring the newest ask's own site.
+    sites: dict[int, CustomerSite] = {}
+    for s in (
+        db.query(CustomerSite).filter(CustomerSite.company_id.in_(company_ids), CustomerSite.is_active.is_(True)).all()
+    ):
+        sites.setdefault(s.company_id, s)
+
+    existing = _existing_match_company_ids(db, class_spellings)
+    existing |= skip_company_ids or set()
+    dno = build_batch_dno_set_multi(db, class_spellings, company_ids)
+
+    out: list[ProactiveMatch] = []
+    for company_id, grp in groups.items():
+        company = companies.get(company_id)
+        if company is None or company_id in existing or company_id in dno:
+            continue
+        newest_req = grp["newest_req"]
+        requisition = grp["newest_requisition"]
+        salesperson_id = company.account_owner_id or requisition.created_by
+        if not salesperson_id:
+            continue
+        ask_site = grp["newest_site"]
+        site = ask_site if (ask_site and ask_site.is_active) else sites.get(company_id)
+
+        score = max(
+            60,  # hotlist baseline — an explicit monitor never scores below one
+            compute_match_score(
+                last_asked_at=newest_req.created_at,
+                requirement_count=grp["count"],
+                available_qty=rollup["available_qty"],
+                last_asked_qty=newest_req.target_qty,
+            ),
+        )
+        match = ProactiveMatch(
+            offer_id=fallback_offer_id,
+            requirement_id=newest_req.id,
+            requisition_id=requisition.id,
+            customer_site_id=site.id if site else None,
+            salesperson_id=salesperson_id,
+            mpn=part_key(newest_req.primary_mpn) or part,
+            material_card_id=(source_offer.material_card_id if source_offer else None) or newest_req.material_card_id,
+            company_id=company_id,
+            match_score=score,
+            margin_pct=None,
+            customer_purchase_count=0,
+            our_cost=our_cost,
+            match_source=ProactiveMatchSource.HOTLIST,
+            requirement_count=grp["count"],
+            last_asked_at=newest_req.created_at,
+            last_asked_qty=newest_req.target_qty,
+        )
+        db.add(match)
+        out.append(match)
+        existing.add(company_id)
+        db.add(
+            ActivityLog(
+                user_id=salesperson_id,
+                activity_type="proactive_match",
+                channel="system",
+                requisition_id=requisition.id,
+                company_id=company_id,
+                contact_name=company.name,
+                subject=f"Hotlist match: {part} — {company.name}",
+            )
+        )
+    return out
+
+
+def trigger_rematch_on_part_hotlist(db: Session, requirement: Requirement) -> int:
+    """Immediate retro-match when a part is flagged hotlist.
+
+    The 4h batch scan only sees offers newer than the watermark, so a freshly
+    hotlisted part with EXISTING live supply would wait for the next new offer
+    before matching. This anchors one part-hotlist pass on the newest live
+    in-window offer for the part's equivalence class.
+
+    UNLIKE :func:`trigger_rematch_on_offer_approval` this NEVER commits or
+    rolls back — it is called from inside ``transition_requirement`` whose
+    callers own the transaction (bulk_outcome commits once after its loop).
+    Work happens inside a SAVEPOINT so a matching failure can never poison the
+    caller's status-change transaction.
+    """
+    from .part_equivalence import expand_part
+
+    part = part_key(requirement.primary_mpn)
+    if not part:
+        return 0
+    try:
+        with db.begin_nested():
+            class_keys = set(expand_part(db, part)["keys"])
+            offer = (
+                db.query(Offer)
+                .filter(
+                    Offer.normalized_mpn.in_(class_keys),
+                    Offer.status.in_(_LIVE_STATUSES),
+                    Offer.created_at >= _offer_window_start(),
+                )
+                .order_by(Offer.created_at.desc())
+                .first()
+            )
+            if offer is None:
+                return 0
+            our_cost = float(offer.unit_price) if offer.unit_price else None
+            matches = _find_part_hotlist_matches(db, part=part, our_cost=our_cost, source_offer=offer)
+    except Exception as exc:
+        logger.warning("Part-hotlist retro-match failed for requirement {}: {}", requirement.id, exc)
+        return 0
+    if matches:
+        _bust_picks_cache()
+        logger.info("Part-hotlist retro-match: requirement {} → {} matches", requirement.id, len(matches))
+    return len(matches)
 
 
 _WATERMARK_KEY = "proactive_last_scan"

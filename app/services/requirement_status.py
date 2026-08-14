@@ -65,6 +65,19 @@ def transition_requirement(
     if new_val not in RequirementSourcingStatus.TERMINAL:
         requirement.outcome_reason = None
 
+    # A part flagged hotlist retro-matches against EXISTING live supply
+    # immediately (the 4h scan only sees offers newer than its watermark).
+    # Function-level import mirrors the other trigger_rematch_* call sites;
+    # the hook is savepoint-only and never commits — our caller owns the
+    # transaction. Failures log and never block the status change.
+    if new_val == RequirementSourcingStatus.HOTLIST:
+        try:
+            from .proactive_matching import trigger_rematch_on_part_hotlist
+
+            trigger_rematch_on_part_hotlist(db, requirement)
+        except Exception as e:
+            logger.warning("Part-hotlist retro-match hook failed for requirement {}: {}", requirement.id, e)
+
     try:
         actor_id = actor.id if actor else None
         log_entry = ActivityLog(

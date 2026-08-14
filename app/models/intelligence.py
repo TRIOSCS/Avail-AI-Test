@@ -353,7 +353,10 @@ class ProactiveMatch(Base):
     dismiss_reason = Column(String(255))
 
     # Requirement-demand signals (2026-08-06 rework — seeded from asks, not purchases)
-    match_source = Column(String(20), default=ProactiveMatchSource.REQUIREMENT)  # requirement | hotlist
+    # requirement | hotlist. hotlist covers BOTH monitor levels: requisition
+    # hotlist (requirement_id NULL) and part hotlist (requirement_id set, real
+    # ask signals — migration 210).
+    match_source = Column(String(20), default=ProactiveMatchSource.REQUIREMENT)
     requirement_count = Column(Integer, default=0)  # asks by this customer inside the window
     last_asked_at = Column(UTCDateTime)
     last_asked_qty = Column(Integer)

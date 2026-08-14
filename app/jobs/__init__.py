@@ -16,6 +16,7 @@ def register_all_jobs(scheduler, settings):
     from .eight_by_eight_jobs import register_eight_by_eight_jobs
     from .email_jobs import register_email_jobs
     from .health_jobs import register_health_jobs
+    from .hotlist_jobs import register_hotlist_jobs
     from .inventory_jobs import register_inventory_jobs
     from .knowledge_jobs import register_knowledge_jobs
     from .maintenance_jobs import register_maintenance_jobs
@@ -38,6 +39,7 @@ def register_all_jobs(scheduler, settings):
         register_email_jobs(scheduler, settings, db)
         register_inventory_jobs(scheduler, settings)
         register_offers_jobs(scheduler, settings, db)
+        register_hotlist_jobs(scheduler, settings, db)
         register_prospecting_jobs(scheduler, settings)
         register_sweep_jobs(scheduler, settings)
         register_resell_jobs(scheduler, settings)
