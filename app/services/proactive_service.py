@@ -754,6 +754,23 @@ async def send_draft_offer(db: Session, user: User, token: str, po_id: int, *, a
     if not recipient_emails:
         raise ValueError("No contact on file — open Prepare to pick or add one")
 
+    # Atomic claim (QC 2026-08-14): flip DRAFT→SENT in ONE conditional UPDATE BEFORE the
+    # Graph send. A concurrent send_draft_offer — or the digest-draft "supersede" sweep —
+    # can then no longer touch this offer while it is in flight: only the caller whose
+    # UPDATE matches status=DRAFT wins (rowcount 1); the rest see 0 rows and bail, so the
+    # customer is never double-emailed and no StaleDataError races the delete. No row
+    # lock is held across the await; a Graph rejection reverts the claim to DRAFT.
+    now = datetime.now(UTC)
+    claimed = db.execute(
+        update(ProactiveOffer)
+        .where(ProactiveOffer.id == po_id, ProactiveOffer.status == ProactiveOfferStatus.DRAFT)
+        .values(status=ProactiveOfferStatus.SENT, sent_at=now)
+    ).rowcount
+    db.commit()
+    if not claimed:
+        raise ValueError("This draft was already sent (or is being sent).")
+    db.refresh(po)
+
     # QC 2026-08-10 P0-1: no internal tracking tag in the customer subject.
     tagged_subject = po.subject
     gc = GraphClient(token)
@@ -770,12 +787,13 @@ async def send_draft_offer(db: Session, user: User, token: str, po_id: int, *, a
             },
         )
     except GraphAPIError as exc:
-        # Draft stays DRAFT, matches stay NEW, no throttle — retry is one click.
+        # Revert the claim so the draft can be retried with one click.
+        po.status = ProactiveOfferStatus.DRAFT
+        po.sent_at = None
+        db.commit()
         logger.error("Proactive draft #{} send rejected by Graph: {}", po.id, exc)
         raise ValueError("Send failed — Microsoft rejected the message; the draft is untouched, try again") from exc
-    now = datetime.now(UTC)
-    po.status = ProactiveOfferStatus.SENT
-    po.sent_at = now
+    # po is already SENT (claimed above); continue to flip matches + write throttles.
 
     match_ids = [li.get("match_id") for li in (po.line_items or []) if li.get("match_id")]
     matches = list(db.scalars(select(ProactiveMatch).where(ProactiveMatch.id.in_(match_ids)))) if match_ids else []

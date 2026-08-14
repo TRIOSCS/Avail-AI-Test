@@ -349,6 +349,41 @@ async def test_send_digest_rejects_non_draft(db_session):
         await send_digest(db_session, 9999, manager, "tok")
 
 
+@pytest.mark.anyio
+async def test_send_digest_reverts_to_draft_on_send_failure(db_session):
+    """A Graph rejection after the claim must revert DRAFT — never a phantom SENT.
+
+    The claim flips the digest SENT before the await so the generate_digests sweep can't
+    delete it mid-send; if the send then fails, it must go back to DRAFT
+    (sent_at/sent_by cleared) so the next generate_digests run can retry it, not leave
+    it stuck as sent.
+    """
+    from app.utils.graph_client import GraphAPIError
+
+    owner = _mk_user(db_session, "Sales Rep", "sr@trioscs.com")
+    manager = _mk_user(db_session, "The Manager", "mgr@trioscs.com", role="manager")
+    customer, _ = _mk_customer(db_session, "IBM", owner)
+    _mk_offer(db_session, mpn="02PX530", qty=214, price="275")
+    _mk_match(db_session, mpn="02PX530", owner=owner, company=customer)
+    generate_digests(db_session)
+    db_session.commit()
+    digest = db_session.query(ProactiveDigest).one()
+
+    with patch(
+        "app.utils.graph_client.GraphClient.post_json",
+        new_callable=AsyncMock,
+        side_effect=GraphAPIError(401, "token expired"),
+    ):
+        with pytest.raises(GraphAPIError):
+            await send_digest(db_session, digest.id, manager, "tok")
+
+    db_session.refresh(digest)
+    assert digest.status == ProactiveDigestStatus.DRAFT  # reverted, retryable
+    assert digest.sent_at is None
+    assert digest.sent_by_id is None
+    assert db_session.query(ProactiveOutreachLine).filter(ProactiveOutreachLine.sent_at.isnot(None)).count() == 0
+
+
 # ── Weekly summary ───────────────────────────────────────────────────────
 
 

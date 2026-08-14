@@ -19,6 +19,7 @@ from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from sqlalchemy import update
 
 from app.constants import ProactiveMatchStatus, ProactiveOfferStatus
 from app.models import (
@@ -43,7 +44,7 @@ from app.services.proactive_service import (
     process_matches,
     send_draft_offer,
 )
-from tests.conftest import engine  # noqa: F401
+from tests.conftest import engine, requires_postgres  # noqa: F401
 
 HX = {"HX-Request": "true"}
 
@@ -398,3 +399,37 @@ async def test_failed_oneshot_send_marks_offer_failed_not_sent(db_session):
     assert s["m1"].status == ProactiveMatchStatus.FAILED
     assert db_session.query(ProactiveThrottle).count() == 0  # retry not suppressed
     assert get_scorecard(db_session)["total_sent"] == 0  # never counted as outreach
+
+
+@requires_postgres
+def test_proactive_offer_claim_is_exclusive(pg_session, pg_engine):
+    """The DRAFT→SENT claim send_draft_offer runs before the Graph send can match a row
+    only ONCE — this is the DB-level guarantee that two racing sends never double-email
+    a customer.
+
+    First claimant gets rowcount 1; after it commits, the second sees 0 and bails.
+    """
+    from sqlalchemy.orm import sessionmaker
+
+    po = ProactiveOffer(status=ProactiveOfferStatus.DRAFT, line_items=[])
+    pg_session.add(po)
+    pg_session.commit()
+
+    def _claim(session):
+        return session.execute(
+            update(ProactiveOffer)
+            .where(ProactiveOffer.id == po.id, ProactiveOffer.status == ProactiveOfferStatus.DRAFT)
+            .values(status=ProactiveOfferStatus.SENT)
+        ).rowcount
+
+    second_session = sessionmaker(bind=pg_engine)()
+    try:
+        first = _claim(pg_session)
+        pg_session.commit()
+        second = _claim(second_session)
+        second_session.commit()
+    finally:
+        second_session.close()
+
+    assert first == 1  # this caller won the claim and sends
+    assert second == 0  # the racer finds no DRAFT row and must not send
