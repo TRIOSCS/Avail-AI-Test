@@ -277,6 +277,13 @@ class Settings(BaseSettings):
     # OFF so enabling delivery is a deliberate admin choice (it sends real Teams
     # messages). Admin can override via the proactive_teams_push_enabled flag.
     proactive_teams_push_enabled: bool = False
+    # Weekly automated re-search of hotlist demand through the ICS/NC/TBF
+    # connectors. Default OFF by owner decision (2026-08-14: "build now, enable
+    # later") — flipping this on spends real connector quota. Admin can
+    # override via the hotlist_research_enabled flag.
+    hotlist_research_enabled: bool = False
+    # Cap on distinct hotlist MPNs enqueued per weekly run.
+    hotlist_research_max_parts: int = 200
 
     # --- Sighting scoring (score_sighting_v2 factor weights) ---
     # The five factor weights behind every sighting's buyer-usefulness score.

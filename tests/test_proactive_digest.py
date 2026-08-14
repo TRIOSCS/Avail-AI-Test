@@ -132,6 +132,43 @@ def test_digest_line_format_exact(db_session):
     assert line.requirement_count == 2
 
 
+def test_part_hotlist_line_keeps_hotlist_framing_with_ask_history(db_session):
+    """A part-level hotlist match (migration 210) carries real ask history AND
+    the standing-monitor framing: 'on your hotlist — last asked …'."""
+    owner = _mk_user(db_session, "Sales Rep", "hl@trioscs.com")
+    customer, _ = _mk_customer(db_session, "Vertiv", owner)
+    _mk_offer(db_session, mpn="HL-77", qty=500, price="12")
+    asked = datetime(2026, 7, 1, tzinfo=UTC)
+    m = _mk_match(db_session, mpn="HL-77", owner=owner, company=customer, asked_qty=250, req_count=1)
+    m.match_source = "hotlist"
+    m.last_asked_at = asked
+    db_session.commit()
+
+    generate_digests(db_session)
+    db_session.commit()
+    body = db_session.query(ProactiveDigest).one().body_html
+    assert "on your hotlist — last asked 7/1/2026 for 250 pcs" in body
+
+
+def test_requisition_hotlist_line_unchanged(db_session):
+    """A requisition-level hotlist match (no ask history) keeps the plain 'on your
+    hotlist' line."""
+    owner = _mk_user(db_session, "Sales Rep", "hl2@trioscs.com")
+    customer, _ = _mk_customer(db_session, "Siemens", owner)
+    _mk_offer(db_session, mpn="HL-88", qty=900, price="3")
+    m = _mk_match(db_session, mpn="HL-88", owner=owner, company=customer)
+    m.match_source = "hotlist"
+    m.last_asked_at = None
+    m.last_asked_qty = None
+    m.requirement_count = 0
+    db_session.commit()
+
+    generate_digests(db_session)
+    db_session.commit()
+    body = db_session.query(ProactiveDigest).one().body_html
+    assert "| on your hotlist |" in body
+
+
 def test_single_request_omits_count_suffix(db_session):
     owner = _mk_user(db_session, "Sales Rep", "sr@trioscs.com")
     customer, _ = _mk_customer(db_session, "IBM Corporation", owner)

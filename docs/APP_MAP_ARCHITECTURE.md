@@ -538,6 +538,7 @@ authoritative reference. Static-analysis tests in
 | requirement_refresh | 4 hours | Re-search stale requirements |
 | proactive_matcher | 4 hours | Match live offers to requirement history (24mo, any status) + hotlists |
 | proactive_digest_drafts | Weekly (Mon 07:00) | Generate per-salesperson digest DRAFTS (human reviews + sends) |
+| hotlist_research | Weekly (Sun 02:00) — **FLAG-OFF** (`hotlist_research_enabled=False`) | Re-search hotlist demand (part-level + requisition-level) through ICS/NC/TBF; cap `hotlist_research_max_parts`/run, workers' 7-day dedup bounds connector load. Owner enables later (see master backlog) |
 | vendor_scorer | Daily | Update vendor reliability scores |
 | health_check | 5 min | DB, Redis, API connector health |
 | backup | 6 hours | pg_dump |

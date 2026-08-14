@@ -814,6 +814,105 @@ def test_download_and_import_stock_list_teams_alert(scheduler_db, test_user, tes
     assert sightings[0].qty_available == 100
 
 
+def test_stock_list_matches_hotlist_requisition(scheduler_db, test_user, test_requisition):
+    """A HOTLIST requisition's parts receive stock-list sightings (was excluded pre-
+    migration-210 — the matcher only took OPEN/OFFERS)."""
+    import base64
+
+    from app.models import Sighting
+
+    test_user.access_token = "at_dl"
+    test_requisition.status = "hotlist"
+    scheduler_db.commit()
+
+    mock_gc = _graph_client({"contentBytes": base64.b64encode(b"data").decode()})
+    rows = [{"mpn": "LM317T", "qty": 60}]
+
+    with (
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+        patch("app.utils.file_validation.validate_file", return_value=(True, "text/csv")),
+        patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=rows),
+        patch("app.vendor_utils.normalize_vendor_name", return_value="arrow"),
+        patch("app.services.activity_service.match_email_to_entity", return_value=None),
+    ):
+        _run_download(test_user, scheduler_db)
+
+    req_id = test_requisition.requirements[0].id
+    assert (
+        scheduler_db.query(Sighting)
+        .filter(Sighting.requirement_id == req_id, Sighting.source_type == "email_auto_import")
+        .count()
+        == 1
+    )
+
+
+def test_stock_list_matches_hotlist_part_on_closed_deal(scheduler_db, test_user, test_requisition):
+    """A HOTLIST *part* on a WON requisition still receives stock-list sightings — the
+    standing monitor outlives the deal (migration 210)."""
+    import base64
+
+    from app.models import Sighting
+
+    test_user.access_token = "at_dl"
+    test_requisition.status = "won"
+    part = test_requisition.requirements[0]
+    part.sourcing_status = "hotlist"
+    scheduler_db.commit()
+
+    mock_gc = _graph_client({"contentBytes": base64.b64encode(b"data").decode()})
+    rows = [{"mpn": "LM317T", "qty": 75}]
+
+    with (
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+        patch("app.utils.file_validation.validate_file", return_value=(True, "text/csv")),
+        patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=rows),
+        patch("app.vendor_utils.normalize_vendor_name", return_value="arrow"),
+        patch("app.services.activity_service.match_email_to_entity", return_value=None),
+    ):
+        _run_download(test_user, scheduler_db)
+
+    assert (
+        scheduler_db.query(Sighting)
+        .filter(Sighting.requirement_id == part.id, Sighting.source_type == "email_auto_import")
+        .count()
+        == 1
+    )
+
+
+def test_stock_list_still_skips_plain_closed_deals(scheduler_db, test_user, test_requisition):
+    """A WON requisition whose parts are NOT hotlisted stays excluded."""
+    import base64
+
+    from app.models import Sighting
+
+    test_user.access_token = "at_dl"
+    test_requisition.status = "won"
+    scheduler_db.commit()
+
+    mock_gc = _graph_client({"contentBytes": base64.b64encode(b"data").decode()})
+    rows = [{"mpn": "LM317T", "qty": 75}]
+
+    with (
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+        patch("app.utils.file_validation.validate_file", return_value=(True, "text/csv")),
+        patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=rows),
+        patch("app.vendor_utils.normalize_vendor_name", return_value="arrow"),
+        patch("app.services.activity_service.match_email_to_entity", return_value=None),
+    ):
+        _run_download(test_user, scheduler_db)
+
+    req_id = test_requisition.requirements[0].id
+    assert (
+        scheduler_db.query(Sighting)
+        .filter(Sighting.requirement_id == req_id, Sighting.source_type == "email_auto_import")
+        .count()
+        == 0
+    )
+
+
 def test_download_and_import_stock_list_final_commit_fails(scheduler_db, test_user):
     """Final db.commit() failure in _download_and_import is handled."""
     import base64

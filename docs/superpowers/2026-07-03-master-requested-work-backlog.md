@@ -169,6 +169,13 @@ Deploy + verify each shippable increment to staging. User can reorder any time.
 |------|--------|
 | **API-search core sprint** (full program, Phases 0-4) — the product's central function; user mandate: highly functional, optimized, stable | ✅ **Phases 0-4 SHIPPED** (verified item-by-item against main 2026-07-15; landed via commits 2026-07-03/04 + the PR #714 hardening merge — e.g. OAuth token-cache hoist `sources.py:135-177`, Redis re-probe `app/cache/redis_probe.py`, interactive ApiSource telemetry `search_service.py:2922-2949`, Nexar REST→GraphQL fall-through `sources.py:557-598`, `@cached_endpoint` async guard `decorators.py:81-93`). **Last loose end CLOSED 2026-07-15:** Phase-4 "validate/disable Sourcengine parser" — live probes (PR #730) found the entire official `api.sourcengine.com` host dead (Cloudflare 530/1016 on every path incl. the documented `searchpart` endpoint); connector already `disabled`/`is_active=false` on the live DB with zero successes ever, so it stays disabled; revive path documented in the connector. **Sprint complete.** Audit: docs/superpowers/specs/2026-07-03-api-search-core-audit.md. |
 
+## 🔔 QUEUED — hotlist follow-ups (2026-08-14, owner: "make sure this is not forgotten")
+
+| Item | Status |
+|------|--------|
+| **Enable hotlist auto re-search** (`hotlist_research_enabled`) | Job BUILT + shipped flag-OFF with the part-level hotlist feature (weekly Sun 02:00, ICS/NC/TBF, cap `hotlist_research_max_parts`, 7-day worker dedup). Owner decision: passive watching now, flip the flag "later down the road" — enabling costs real connector quota, needs the owner's word. |
+| **Wire LOOKING_AGAIN outreach outcome → Clone-to-Active** | The proactive outreach tracking records "Looking again" but creates nothing. Natural hook: one-tap clone from that outcome row via `clone_parts_to_active` (service shipped with Clone-to-Active). Not built — future planning item. |
+
 ## ⭐ QUEUED — user-requested module review/rework programs (after the API-core sprint)
 
 Each = deep review → prioritized findings → optimization + rework. Treat like the
