@@ -137,3 +137,34 @@ class TestPushJobRegistration:
 
     def test_absent_when_flag_off(self):
         assert "proactive_teams_push" not in self._register(push_enabled=False)
+
+
+async def test_watermark_advances_contiguously_no_skip(db_session: Session, monkeypatch):
+    """With more NEW matches than the scan cap, the watermark advances by ID (a
+    contiguous window), so lower-scored lower-id matches are NOT skipped forever — a
+    second run picks up the remainder with no overlap.
+
+    (Regression: the old score-ordered window jumped the watermark to the top-by-score
+    max id.)
+    """
+    import app.services.proactive_teams_push as tp
+
+    monkeypatch.setattr(tp, "_SCAN_CAP", 3)
+    ctx = _scaffold(db_session)
+    # Scores ASCEND with id, so top-by-score = the HIGHEST ids. The buggy window would
+    # push ids {3,4,5} and jump the watermark to id5, orphaning ids {1,2}.
+    ms = [_add_match(db_session, ctx, f"MPN{i}", score=10 * i) for i in range(1, 6)]
+
+    with patch(_PUSH_PATH, new=AsyncMock()) as mock_post:
+        first = await tp.push_new_matches_to_teams(db_session)
+    assert first == {"pushed": 3}
+    row = db_session.query(SystemConfig).filter(SystemConfig.key == _WATERMARK_KEY).first()
+    assert int(row.value) == ms[2].id  # contiguous: 3rd id, NOT ms[4].id (top score)
+    # Card is still score-sorted for display (highest score of the window first).
+    facts = mock_post.call_args.args[0]["body"][1]["facts"]
+    assert "MPN3" in facts[0]["title"]
+
+    with patch(_PUSH_PATH, new=AsyncMock()) as mock_post2:
+        second = await tp.push_new_matches_to_teams(db_session)
+    assert second == {"pushed": 2}  # ids 4,5 — the remainder, none re-pushed
+    assert int(db_session.query(SystemConfig).filter(SystemConfig.key == _WATERMARK_KEY).first().value) == ms[4].id

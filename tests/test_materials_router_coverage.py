@@ -2464,7 +2464,7 @@ class TestImportStockDirectIntegrityErrors:
                     from unittest.mock import MagicMock as _MM
 
                     mock_q = _MM()
-                    mock_q.filter_by.return_value.first.return_value = None
+                    mock_q.filter.return_value.first.return_value = None
                     return mock_q
             return q
 
@@ -2522,7 +2522,7 @@ class TestImportStockDirectIntegrityErrors:
                 from unittest.mock import MagicMock as _MM
 
                 mock_q = _MM()
-                mock_q.filter_by.return_value.first.return_value = None
+                mock_q.filter.return_value.first.return_value = None
                 return mock_q
             return q
 

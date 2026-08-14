@@ -995,3 +995,22 @@ def test_cap_field_helper():
     assert _cap_field("description", "short") == "short"
     assert _cap_field("category", "z" * 2000) == "z" * 2000  # unbounded field untouched
     assert _cap_field("description", None) is None
+
+
+def test_apply_authoritative_merges_provenance_not_replaces(db_session):
+    """QC 2026-08-13: applying enrichment MERGES per-field provenance into the card's
+    existing provenance — a prior manual entry for a field NOT touched this run is
+    preserved, not wiped by the wholesale reassignment."""
+    card = _card(db_session, "PROVMERGE001")
+    # A human previously set package_type by hand (a non-core field the run below
+    # doesn't touch); its provenance must survive.
+    card.enrichment_provenance = {"package_type": {"source": "manual", "confidence": 1.0}}
+
+    apply_authoritative(
+        card, {"description": "New authoritative desc"}, {"description": _prov_entry("digikey")}, ["digikey"]
+    )
+
+    prov = card.enrichment_provenance
+    assert prov["package_type"]["source"] == "manual"  # PRESERVED (was wiped before the fix)
+    assert prov["description"]["source"] == "digikey"  # this run's entry added
+    assert card.description == "New authoritative desc"

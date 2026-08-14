@@ -172,23 +172,26 @@ class TestEncryptedTypeFailOpen:
 # ── Fix 2: OData Filter Injection ──────────────────────────────────
 
 
-class TestODataFilterInjection:
-    """search_sent_messages must escape single quotes in query."""
+class TestODataSearchInjection:
+    """search_sent_messages now uses $search (QC 2026-08-13, the old contains()+$orderby
+    $filter was Graph-invalid): a double-quote in the query is stripped so it can't
+    break out of the quoted KQL search string.
+
+    Single quotes are harmless inside $search.
+    """
 
     @pytest.mark.asyncio
-    async def test_single_quotes_escaped_in_odata_filter(self):
+    async def test_double_quote_stripped_from_search(self):
         from unittest.mock import AsyncMock
 
         from app.utils.graph_client import GraphClient
 
         gc = GraphClient("fake-token")
-        mock_response = {"value": []}
-        with patch.object(gc, "get_json", new_callable=AsyncMock, return_value=mock_response) as mock_get:
-            await gc.search_sent_messages("test'injection")
-            call_args = mock_get.call_args
-            params = call_args.kwargs.get("params") or call_args[1]["params"]
-            assert "test''injection" in params["$filter"]
-            assert "test'injection" not in params["$filter"]
+        with patch.object(gc, "get_json", new_callable=AsyncMock, return_value={"value": []}) as mock_get:
+            await gc.search_sent_messages('test"injection')
+            params = mock_get.call_args.kwargs.get("params") or mock_get.call_args[1]["params"]
+            assert params["$search"] == '"test injection"'  # stray double-quote neutralized
+            assert "$filter" not in params
 
     @pytest.mark.asyncio
     async def test_query_without_quotes_unchanged(self):
@@ -197,12 +200,10 @@ class TestODataFilterInjection:
         from app.utils.graph_client import GraphClient
 
         gc = GraphClient("fake-token")
-        mock_response = {"value": []}
-        with patch.object(gc, "get_json", new_callable=AsyncMock, return_value=mock_response) as mock_get:
+        with patch.object(gc, "get_json", new_callable=AsyncMock, return_value={"value": []}) as mock_get:
             await gc.search_sent_messages("PO12345")
-            call_args = mock_get.call_args
-            params = call_args.kwargs.get("params") or call_args[1]["params"]
-            assert "PO12345" in params["$filter"]
+            params = mock_get.call_args.kwargs.get("params") or mock_get.call_args[1]["params"]
+            assert params["$search"] == '"PO12345"'
 
 
 # ── Fix 4: Screenshot Path Traversal ──────────────────────────────

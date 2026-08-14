@@ -24,6 +24,7 @@ import contextlib
 import uuid
 from datetime import UTC, datetime
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -561,3 +562,18 @@ def test_buyplan_badge_excludes_plans_with_open_engine_request(db_session: Sessi
     assert bp_source.count_for_user(db_session, approver) == 1
     # The approvals badge is unchanged by the pre-C1 plan (it has no engine request).
     assert appr_source.count_for_user(db_session, approver) == 1
+
+
+def test_double_submit_rejected_opens_no_second_request(db_session: Session) -> None:
+    """A second submit of an already-PENDING plan raises (the id-only FOR UPDATE +
+    status re-check serialize a double-submit) and opens NO second REQUESTED row."""
+    approver = _make_approver(db_session)
+    plan = _make_draft_plan(db_session, approver)
+
+    submit_buy_plan(plan.id, "SO-DUP", approver, db_session)
+    assert plan.status == BuyPlanStatus.PENDING.value
+
+    with pytest.raises(ValueError, match="draft"):
+        submit_buy_plan(plan.id, "SO-DUP2", approver, db_session)
+
+    assert len(_open_requests(db_session, plan.id)) == 1  # no orphan second request
