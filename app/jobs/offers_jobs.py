@@ -114,55 +114,59 @@ async def _job_proactive_matching():
     """Scan new offers for proactive matching (requirement history + hotlists)."""
     from ..database import SessionLocal
 
-    db = SessionLocal()
-    try:
+    def _run_all_matching() -> tuple[dict, int, int]:
+        """All DB work in ONE worker thread with ONE Session it fully owns (QC
+        2026-08-14).
+
+        Previously the job created the Session and handed it to run_in_executor, then
+        rolled back / closed it in the timeout & except branches — while the executor
+        thread was STILL mid-query on it (a ``wait_for`` timeout cancels the await but
+        cannot stop the running thread). Owning the Session inside the thread removes
+        that cross-thread corruption; the outer timeout simply abandons the future and
+        the thread cleans up its own Session in ``finally``.
+        """
         from ..models import ProactiveMatch
+        from ..services.part_equivalence import classify_new_pairs, windowed_spellings_by_key
         from ..services.proactive_matching import expire_old_matches, run_proactive_scan
 
-        loop = asyncio.get_running_loop()
-
-        # Classify any new part-equivalence candidate pairs FIRST so this
-        # scan already pools freshly-judged variants (verdicts are cached
-        # forever; a pass with nothing new is a no-op).
+        db = SessionLocal()
         try:
-            from ..services.part_equivalence import classify_new_pairs, windowed_spellings_by_key
+            # Classify new part-equivalence candidate pairs FIRST so the scan pools
+            # freshly-judged variants (verdicts cached forever; empty pass = no-op).
+            try:
+                spellings = windowed_spellings_by_key(db)
+                asyncio.run(asyncio.wait_for(classify_new_pairs(db, spellings), timeout=120))
+            except Exception as eq_exc:  # classifier down ≠ matching broken (same thread → safe rollback)
+                logger.warning("Part-equivalence classification pass failed: {}", eq_exc)
+                db.rollback()
 
-            spellings = await loop.run_in_executor(None, windowed_spellings_by_key, db)
-            await asyncio.wait_for(classify_new_pairs(db, spellings), timeout=120)
-        except Exception as eq_exc:  # classifier down ≠ matching broken
-            logger.warning("Part-equivalence classification pass failed: {}", eq_exc)
-            db.rollback()
+            scan_result = run_proactive_scan(db)
+            expired = expire_old_matches(db)
+            total_pending = db.query(ProactiveMatch).filter(ProactiveMatch.status == ProactiveMatchStatus.NEW).count()
+            return scan_result, expired, total_pending
+        finally:
+            db.close()
 
-        # Requirement-history + hotlist scan over new live offers
-        scan_result = await asyncio.wait_for(
-            loop.run_in_executor(None, run_proactive_scan, db),
-            timeout=300,
+    loop = asyncio.get_running_loop()
+    try:
+        scan_result, expired, total_pending = await asyncio.wait_for(
+            loop.run_in_executor(None, _run_all_matching), timeout=300
         )
-        if scan_result.get("matches_created"):
-            logger.info(
-                f"Proactive matching: {scan_result['matches_created']} new matches "
-                f"from {scan_result['scanned_offers']} offers"
-            )
-
-        # Expire stale matches
-        expired = await loop.run_in_executor(None, expire_old_matches, db)
-        if expired:
-            logger.info(f"Proactive matching: expired {expired} old matches")
-
-        # Summary log with total pending
-        new_matches = scan_result.get("matches_created", 0)
-        total_pending = db.query(ProactiveMatch).filter(ProactiveMatch.status == ProactiveMatchStatus.NEW).count()
-        logger.info(f"Proactive scan complete: {new_matches} new matches, {total_pending} pending")
     except TimeoutError:
+        # The worker thread owns + closes its own Session — nothing to roll back/close here.
         logger.error("Proactive matching timed out after 300s")
-        db.rollback()
         raise
-    except Exception as e:
-        logger.exception(f"Proactive matching error: {e}")
-        db.rollback()
-        raise
-    finally:
-        db.close()
+
+    if scan_result.get("matches_created"):
+        logger.info(
+            f"Proactive matching: {scan_result['matches_created']} new matches "
+            f"from {scan_result['scanned_offers']} offers"
+        )
+    if expired:
+        logger.info(f"Proactive matching: expired {expired} old matches")
+    logger.info(
+        f"Proactive scan complete: {scan_result.get('matches_created', 0)} new matches, {total_pending} pending"
+    )
 
 
 @_traced_job
