@@ -477,8 +477,11 @@ class ProactiveMatchSource(StrEnum):
     """How a ProactiveMatch was seeded (2026-08-06 rework).
 
     REQUIREMENT — the customer asked for this part inside the requirement window (any
-    requisition status; a won/lost ask is still demand history). HOTLIST — a salesperson
-    explicitly monitors this part for the customer.
+    requisition status; a won/lost ask is still demand history). HOTLIST — an explicit
+    standing monitor, at either level: a HOTLIST requisition (match has requirement_id
+    NULL, no ask history) or a HOTLIST part (migration 210 — match carries
+    requirement_id + real last-asked signals). Both share this value; disambiguate by
+    requirement_id when it matters.
     """
 
     REQUIREMENT = "requirement"

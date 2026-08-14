@@ -32,6 +32,12 @@
   {# MPN + ask context #}
   <td>
     <p class="text-sm font-medium text-gray-900 font-mono">{{ match.mpn | default('--') }}</p>
+    {# The hotlist tag renders independently of ask history — a part-level
+       hotlist match (migration 210) carries BOTH the standing-monitor badge
+       and its real last-asked context. #}
+    {% if match.match_source == 'hotlist' %}
+    <span class="badge-mini bg-orange-50 text-orange-700 border border-orange-200 mt-0.5">hotlist</span>
+    {% endif %}
     {% if match.last_asked_at %}
     <p class="text-secondary mt-0.5">
       last asked {{ match.last_asked_at.month }}/{{ match.last_asked_at.day }}/{{ match.last_asked_at.year }}
@@ -41,8 +47,6 @@
             title="{{ match.requirement_count }} requirement records inside the window">{{ match.requirement_count }} requests</span>
       {% endif %}
     </p>
-    {% elif match.match_source == 'hotlist' %}
-    <p class="text-secondary mt-0.5">hotlist</p>
     {% endif %}
     {% if match.has_ai_variants %}
     <span class="badge-mini bg-amber-100 text-amber-800 border border-amber-300 mt-0.5"

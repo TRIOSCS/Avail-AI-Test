@@ -132,6 +132,43 @@ def test_digest_line_format_exact(db_session):
     assert line.requirement_count == 2
 
 
+def test_part_hotlist_line_keeps_hotlist_framing_with_ask_history(db_session):
+    """A part-level hotlist match (migration 210) carries real ask history AND
+    the standing-monitor framing: 'on your hotlist — last asked …'."""
+    owner = _mk_user(db_session, "Sales Rep", "hl@trioscs.com")
+    customer, _ = _mk_customer(db_session, "Vertiv", owner)
+    _mk_offer(db_session, mpn="HL-77", qty=500, price="12")
+    asked = datetime(2026, 7, 1, tzinfo=UTC)
+    m = _mk_match(db_session, mpn="HL-77", owner=owner, company=customer, asked_qty=250, req_count=1)
+    m.match_source = "hotlist"
+    m.last_asked_at = asked
+    db_session.commit()
+
+    generate_digests(db_session)
+    db_session.commit()
+    body = db_session.query(ProactiveDigest).one().body_html
+    assert "on your hotlist — last asked 7/1/2026 for 250 pcs" in body
+
+
+def test_requisition_hotlist_line_unchanged(db_session):
+    """A requisition-level hotlist match (no ask history) keeps the plain 'on your
+    hotlist' line."""
+    owner = _mk_user(db_session, "Sales Rep", "hl2@trioscs.com")
+    customer, _ = _mk_customer(db_session, "Siemens", owner)
+    _mk_offer(db_session, mpn="HL-88", qty=900, price="3")
+    m = _mk_match(db_session, mpn="HL-88", owner=owner, company=customer)
+    m.match_source = "hotlist"
+    m.last_asked_at = None
+    m.last_asked_qty = None
+    m.requirement_count = 0
+    db_session.commit()
+
+    generate_digests(db_session)
+    db_session.commit()
+    body = db_session.query(ProactiveDigest).one().body_html
+    assert "| on your hotlist |" in body
+
+
 def test_single_request_omits_count_suffix(db_session):
     owner = _mk_user(db_session, "Sales Rep", "sr@trioscs.com")
     customer, _ = _mk_customer(db_session, "IBM Corporation", owner)
@@ -310,6 +347,41 @@ async def test_send_digest_rejects_non_draft(db_session):
     manager = _mk_user(db_session, "The Manager", "mgr@trioscs.com", role="manager")
     with pytest.raises(ValueError):
         await send_digest(db_session, 9999, manager, "tok")
+
+
+@pytest.mark.anyio
+async def test_send_digest_reverts_to_draft_on_send_failure(db_session):
+    """A Graph rejection after the claim must revert DRAFT — never a phantom SENT.
+
+    The claim flips the digest SENT before the await so the generate_digests sweep can't
+    delete it mid-send; if the send then fails, it must go back to DRAFT
+    (sent_at/sent_by cleared) so the next generate_digests run can retry it, not leave
+    it stuck as sent.
+    """
+    from app.utils.graph_client import GraphAPIError
+
+    owner = _mk_user(db_session, "Sales Rep", "sr@trioscs.com")
+    manager = _mk_user(db_session, "The Manager", "mgr@trioscs.com", role="manager")
+    customer, _ = _mk_customer(db_session, "IBM", owner)
+    _mk_offer(db_session, mpn="02PX530", qty=214, price="275")
+    _mk_match(db_session, mpn="02PX530", owner=owner, company=customer)
+    generate_digests(db_session)
+    db_session.commit()
+    digest = db_session.query(ProactiveDigest).one()
+
+    with patch(
+        "app.utils.graph_client.GraphClient.post_json",
+        new_callable=AsyncMock,
+        side_effect=GraphAPIError(401, "token expired"),
+    ):
+        with pytest.raises(GraphAPIError):
+            await send_digest(db_session, digest.id, manager, "tok")
+
+    db_session.refresh(digest)
+    assert digest.status == ProactiveDigestStatus.DRAFT  # reverted, retryable
+    assert digest.sent_at is None
+    assert digest.sent_by_id is None
+    assert db_session.query(ProactiveOutreachLine).filter(ProactiveOutreachLine.sent_at.isnot(None)).count() == 0
 
 
 # ── Weekly summary ───────────────────────────────────────────────────────

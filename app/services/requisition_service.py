@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 
 from fastapi import HTTPException
 from loguru import logger
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -304,9 +304,9 @@ def clone_parts_to_active(db: Session, parts: list[Requirement], user: User) -> 
             cloned.append((new_req, new_r, part))
 
             # Carry the SOURCE PART's live offers over as reference intel.
-            part_offers = (
-                db.query(Offer).filter(Offer.requirement_id == part.id, Offer.status.in_(("active", "selected"))).all()
-            )
+            part_offers = db.scalars(
+                select(Offer).where(Offer.requirement_id == part.id, Offer.status.in_(("active", "selected")))
+            ).all()
             for o in part_offers:
                 new_o = _copy_reference_offer(
                     o,

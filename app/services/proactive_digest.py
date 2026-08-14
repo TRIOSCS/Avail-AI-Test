@@ -118,13 +118,23 @@ def find_duplicate_material_groups(db: Session) -> list[list[str]]:
 
 
 def _render_line(line: dict) -> list[str]:
-    """One digest bullet + its indented anchor sub-lines (text form)."""
+    """One digest bullet + its indented anchor sub-lines (text form).
+
+    Hotlist matches keep the hotlist framing even when they carry real ask history
+    (part-level hotlist, migration 210) — the salesperson should read "standing
+    monitor", not "recent ask".
+    """
+    is_hotlist = line.get("match_source") == "hotlist"
     ask = ""
     if line["last_asked_at"]:
         ask = f"last asked {fmt_date(line['last_asked_at'])} for {fmt_qty(line['last_asked_qty'])} pcs"
         if (line["requirement_count"] or 0) > 1:
             ask += f" ({line['requirement_count']} requests on file)"
+        if is_hotlist:
+            ask = f"on your hotlist — {ask}"
     else:
+        # No ask history = requisition-level hotlist (the only source that
+        # seeds without a requirement).
         ask = "on your hotlist"
     avail = f"available {fmt_qty(line['available_qty'])} pcs"
     if line["low_cost"] is not None:
@@ -228,6 +238,7 @@ def generate_digests(db: Session) -> dict:
             "match_id": m.id,
             "mpn": m.mpn,
             "company_id": m.company_id,
+            "match_source": m.match_source or "requirement",
             "last_asked_at": m.last_asked_at,
             "last_asked_qty": m.last_asked_qty,
             "requirement_count": m.requirement_count or 0,
@@ -317,22 +328,42 @@ async def send_digest(db: Session, digest_id: int, actor: User, token: str) -> N
     if not salesperson or not salesperson.email:
         raise ValueError("Digest has no recipient")
 
-    gc = GraphClient(token)
-    await gc.post_json(
-        "/me/sendMail",
-        {
-            "message": {
-                "subject": digest.subject,
-                "body": {"contentType": "HTML", "content": digest.body_html},
-                "toRecipients": [{"emailAddress": {"address": salesperson.email}}],
-            },
-            "saveToSentItems": "true",
-        },
-    )
+    # Atomic claim (QC 2026-08-14): flip DRAFT→SENT in one conditional UPDATE and commit
+    # BEFORE the Graph send, so the generate_digests "clear ALL drafts" sweep (a separate
+    # job session) can no longer delete this digest mid-send, and a concurrent send_digest
+    # can't double-mail it. Only the caller whose UPDATE matches status=DRAFT wins; a send
+    # failure reverts the claim to DRAFT so it can be retried.
     now = datetime.now(UTC)
-    digest.status = ProactiveDigestStatus.SENT
-    digest.sent_at = now
-    digest.sent_by_id = actor.id
+    claimed = db.execute(
+        update(ProactiveDigest)
+        .where(ProactiveDigest.id == digest_id, ProactiveDigest.status == ProactiveDigestStatus.DRAFT)
+        .values(status=ProactiveDigestStatus.SENT, sent_at=now, sent_by_id=actor.id)
+    ).rowcount
+    db.commit()
+    if not claimed:
+        raise ValueError("Digest not found or not a draft")
+    db.refresh(digest)
+
+    gc = GraphClient(token)
+    try:
+        await gc.post_json(
+            "/me/sendMail",
+            {
+                "message": {
+                    "subject": digest.subject,
+                    "body": {"contentType": "HTML", "content": digest.body_html},
+                    "toRecipients": [{"emailAddress": {"address": salesperson.email}}],
+                },
+                "saveToSentItems": "true",
+            },
+        )
+    except Exception:
+        # Revert the claim so the digest can be retried with one click.
+        digest.status = ProactiveDigestStatus.DRAFT
+        digest.sent_at = None
+        digest.sent_by_id = None
+        db.commit()
+        raise
     db.execute(update(ProactiveOutreachLine).where(ProactiveOutreachLine.digest_id == digest.id).values(sent_at=now))
     logger.info("Proactive digest {} sent to {} by {}", digest.id, salesperson.email, actor.email)
 

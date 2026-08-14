@@ -1301,7 +1301,7 @@ async def bulk_clone(
 
     # Load parts preserving request order; missing ids are dropped.
     int_ids = [int(rid) for rid in requirement_ids]
-    parts_by_id = {p.id: p for p in db.query(Requirement).filter(Requirement.id.in_(int_ids)).all()}
+    parts_by_id = {p.id: p for p in db.scalars(select(Requirement).where(Requirement.id.in_(int_ids)))}
     parts = [parts_by_id[rid] for rid in int_ids if rid in parts_by_id]
 
     # Ownership guard (no-op for buyer/manager/admin; 404 for a restricted non-owner).

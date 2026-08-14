@@ -25,6 +25,24 @@ def _as_utc(dt: datetime) -> datetime:
     return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
+def run_auto_attribution_threadsafe() -> dict:
+    """Run auto-attribution in a thread that owns its own Session (QC 2026-08-14).
+
+    Called via ``loop.run_in_executor`` from the async maintenance job so that (a) the
+    AI matching pass actually FIRES — ``run_auto_attribution`` skips it when it detects a
+    running event loop, which the async job always has, so the pass was dead in prod; and
+    (b) the Session is created, used, and closed entirely inside THIS worker thread,
+    never shared across the loop boundary (a SQLAlchemy Session is not thread-safe).
+    """
+    from ..database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        return run_auto_attribution(db)
+    finally:
+        db.close()
+
+
 def run_auto_attribution(db: Session) -> dict:
     """Process unmatched activities with rule-based and AI matching.
 

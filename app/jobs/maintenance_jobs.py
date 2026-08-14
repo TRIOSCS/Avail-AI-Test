@@ -66,12 +66,15 @@ async def _job_cache_cleanup():
 @_traced_job
 async def _job_auto_attribute_activities():
     """Auto-attribute unmatched activities using rule-based + AI matching."""
-    from ..database import SessionLocal
-    from ..services.auto_attribution_service import run_auto_attribution
+    from ..services.auto_attribution_service import run_auto_attribution_threadsafe
 
-    db = SessionLocal()
+    # Run in a worker thread (QC 2026-08-14): run_auto_attribution's AI pass skips when
+    # a running event loop is present (this job always has one), so it was dead in prod;
+    # the executor thread has no loop, so the AI pass fires. The wrapper owns its own
+    # Session inside that thread (never shared across the loop boundary).
+    loop = asyncio.get_running_loop()
     try:
-        stats = run_auto_attribution(db)
+        stats = await loop.run_in_executor(None, run_auto_attribution_threadsafe)
         total = stats["rule_matched"] + stats["ai_matched"]
         if total:
             logger.info(
@@ -81,11 +84,10 @@ async def _job_auto_attribute_activities():
                 stats["auto_dismissed"],
             )
     except Exception:
+        # The worker-thread Session is created + closed inside run_auto_attribution_threadsafe;
+        # nothing to roll back or close here.
         logger.exception("Auto-attribution job failed")
-        db.rollback()
         raise
-    finally:
-        db.close()
 
 
 @_traced_job
