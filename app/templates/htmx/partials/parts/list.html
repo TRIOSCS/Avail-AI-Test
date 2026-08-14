@@ -90,6 +90,11 @@
             class="px-2 py-0.5 text-[11px] font-semibold bg-accent-500 text-white rounded hover:bg-accent-600">
       Reopen
     </button>
+    <button type="button" @click="bulkClone()"
+            class="px-2 py-0.5 text-[11px] font-semibold bg-accent-500 text-white rounded hover:bg-accent-600"
+            title="Customer needs this part again — copy it into a fresh open requisition for buyers to work">
+      Clone to Active
+    </button>
     {% endif %}
     {# Mark Won / Mark Lost — each opens a shared required-reason popover; ONE reason
        applies to all selected lines. Mirrors the requisitions/req_row.html outcome
@@ -109,6 +114,11 @@
               class="px-2 py-0.5 text-[11px] font-semibold bg-orange-500 text-white rounded hover:bg-orange-600"
               title="Monitor this part — keep collecting sightings and offer proactively when stock appears">
         Hotlist
+      </button>
+      <button type="button" @click="bulkClone()"
+              class="px-2 py-0.5 text-[11px] font-semibold bg-accent-500 text-white rounded hover:bg-accent-600"
+              title="Customer needs this part again — copy it into a fresh open requisition for buyers to work">
+        Clone to Active
       </button>
       {% endif %}
       <div x-show="outcomePrompt" x-cloak x-transition
@@ -191,7 +201,7 @@
           {% set stats = offer_stats.get(req.id, {}) %}
           <tr data-part-id="{{ req.id }}"{{ alert_row_attrs(alert_markers, 'req-' ~ req.id) }}
               :class="selectedPartId === {{ req.id }} ? 'row-selected' : ''"
-              @click="selectPart({{ req.id }}); htmx.ajax('GET', '/v2/partials/parts/{{ req.id }}/tab/' + activeTab, {target: '#part-detail'})">
+              @click="selectPart({{ req.id }}); htmx.ajax('GET', '/v2/partials/parts/{{ req.id }}/tab/' + activeTab, {target: '#part-detail', indicator: '#part-detail'})">
             <td class="w-6" @click.stop>
               {# Checkbox accent color (finding 2) #}
               <input aria-label="Select part {{ req.primary_mpn }}" type="checkbox" class="h-3 w-3 rounded border-line-base text-accent-500"
@@ -389,6 +399,10 @@
       bulkReopen: function() {
         if (!confirm('Reopen ' + this.selectedIds.length + ' part(s) back to Open?')) return;
         this._postJson('/v2/partials/parts/bulk-reopen', {requirement_ids: this.selectedIds.slice(), status: this.pStatus});
+      },
+      bulkClone: function() {
+        if (!confirm('Clone ' + this.selectedIds.length + ' part(s) into a new active requisition?')) return;
+        this._postJson('/v2/partials/parts/bulk-clone', {requirement_ids: this.selectedIds.slice(), status: this.pStatus});
       }
     };
   }

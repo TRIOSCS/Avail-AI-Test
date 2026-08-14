@@ -263,7 +263,7 @@ class TestSightingsDetailDoesNotSearch:
         scheduled = MagicMock()
         real_search = AsyncMock(return_value={"sightings": [], "source_stats": [], "mpn_results": {}})
         with (
-            patch("app.routers.sightings._run_search_and_publish", new=scheduled),
+            patch("app.routers.sightings.run_search_and_publish", new=scheduled),
             patch("app.search_service.search_requirement", new=real_search),
         ):
             resp = client.post(

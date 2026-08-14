@@ -66,7 +66,6 @@ def test_htmx_ajax_calls_have_indicator():
         ("app/templates/htmx/partials/parts/cell_edit.html", 37),
         ("app/templates/htmx/partials/parts/workspace.html", 114),
         ("app/templates/htmx/partials/parts/workspace.html", 120),
-        ("app/templates/htmx/partials/parts/list.html", 194),
     }
 
     failures: list[str] = []
