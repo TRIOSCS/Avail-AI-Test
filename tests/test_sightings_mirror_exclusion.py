@@ -24,8 +24,9 @@ from app.routers import sightings as sightings_router
 from app.routers.sightings import build_board_requirement_query
 from app.schemas.sightings import SightingsListParams
 from app.services.excess_mirror import ensure_virtual_requirement
-from app.services.excess_service import create_excess_list, import_line_items
+from app.services.excess_service import create_excess_list
 from tests.conftest import engine
+from tests.fixtures.excess_import import import_line_items
 
 _ = engine  # Ensure test DB tables are created
 

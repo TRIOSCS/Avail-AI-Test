@@ -45,9 +45,10 @@ from app.services.excess_mirror import (
     sync_list_mirror,
     teardown_list_mirror,
 )
-from app.services.excess_service import create_excess_list, import_line_items
+from app.services.excess_service import create_excess_list
 from app.utils.normalization import normalize_mpn_key
 from tests.conftest import engine
+from tests.fixtures.excess_import import import_line_items
 
 _ = engine  # Ensure test DB tables are created
 
