@@ -60,6 +60,10 @@ jobs:
         # Pinned pip-tools + identical flags to ci.yml's drift gate, so the output is
         # byte-identical to what the gate expects.
         run: |
+          # pip 26.2 removed pip._internal.utils.compat.stdlib_pkgs, which pip-tools
+          # still imports — same break ci.yml's "Verify lockfiles" step pins around.
+          # Pin below 26.2 until pip-tools ships a release that drops the import.
+          python -m pip install --quiet "pip<26.2"
           pip install "pip-tools==7.5.3"
           pip-compile --no-header --no-strip-extras --quiet requirements.in
           pip-compile --no-header --no-strip-extras --quiet requirements-dev.in
