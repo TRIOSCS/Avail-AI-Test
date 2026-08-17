@@ -613,6 +613,7 @@ class TestCompaniesAdditional:
             requisition_id=req.id,
             customer_site_id=test_customer_site.id,
             quote_number="WON-Q-001",
+            result="won",  # oq-06: only the quote that WON counts toward revenue_90d
             subtotal=5000.00,
             created_at=datetime.now(UTC),
         )
@@ -648,6 +649,7 @@ class TestCompaniesAdditional:
             requisition_id=req.id,
             customer_site_id=test_customer_site.id,
             quote_number="WON-ENUM-001",
+            result="won",  # oq-06: only the quote that WON counts toward revenue_90d
             subtotal=4200.00,
             created_at=datetime.now(UTC),
         )
