@@ -20,7 +20,6 @@ import secrets
 from decimal import Decimal, InvalidOperation
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 from starlette.responses import HTMLResponse
 
@@ -52,80 +51,6 @@ _PAYMENT_METHOD_CHOICES: list[tuple[str, str]] = [
 
 # Form checkbox / string truthy values ("on" from an HTML checkbox; "true"/"1" from JS).
 _TRUTHY = {"true", "on", "1", "yes"}
-
-
-class PrepaymentCreate(BaseModel):
-    """Request body for POST /v2/prepayments.
-
-    ``buy_plan_line_id`` is optional at the schema boundary so the ownership gate in
-    ``create_prepayment`` (get_buyplan_for_user) still runs FIRST and a restricted
-    non-owner gets a 404 rather than a 422 — line validation follows the ownership check.
-    """
-
-    model_config = ConfigDict(str_strip_whitespace=True)
-
-    buy_plan_id: int
-    buy_plan_line_id: int | None = None
-    vendor_card_id: int | None = None
-    payment_method: str | None = None
-    total_incl_fees: Decimal
-    test_report_sent: bool = False
-    buyer_remarks: str | None = None
-    # Client-prefilled payee (fallback only — the authoritative payee is snapshotted
-    # server-side in create_prepayment from the line's offer / vendor card).
-    vendor_name: str | None = None
-    currency: str = "USD"
-
-
-@router.post("/v2/prepayments")
-def post_prepayment(
-    body: PrepaymentCreate,
-    db: Session = Depends(get_db),
-    current_user=Depends(require_user),
-):
-    """Create a prepayment and spawn its approval gate.
-
-    Returns JSON with the prepayment_id and approval_request_id so the caller can poll
-    or redirect to the approval workflow.
-    """
-    # Same COD/method guards as the HTMX create (router-level — the service stays
-    # untouched): COD lines have nothing to pay in advance; only PREPAYMENT_METHODS pass.
-    if body.payment_method and body.payment_method not in {m.value for m in PREPAYMENT_METHODS}:
-        raise HTTPException(status_code=400, detail="That payment method can't be prepaid.")
-    if body.buy_plan_line_id is not None:
-        guard_line = db.get(BuyPlanLine, body.buy_plan_line_id)
-        if guard_line is not None and guard_line.payment_method == PaymentMethod.COD.value:
-            raise HTTPException(
-                status_code=400,
-                detail="This PO is COD — payment happens on delivery, so there's nothing to pay in advance.",
-            )
-    try:
-        prepayment, request = create_prepayment(
-            db,
-            buy_plan_id=body.buy_plan_id,
-            buy_plan_line_id=body.buy_plan_line_id,
-            vendor_card_id=body.vendor_card_id,
-            payment_method=body.payment_method,
-            total_incl_fees=body.total_incl_fees,
-            test_report_sent=body.test_report_sent,
-            buyer_remarks=body.buyer_remarks,
-            created_by=current_user,
-            vendor_name=body.vendor_name,
-            currency=body.currency,
-        )
-        db.commit()
-    except NoEligibleApproverError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    return {
-        "prepayment_id": prepayment.id,
-        "approval_request_id": request.id,
-    }
-
-
-# ── HTMX request entry point ────────────────────────────────────────────────
 
 
 def _prepayment_toast(response: HTMLResponse, message: str, kind: str = "success") -> None:

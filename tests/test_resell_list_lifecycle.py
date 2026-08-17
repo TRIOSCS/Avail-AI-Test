@@ -39,7 +39,8 @@ from app.models.excess import ExcessLineItem, ExcessList, ExcessOffer, ExcessOff
 from app.models.sourcing import Sighting
 from app.services import excess_service
 from app.services.excess_mirror import publish_list
-from app.services.excess_service import create_excess_list, import_line_items
+from app.services.excess_service import create_excess_list
+from tests.fixtures.excess_import import import_line_items
 
 # ── Fixtures / helpers ───────────────────────────────────────────────
 

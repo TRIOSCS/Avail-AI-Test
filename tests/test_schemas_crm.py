@@ -18,7 +18,6 @@ from app.schemas.crm import (
     QuoteReopen,
     QuoteResult,
     QuoteSendOverride,
-    QuoteUpdate,
     SuggestedContactItem,
     SuggestedSiteContact,
 )
@@ -305,7 +304,7 @@ class TestQuoteLineItem:
         assert li.custom_field == "value"
 
 
-# ── QuoteCreate / QuoteUpdate ──────────────────────────────────────
+# ── QuoteCreate ────────────────────────────────────────────────────
 
 
 class TestQuoteCreate:
@@ -313,16 +312,6 @@ class TestQuoteCreate:
         q = QuoteCreate()
         assert q.offer_ids == []
         assert q.line_items == []
-
-
-class TestQuoteUpdate:
-    def test_all_none(self) -> None:
-        q = QuoteUpdate()
-        assert q.line_items is None
-        assert q.payment_terms is None
-
-
-# ── CustomerImportRow ──────────────────────────────────────────────
 
 
 class TestCustomerImportRow:

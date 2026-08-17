@@ -323,11 +323,14 @@ def _buy_plan(db_session, owner_id):
 
 
 def test_g5_prepayment_blocks_restricted_non_owner_sales(client, db_session, test_user, admin_user):
+    # The legacy JSON POST /v2/prepayments was deleted (Tier D #11) — the ownership
+    # gate is pinned on the surviving HTMX create route instead. The nonexistent
+    # line id is fine: get_buyplan_for_user 404s BEFORE line validation.
     bp = _buy_plan(db_session, admin_user.id)  # foreign buy plan
     _make_sales(test_user, db_session)
     resp = client.post(
-        "/v2/prepayments",
-        json={"buy_plan_id": bp.id, "total_incl_fees": "100.00"},
+        "/v2/partials/prepayments",
+        data={"buy_plan_id": bp.id, "buy_plan_line_id": 999999, "total_incl_fees": "100.00"},
     )
     assert resp.status_code == 404
     # No prepayment attached to the foreign plan
@@ -339,11 +342,12 @@ def test_g5_prepayment_blocks_restricted_non_owner_sales(client, db_session, tes
 def test_g5_prepayment_allows_buyer_owner(client, db_session, test_user):
     bp = _buy_plan(db_session, test_user.id)  # test_user (buyer) owns the requisition
     resp = client.post(
-        "/v2/prepayments",
-        json={"buy_plan_id": bp.id, "total_incl_fees": "100.00"},
+        "/v2/partials/prepayments",
+        data={"buy_plan_id": bp.id, "buy_plan_line_id": 999999, "total_incl_fees": "100.00"},
     )
-    # Past the ownership gate. Routing may raise NoEligibleApprover (no approvers seeded);
-    # the security boundary is simply that it is NOT a 404 buy-plan-ownership rejection.
+    # Past the ownership gate. Line validation / approver routing may still reject
+    # (rendered as an error toast, 200); the security boundary is simply that it is
+    # NOT a 404 buy-plan-ownership rejection.
     assert resp.status_code != 404
 
 
