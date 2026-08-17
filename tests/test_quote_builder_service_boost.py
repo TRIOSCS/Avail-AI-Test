@@ -263,10 +263,13 @@ class TestSaveQuoteRevision:
 
         assert result["ok"] is True
         assert result["revision"] == 2
-        # Old quote should be renamed to R1
+        # oq-04 convention (2026-08-17): the superseded quote KEEPS its number;
+        # the NEW quote carries the -R1 trail.
         db_session.expire(old_quote)
         refreshed = db_session.get(Quote, old_id)
-        assert refreshed.quote_number == "Q-2026-0001-R1"
+        assert refreshed.quote_number == "Q-2026-0001"
+        new_quote = db_session.query(Quote).filter(Quote.id != old_id).order_by(Quote.id.desc()).first()
+        assert new_quote.quote_number == "Q-2026-0001-R1"
 
     def test_revision_number_increments_from_existing(self, db_session: Session, req_and_item, test_user: User):
         """When old quote already has revision=3, new quote gets revision 4."""

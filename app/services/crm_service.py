@@ -34,10 +34,10 @@ def next_quote_number(db: Session) -> str:
     """Generate next sequential quote number: Q-YYYY-NNNN.
 
     Takes the MAX numeric sequence across the year's quote numbers rather than
-    trusting the newest row: revising a non-latest quote re-issues its
-    canonical number on a NEW row (the old one becomes ...-R{n}), so
-    newest-by-id can lag the real maximum and every subsequent create would
-    collide on the unique constraint (QC 2026-08-08). The newest-row SELECT
+    trusting the newest row (QC 2026-08-08): under the oq-04 convention a
+    revision row carries `{base}-R{n}` — the prefix regex still reads its base
+    sequence, and newest-by-id can lag the real maximum, so every subsequent
+    create would collide on the unique constraint. The newest-row SELECT
     FOR UPDATE is retained as the concurrency mutex it always was.
     """
     year = datetime.now(UTC).year
@@ -58,6 +58,31 @@ def next_quote_number(db: Session) -> str:
         if match:
             seq = max(seq, int(match.group(1)))
     return f"{prefix}{seq + 1:04d}"
+
+
+_REVISION_SUFFIX_RE = re.compile(r"(?:-R\d+)+$")
+
+
+def quote_base_number(number: str | None) -> str:
+    """Strip any trailing ``-R<n>`` suffix chain: 'Q-2026-0142-R2' → 'Q-2026-0142'.
+
+    Also flattens legacy compounded numbers ('...-R2-R3') from the pre-unification
+    HTMX path back to their base.
+    """
+    return _REVISION_SUFFIX_RE.sub("", number or "")
+
+
+def revision_quote_number(base_number: str, revision: int) -> str:
+    """Owner-chosen revision convention (oq-04, 2026-08-17): the ORIGINAL quote keeps
+    the base number forever; each revision carries an explicit trail suffix — Q-0142 →
+    Q-0142-R1 → Q-0142-R2.
+
+    ``revision`` is the Quote.revision field
+    (1 = original), so the first revision (revision=2) renders R1.
+    """
+    if revision <= 1:
+        return base_number
+    return f"{base_number}-R{revision - 1}"
 
 
 # ═══════════════════════════════════════════════════════════════════════
