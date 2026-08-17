@@ -263,40 +263,6 @@ def test_create_prepayment_2500_excludes_capped_approver(db_session: Session, te
 # ── Route tests ───────────────────────────────────────────────────────────────
 
 
-def test_post_prepayments_returns_200_with_request_id(db_session: Session, client, test_user: User):
-    """POST /v2/prepayments → 200 + JSON with approval_request_id."""
-    _make_approver(
-        db_session,
-        email="approver@trioscs.com",
-        name="Approver",
-        azure_id="az-approver-route",
-        limit=None,
-    )
-    db_session.commit()
-
-    buy_plan = _make_buy_plan(db_session, test_user)
-    line = _make_po_line(db_session, buy_plan)
-    db_session.commit()
-
-    resp = client.post(
-        "/v2/prepayments",
-        json={
-            "buy_plan_id": buy_plan.id,
-            "buy_plan_line_id": line.id,
-            "vendor_card_id": None,
-            "payment_method": PaymentMethod.WIRE,
-            "total_incl_fees": "500.00",
-            "test_report_sent": False,
-            "buyer_remarks": "Test route",
-        },
-    )
-    assert resp.status_code == 200, resp.text
-    data = resp.json()
-    assert "approval_request_id" in data
-    assert isinstance(data["approval_request_id"], int)
-    assert data["approval_request_id"] > 0
-
-
 def test_prepayment_state_for_lines_returns_batch_states(db_session: Session, test_user: User):
     """prepayment_state_for_lines maps each line to its Prepayment.status lifecycle in ONE
     query: requested → 'requested', approved → 'approved', paid → 'paid'; a VOID prepayment is
@@ -335,19 +301,3 @@ def test_prepayment_state_for_lines_returns_batch_states(db_session: Session, te
     state = prepayment_state_for_lines(db_session, [line_req.id, line_app.id, line_paid.id, line_void.id, line_none.id])
     assert state == {line_req.id: "requested", line_app.id: "approved", line_paid.id: "paid"}
     assert prepayment_state_for_lines(db_session, []) == {}
-
-
-def test_post_prepayments_unauth_returns_401(db_session: Session, unauthenticated_client):
-    """POST /v2/prepayments without auth → 401."""
-    resp = unauthenticated_client.post(
-        "/v2/prepayments",
-        json={
-            "buy_plan_id": 1,
-            "vendor_card_id": None,
-            "payment_method": PaymentMethod.WIRE,
-            "total_incl_fees": "100.00",
-            "test_report_sent": False,
-            "buyer_remarks": None,
-        },
-    )
-    assert resp.status_code == 401

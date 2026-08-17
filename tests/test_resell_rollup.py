@@ -21,12 +21,12 @@ from app.models import Company, User
 from app.models.excess import ExcessLineItem, ExcessList
 from app.services.excess_service import (
     create_excess_list,
-    import_line_items,
     recompute_line_rollup,
     submit_offer,
     withdraw_offer,
 )
 from tests.conftest import engine
+from tests.fixtures.excess_import import import_line_items
 
 _ = engine  # Ensure test DB tables are created
 

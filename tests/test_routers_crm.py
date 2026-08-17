@@ -1448,70 +1448,6 @@ class TestQuotesAdditional:
         assert "quote_number" in data
         assert len(data["line_items"]) >= 1
 
-    def test_update_quote(self, client, db_session, test_requisition, test_customer_site, test_user):
-        q = Quote(
-            requisition_id=test_requisition.id,
-            customer_site_id=test_customer_site.id,
-            quote_number="Q-2026-UPD1",
-            status="draft",
-            line_items=[{"mpn": "LM317T", "qty": 100, "sell_price": 5.00, "cost_price": 3.00}],
-            subtotal=500.0,
-            total_cost=300.0,
-            total_margin_pct=40.0,
-            created_by_id=test_user.id,
-            created_at=datetime.now(UTC),
-        )
-        db_session.add(q)
-        db_session.commit()
-
-        resp = client.put(
-            f"/api/quotes/{q.id}",
-            json={"payment_terms": "Net 60"},
-        )
-        assert resp.status_code == 200
-
-    def test_update_quote_line_items(self, client, db_session, test_requisition, test_customer_site, test_user):
-        """Updating line_items recalculates totals."""
-        q = Quote(
-            requisition_id=test_requisition.id,
-            customer_site_id=test_customer_site.id,
-            quote_number="Q-2026-UPD2",
-            status="draft",
-            line_items=[],
-            subtotal=0,
-            total_cost=0,
-            total_margin_pct=0,
-            created_by_id=test_user.id,
-            created_at=datetime.now(UTC),
-        )
-        db_session.add(q)
-        db_session.commit()
-
-        resp = client.put(
-            f"/api/quotes/{q.id}",
-            json={
-                "line_items": [
-                    {"mpn": "LM317T", "qty": 200, "sell_price": 10.00, "cost_price": 7.00},
-                ],
-            },
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["subtotal"] == 2000.0
-        assert data["total_cost"] == 1400.0
-
-    def test_update_quote_not_found(self, client):
-        resp = client.put("/api/quotes/99999", json={"notes": "x"})
-        assert resp.status_code == 404
-
-    def test_update_quote_not_draft(self, client, db_session, test_quote):
-        """Non-draft quotes cannot be edited."""
-        resp = client.put(
-            f"/api/quotes/{test_quote.id}",
-            json={"notes": "nope"},
-        )
-        assert resp.status_code == 400
-
     def test_delete_quote_not_found(self, client):
         resp = client.delete("/api/quotes/99999")
         assert resp.status_code == 404
@@ -1700,17 +1636,6 @@ class TestQuotesAdditional:
 
     def test_quote_result_not_found(self, client):
         resp = client.post("/api/quotes/99999/result", json={"result": "won"})
-        assert resp.status_code == 404
-
-    def test_revise_quote(self, client, db_session, test_quote):
-        resp = client.post(f"/api/quotes/{test_quote.id}/revise")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["revision"] == 2
-        assert data["quote_number"] == "TEST-Q-2026-0001"
-
-    def test_revise_quote_not_found(self, client):
-        resp = client.post("/api/quotes/99999/revise")
         assert resp.status_code == 404
 
     def test_reopen_quote_without_revise(self, client, db_session, test_quote):
@@ -2721,7 +2646,9 @@ def test_quote_mutation_scope_enforced_for_sales(db_session, sales_user, test_qu
     app.dependency_overrides[require_user] = _override_user
     try:
         with TestClient(app) as c:
-            resp = c.put(f"/api/quotes/{test_quote.id}", json={"notes": "should fail"})
+            # PUT /api/quotes was deleted (Tier D) — pin the same get_quote_for_user
+            # scope gate on the surviving result route instead.
+            resp = c.post(f"/api/quotes/{test_quote.id}/result", json={"result": "won"})
     finally:
         for dep in [get_db, require_user]:
             app.dependency_overrides.pop(dep, None)

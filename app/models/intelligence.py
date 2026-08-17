@@ -376,6 +376,20 @@ class ProactiveMatch(Base):
         return value
 
     __table_args__ = (
+        # One ACTIVE (new|sent) match per exact (mpn, company) — the DB-level backstop
+        # for the Python dedup in _existing_match_company_ids, which an overlapping
+        # scheduler scan + manual Refresh could both pass (migration 211). company_id
+        # NULL (back-order lines) is unconstrained: NULLs are distinct in a unique
+        # index; those are deduped per owner in Python. Cross-spelling (equivalence
+        # class) dedup also stays Python-side.
+        Index(
+            "uq_pm_active_mpn_company",
+            "mpn",
+            "company_id",
+            unique=True,
+            postgresql_where=text("status IN ('new', 'sent')"),
+            sqlite_where=text("status IN ('new', 'sent')"),
+        ),
         Index("ix_pm_offer", "offer_id"),
         Index("ix_pm_req", "requisition_id"),
         Index("ix_pm_site", "customer_site_id"),
