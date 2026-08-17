@@ -771,7 +771,10 @@ def company_commercial_stats(db: Session, company_ids: list[int]) -> dict[int, d
         result[row.company_id]["win_rate"] = wr
         result[row.company_id]["last_req_date"] = row.last_req_date.isoformat() if row.last_req_date else None
 
-    # 90-day won revenue — CustomerSite → Requisition → Quote join
+    # 90-day won revenue — CustomerSite → Requisition → Quote join. Only quotes that
+    # actually WON count (QC oq-06): a won requisition can carry the original, its
+    # revisions, and lost/draft attempts — summing every quote double/triple-counted
+    # the deal. Quote.result is stamped by the result route / apply_quote_result.
     rev_cutoff = datetime.now(UTC) - timedelta(days=90)
     rev_rows = (
         db.query(
@@ -783,6 +786,7 @@ def company_commercial_stats(db: Session, company_ids: list[int]) -> dict[int, d
         .filter(
             CustomerSite.company_id.in_(company_ids),
             Requisition.status == RequisitionStatus.WON,
+            Quote.result == "won",
             Quote.created_at >= rev_cutoff,
         )
         .group_by(CustomerSite.company_id)
