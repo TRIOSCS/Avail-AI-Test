@@ -32,6 +32,24 @@
     <option value="no_longer_needed" {{ 'selected' if line.outcome == 'no_longer_needed' }}>No longer needed</option>
     <option value="no_response" {{ 'selected' if line.outcome == 'no_response' }}>No response</option>
   </select>
+  {# "Looking again" one-tap clone: copies the source part into a fresh OPEN
+     requisition (clone_parts_to_active) and fires a sightings search. Once done,
+     the produced REQ replaces the button (produced_requisition_id). #}
+  {% if line.produced_requisition_id %}
+    <span class="block mt-1 text-[11px] text-emerald-700 font-semibold">
+      Cloned &rarr; REQ-{{ '%03d'|format(line.produced_requisition_id) }}
+    </span>
+  {% elif line.outcome == 'looking_again' and line.can_edit %}
+    <button type="button"
+            hx-post="/v2/partials/proactive/lines/{{ line.id }}/clone"
+            hx-target="#outreach-line-{{ line.id }}"
+            hx-swap="innerHTML"
+            hx-disabled-elt="this"
+            title="Customer needs this part again — copy it into a fresh open requisition and start a search"
+            class="mt-1 px-2 py-0.5 text-[11px] font-semibold bg-accent-500 text-white rounded hover:bg-accent-600">
+      Clone to Active
+    </button>
+  {% endif %}
 </td>
 <td>
   <input type="text" value="{{ line.sales_order_number or '' }}" maxlength="100"
