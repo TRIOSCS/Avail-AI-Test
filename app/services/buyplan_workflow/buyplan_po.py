@@ -11,6 +11,7 @@ Depends on: dependencies (can_approve_purchase_orders), buyplan_approval (lazy),
 """
 
 from datetime import UTC, datetime
+from decimal import Decimal
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -138,14 +139,16 @@ def mark_line_received(plan_id: int, line_id: int, user: User, db: Session) -> B
     return line
 
 
-def _line_amount(line: BuyPlanLine) -> float:
+def _line_amount(line: BuyPlanLine) -> Decimal:
     """Dollar amount of one line's PO (``unit_cost * quantity``).
 
     Mirrors ``_recalculate_financials``'s per-line cost math — the single grain for the
     per-PO dollar-limit check (``verify_po``, ``can_verify_po_line``) and the per-line
-    stall detector (``plan_needs_approver_reason``).
+    stall detector (``plan_needs_approver_reason``). Decimal end-to-end: unit_cost is a
+    Numeric column, and the approval limits it is compared against are Numeric too — a
+    float round-trip here is exactly the at-limit routing edge the QC finding flagged.
     """
-    return float(line.unit_cost or 0) * (line.quantity or 0)
+    return (line.unit_cost or Decimal("0")) * (line.quantity or 0)
 
 
 def _log_po_line_activity(

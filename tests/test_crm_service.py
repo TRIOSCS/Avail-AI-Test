@@ -135,13 +135,19 @@ class TestCompanyCommercialStats:
         co = _make_company(db_session, "Revenue Co")
         site = _make_site(db_session, co)
 
+        # Seed relative to the REAL clock: company_commercial_stats computes its
+        # 90-day cutoff from datetime.now(UTC) (no clock seam), so seeding from the
+        # frozen module NOW was a time bomb — the "in-window" quote drifted out of
+        # the real window once the wall clock moved 90 days past it.
+        real_now = datetime.now(UTC)
+
         # WON req within the 90d window
-        req_in = _make_req(db_session, site, "won", created_at=NOW - timedelta(days=30))
-        _make_quote(db_session, req_in, site, subtotal=5000.0, created_at=NOW - timedelta(days=30))
+        req_in = _make_req(db_session, site, "won", created_at=real_now - timedelta(days=30))
+        _make_quote(db_session, req_in, site, subtotal=5000.0, created_at=real_now - timedelta(days=30))
 
         # WON req OUTSIDE the 90d window — should NOT be included
-        req_out = _make_req(db_session, site, "won", created_at=NOW - timedelta(days=120))
-        _make_quote(db_session, req_out, site, subtotal=9999.0, created_at=NOW - timedelta(days=120))
+        req_out = _make_req(db_session, site, "won", created_at=real_now - timedelta(days=120))
+        _make_quote(db_session, req_out, site, subtotal=9999.0, created_at=real_now - timedelta(days=120))
 
         db_session.commit()
 
