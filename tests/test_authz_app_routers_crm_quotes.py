@@ -102,9 +102,12 @@ def test_reopen_quote_blocks_non_owner_sales(client, db_session, test_user, othe
 # ── Buyer happy path stays unchanged (owner / unrestricted role allowed) ─
 
 
-def test_delete_quote_allows_buyer_owner(client, other_owned_quote):
+def test_delete_quote_allows_buyer_owner(client, db_session, other_owned_quote):
     # test_user is a buyer (unrestricted) by default — must NOT be blocked. (Was the
     # PUT update route until Tier D deleted it; DELETE pins the same
     # get_quote_for_user gate's allow side.)
-    resp = client.delete(f"/api/quotes/{other_owned_quote.id}")
+    quote_id = other_owned_quote.id
+    resp = client.delete(f"/api/quotes/{quote_id}")
     assert resp.status_code == 200
+    # The allow actually took effect: the quote is gone.
+    assert db_session.get(Quote, quote_id) is None
