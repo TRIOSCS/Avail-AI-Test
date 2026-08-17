@@ -172,8 +172,10 @@ class TestBuildQuoteAssemble:
         assert len(quotes) == 2
         old, new = quotes
         assert old.status == "revised"
-        assert old.quote_number == f"{base_number}-R1"
-        assert new.quote_number == base_number
+        # oq-04 convention (2026-08-17): the superseded quote KEEPS its number;
+        # the new revision carries the -R trail.
+        assert old.quote_number == base_number
+        assert new.quote_number == f"{base_number}-R1"
         assert new.revision == 2
 
     def test_guardrail_binding_wired_into_tab(self, client: TestClient, quoteable_req: Requisition):

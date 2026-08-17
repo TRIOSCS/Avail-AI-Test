@@ -60,6 +60,31 @@ def next_quote_number(db: Session) -> str:
     return f"{prefix}{seq + 1:04d}"
 
 
+_REVISION_SUFFIX_RE = re.compile(r"(?:-R\d+)+$")
+
+
+def quote_base_number(number: str | None) -> str:
+    """Strip any trailing ``-R<n>`` suffix chain: 'Q-2026-0142-R2' → 'Q-2026-0142'.
+
+    Also flattens legacy compounded numbers ('...-R2-R3') from the pre-unification
+    HTMX path back to their base.
+    """
+    return _REVISION_SUFFIX_RE.sub("", number or "")
+
+
+def revision_quote_number(base_number: str, revision: int) -> str:
+    """Owner-chosen revision convention (oq-04, 2026-08-17): the ORIGINAL quote keeps
+    the base number forever; each revision carries an explicit trail suffix — Q-0142 →
+    Q-0142-R1 → Q-0142-R2.
+
+    ``revision`` is the Quote.revision field
+    (1 = original), so the first revision (revision=2) renders R1.
+    """
+    if revision <= 1:
+        return base_number
+    return f"{base_number}-R{revision - 1}"
+
+
 # ═══════════════════════════════════════════════════════════════════════
 #  CDM ACCOUNT WORKSPACE — staleness, list query, contact rows
 # ═══════════════════════════════════════════════════════════════════════

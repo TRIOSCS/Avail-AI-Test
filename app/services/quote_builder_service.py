@@ -476,7 +476,7 @@ def _save_quote_from_builder_core(
 
     from app.constants import QuoteStatus, RequisitionStatus
     from app.models import Quote, QuoteLine, Requisition
-    from app.services.crm_service import next_quote_number
+    from app.services.crm_service import next_quote_number, quote_base_number, revision_quote_number
     from app.services.quote_requisitions import (
         link_quote_to_requisitions,
         requisition_ids_for_quote,
@@ -533,10 +533,10 @@ def _save_quote_from_builder_core(
         old_req_ids = set(requisition_ids_for_quote(db, old_quote.id))
         if old_req_ids and not old_req_ids.issubset(set(req_ids)):
             raise ValueError("This revision must include all of the original quote's requisitions.")
-        old_revision = old_quote.revision or 1
-        quote_number = old_quote.quote_number
-        revision = old_revision + 1
-        old_quote.quote_number = f"{quote_number}-R{old_revision}"
+        # oq-04 convention (unified 2026-08-17): the superseded quote KEEPS its
+        # number; the NEW revision carries the -R trail (Q-0142 → Q-0142-R1).
+        revision = (old_quote.revision or 1) + 1
+        quote_number = revision_quote_number(quote_base_number(old_quote.quote_number), revision)
         old_quote.status = QuoteStatus.REVISED
     else:
         quote_number = next_quote_number(db)
