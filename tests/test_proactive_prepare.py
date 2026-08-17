@@ -681,7 +681,10 @@ def test_add_contact_first_contact_unblocks_empty_site(db_session):
         offer_id=data["offer"].id,
         customer_site_id=empty_site.id,
         salesperson_id=data["owner"].id,
-        mpn="LM358N",
+        # Distinct part: _setup_send_scenario already holds an ACTIVE LM358N match for
+        # this company, and uq_pm_active_mpn_company (migration 211) enforces the
+        # one-active-match-per-(part, company) invariant the scanner has always kept.
+        mpn="LM358N-DEPOT",
         company_id=data["company"].id,
         match_score=50,
         status="new",
