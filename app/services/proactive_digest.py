@@ -42,6 +42,7 @@ from ..models import (
     ProactiveMatch,
     ProactiveOutreachLine,
     Requirement,
+    Requisition,
     User,
 )
 from .pricing_history import last_quote_for_part, last_win_for_part
@@ -411,6 +412,7 @@ def get_digests_for_view(db: Session, *, viewer: User, can_see_all: bool) -> lis
                         "contacted": line.contacted,
                         "outcome": line.outcome,
                         "sales_order_number": line.sales_order_number,
+                        "produced_requisition_id": line.produced_requisition_id,
                         "can_edit": can_see_all or line.salesperson_id == viewer.id,
                     }
                     for line in lines
@@ -480,6 +482,62 @@ def update_line_tracking(
             _log("sales_order_number", line.sales_order_number, sales_order_number)
             line.sales_order_number = sales_order_number
     return line
+
+
+def clone_line_to_active(
+    db: Session,
+    line_id: int,
+    *,
+    viewer: User,
+    can_manage: bool,
+) -> tuple[ProactiveOutreachLine, Requisition]:
+    """One-tap clone for a "Looking again" outcome: copy the line's source part into a
+    fresh OPEN requisition via ``clone_parts_to_active`` and stamp
+    ``produced_requisition_id`` on the line.
+
+    Source-part resolution: the line's match → ``requirement_id`` when present;
+    otherwise (hotlist/back-order match, or the requirement FK was nulled) the newest
+    requirement for the same normalized MPN on one of this company's requisitions.
+    Same edit rights as tracking (line's salesperson or manager/admin). Commits (the
+    clone service commits the new requisition; the produced-id stamp commits after).
+    Raises ValueError on missing/unsent/foreign line, an already-recorded clone, or
+    no resolvable source part.
+    """
+    from ..utils.normalization import normalize_mpn_key
+    from .requisition_service import clone_parts_to_active
+
+    line = db.get(ProactiveOutreachLine, line_id)
+    if not line:
+        raise ValueError("Line not found")
+    if not line.sent_at:
+        raise ValueError("Line not sent yet — tracking starts after send")
+    if not can_manage and line.salesperson_id != viewer.id:
+        raise ValueError("Not your line")
+    if line.produced_requisition_id:
+        raise ValueError("Already cloned — this line produced a requisition.")
+
+    part: Requirement | None = None
+    match = db.get(ProactiveMatch, line.match_id) if line.match_id else None
+    if match is not None and match.requirement_id is not None:
+        part = db.get(Requirement, match.requirement_id)
+    if part is None and line.company_id:
+        norm = normalize_mpn_key(line.mpn)
+        if norm:
+            part = db.scalars(
+                select(Requirement)
+                .join(Requisition, Requirement.requisition_id == Requisition.id)
+                .where(Requirement.normalized_mpn == norm, Requisition.company_id == line.company_id)
+                .order_by(Requirement.id.desc())
+                .limit(1)
+            ).first()
+    if part is None:
+        raise ValueError("No source part on file for this line — clone it from the parts workspace instead.")
+
+    new_req = clone_parts_to_active(db, [part], viewer)[0]
+    line.produced_requisition_id = new_req.id
+    db.commit()
+    logger.info("Looking-again clone by user {}: line {} → requisition {}", viewer.id, line.id, new_req.id)
+    return line, new_req
 
 
 # ── Weekly outreach summary (Step 8) ─────────────────────────────────────

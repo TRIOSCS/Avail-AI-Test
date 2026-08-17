@@ -37,11 +37,11 @@ from app.routers.resell import _award_response_context, _offers_context, _outrea
 from app.services.excess_service import (
     confirm_import,
     create_excess_list,
-    import_line_items,
     submit_offer,
 )
 from app.utils.normalization import normalize_mpn_key
 from tests.conftest import engine
+from tests.fixtures.excess_import import import_line_items
 
 _ = engine  # Ensure test DB tables are created
 

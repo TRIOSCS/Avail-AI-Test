@@ -17,10 +17,10 @@ from app.services.excess_service import (
     confirm_import,
     create_excess_list,
     get_excess_list,
-    import_line_items,
     preview_import,
 )
 from tests.conftest import engine
+from tests.fixtures.excess_import import import_line_items
 
 _ = engine  # Ensure test DB tables are created
 

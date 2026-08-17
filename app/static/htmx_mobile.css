@@ -151,3 +151,20 @@
         display: inline-flex !important;
     }
 }
+
+
+/* ============================================================
+   N+1. Wide compact tables scroll instead of overflowing the page
+   (QC 2026-08-10 P3) — the resell lines/offers tables use
+   `compact-table min-w-full`, so on a phone their many columns
+   pushed the whole page sideways. `display:block; overflow-x:auto`
+   contains the scroll to the table's own box. Mobile-only; desktop
+   (table layout) is untouched.
+   ============================================================ */
+@media (max-width: 768px) {
+    .compact-table {
+        display: block;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+}

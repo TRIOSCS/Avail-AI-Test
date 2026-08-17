@@ -14,6 +14,7 @@ Depends on: app.models, app.dependencies, app.database, app.services.approvals,
 
 import json
 from datetime import datetime
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -83,13 +84,19 @@ def _parse_optional_int(raw: str | None) -> int | None:
         raise HTTPException(400, "Expected a whole number.") from e
 
 
-def _parse_optional_float(raw: str | None) -> float | None:
-    """Parse an optional decimal form field: blank → None; non-numeric → 400."""
+def _parse_optional_float(raw: str | None) -> Decimal | None:
+    """Parse an optional money form field: blank → None; non-numeric → 400.
+
+    Returns Decimal (QC money-math-float): these values flow into unit_sell/unit_cost
+    Numeric columns and the plan-financial math, which is Decimal end-to-end — parsing
+    to binary float here was the drift's entry point. Name kept so call sites don't
+    churn; it parses "a decimal number", now literally.
+    """
     if raw is None or str(raw).strip() == "":
         return None
     try:
-        return float(str(raw).strip())
-    except (TypeError, ValueError) as e:
+        return Decimal(str(raw).strip())
+    except (ArithmeticError, TypeError, ValueError) as e:
         raise HTTPException(400, "Expected a number.") from e
 
 

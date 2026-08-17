@@ -273,56 +273,6 @@ def get_excess_list(db: Session, list_id: int) -> ExcessList:
 # ---------------------------------------------------------------------------
 
 
-def import_line_items(db: Session, list_id: int, rows: list[dict]) -> dict:
-    """Import line items from parsed CSV/Excel rows into an excess list.
-
-    Flexible header detection maps common column names to canonical fields. Skips rows
-    with blank part_number or invalid quantity.
-
-    Returns {imported: int, skipped: int, errors: list[str]}.
-    """
-    excess_list = get_excess_list(db, list_id)
-
-    imported = 0
-    skipped = 0
-    errors: list[str] = []
-
-    for i, raw_row in enumerate(rows, start=1):
-        fields, error_reason = _parse_import_row(raw_row)
-        if fields is None:
-            skipped += 1
-            errors.append(f"Row {i}: {error_reason} — skipped")
-            continue
-
-        part_number = fields["part_number"]
-        item = ExcessLineItem(
-            excess_list_id=list_id,
-            part_number=part_number,
-            normalized_part_number=normalize_mpn_key(part_number) or None,
-            manufacturer=fields["manufacturer"],
-            quantity=fields["quantity"],
-            date_code=fields["date_code"],
-            condition=fields["condition"],
-            asking_price=fields["asking_price"],
-        )
-        db.add(item)
-        _resolve_line_material_card(db, item)
-        imported += 1
-
-    # Update total_line_items counter
-    if imported > 0:
-        excess_list.total_line_items = (excess_list.total_line_items or 0) + imported
-        _safe_commit(db, entity="excess line items")
-
-    logger.info(
-        "Imported {} line items into ExcessList id={} (skipped={})",
-        imported,
-        list_id,
-        skipped,
-    )
-    return {"imported": imported, "skipped": skipped, "errors": errors}
-
-
 def preview_import(rows: list[dict]) -> dict:
     """Parse rows and return a preview with validation results.
 

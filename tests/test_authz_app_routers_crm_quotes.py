@@ -69,12 +69,6 @@ def test_create_quote_blocks_non_owner_sales(client, db_session, test_requisitio
     assert resp.status_code == 404
 
 
-def test_update_quote_blocks_non_owner_sales(client, db_session, test_user, other_owned_quote):
-    _make_sales(test_user, db_session)
-    resp = client.put(f"/api/quotes/{other_owned_quote.id}", json={"notes": "hacked"})
-    assert resp.status_code == 404
-
-
 def test_delete_quote_blocks_non_owner_sales(client, db_session, test_user, other_owned_quote):
     _make_sales(test_user, db_session)
     resp = client.delete(f"/api/quotes/{other_owned_quote.id}")
@@ -99,12 +93,6 @@ def test_quote_result_blocks_non_owner_sales(client, db_session, test_user, othe
     assert resp.status_code == 404
 
 
-def test_revise_quote_blocks_non_owner_sales(client, db_session, test_user, other_owned_quote):
-    _make_sales(test_user, db_session)
-    resp = client.post(f"/api/quotes/{other_owned_quote.id}/revise")
-    assert resp.status_code == 404
-
-
 def test_reopen_quote_blocks_non_owner_sales(client, db_session, test_user, other_owned_quote):
     _make_sales(test_user, db_session)
     resp = client.post(f"/api/quotes/{other_owned_quote.id}/reopen", json={"revise": False})
@@ -114,7 +102,12 @@ def test_reopen_quote_blocks_non_owner_sales(client, db_session, test_user, othe
 # ── Buyer happy path stays unchanged (owner / unrestricted role allowed) ─
 
 
-def test_update_quote_allows_buyer_owner(client, other_owned_quote):
-    # test_user is a buyer (unrestricted) by default — must NOT be blocked.
-    resp = client.put(f"/api/quotes/{other_owned_quote.id}", json={"notes": "ok"})
+def test_delete_quote_allows_buyer_owner(client, db_session, other_owned_quote):
+    # test_user is a buyer (unrestricted) by default — must NOT be blocked. (Was the
+    # PUT update route until Tier D deleted it; DELETE pins the same
+    # get_quote_for_user gate's allow side.)
+    quote_id = other_owned_quote.id
+    resp = client.delete(f"/api/quotes/{quote_id}")
     assert resp.status_code == 200
+    # The allow actually took effect: the quote is gone.
+    assert db_session.get(Quote, quote_id) is None
