@@ -135,6 +135,21 @@ htmx.on('htmx:afterRequest', function(evt) {
     });
 });
 
+// ── Mobile: bring a just-loaded detail pane into view (QC 2026-08-10 P3) ──────
+// On a phone the master/detail workspaces stack vertically, so selecting a row
+// swaps the detail BELOW the fold — the tap looked DEAD because nothing visibly
+// changed (a UX-review blocker). After a swap settles into a detail pane, scroll
+// it into view on narrow viewports only. Desktop (>=768px, side-by-side) is
+// untouched by construction.
+document.body.addEventListener('htmx:afterSettle', function(evt) {
+    if (window.innerWidth >= 768) return;
+    var t = evt.detail && evt.detail.target;
+    if (!t || !t.id) return;
+    if (t.id === 'aw-pane' || t.id === 'sightings-detail' || /(^|[-_])detail([-_]|$)/.test(t.id)) {
+        try { t.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (_e) { t.scrollIntoView(); }
+    }
+});
+
 // ── Trouble-ticket capture & reporting ───────────────────────
 // Recent HTMX-pushed URLs — a breadcrumb trail for bug repro. Capped at 8.
 window._ttNavHistory = [];

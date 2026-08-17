@@ -314,15 +314,6 @@ class QuoteCreate(BaseModel):
     line_items: list[QuoteLineItem] = []
 
 
-class QuoteUpdate(BaseModel):
-    line_items: list[QuoteLineItem] | None = None
-    payment_terms: str | None = None
-    shipping_terms: str | None = None
-    notes: str | None = None
-    valid_until: str | None = None
-    validity_days: int | None = None
-
-
 class QuoteResult(BaseModel):
     result: Literal["won", "lost"]
     reason: str | None = None

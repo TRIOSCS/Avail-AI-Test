@@ -14,7 +14,7 @@ import asyncio
 import html as html_mod
 import json
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from loguru import logger
 from sqlalchemy import func as sqlfunc
@@ -866,9 +866,54 @@ async def proactive_line_tracking(
         "contacted": line.contacted,
         "outcome": line.outcome,
         "sales_order_number": line.sales_order_number,
+        "produced_requisition_id": line.produced_requisition_id,
         "can_edit": can_manage or line.salesperson_id == user.id,
     }
     return template_response("htmx/partials/proactive/_outreach_line_cells.html", ctx)
+
+
+@router.post("/v2/partials/proactive/lines/{line_id}/clone", response_class=HTMLResponse)
+async def proactive_line_clone(
+    request: Request,
+    line_id: int,
+    background_tasks: BackgroundTasks,
+    user: User = Depends(require_access(AccessKey.PROACTIVE)),
+    db: Session = Depends(get_db),
+):
+    """One-tap "Looking again" clone: copy the line's source part into a fresh OPEN
+    requisition (clone_parts_to_active), stamp produced_requisition_id, fire a
+    background sightings search on the clone, and re-render the row cells."""
+    from ...dependencies import is_manager_or_admin
+    from ...routers.sightings import run_search_and_publish
+    from ...services.proactive_digest import clone_line_to_active
+
+    can_manage = is_manager_or_admin(user)
+    try:
+        line, new_req = clone_line_to_active(db, line_id, viewer=user, can_manage=can_manage)
+    except ValueError as e:
+        raise HTTPException(403 if "Not your" in str(e) else 400, str(e)) from e
+
+    new_requirement_ids = [r.id for r in new_req.requirements]
+    if new_requirement_ids:
+        background_tasks.add_task(run_search_and_publish, new_requirement_ids, user.id)
+
+    company = db.get(Company, line.company_id) if line.company_id else None
+    ctx = _base_ctx(request, user, "proactive")
+    ctx["line"] = {
+        "id": line.id,
+        "mpn": line.mpn,
+        "company_name": company.name if company else None,
+        "contacted": line.contacted,
+        "outcome": line.outcome,
+        "sales_order_number": line.sales_order_number,
+        "produced_requisition_id": line.produced_requisition_id,
+        "can_edit": can_manage or line.salesperson_id == user.id,
+    }
+    response = template_response("htmx/partials/proactive/_outreach_line_cells.html", ctx)
+    response.headers["HX-Trigger"] = json.dumps(
+        {"showToast": {"message": f"Part cloned → REQ-{new_req.id:03d} (search running)", "type": "success"}}
+    )
+    return response
 
 
 @router.post("/v2/partials/proactive/equivalence/verdict", response_class=HTMLResponse)

@@ -13,7 +13,7 @@ from ...constants import RESTRICTED_ROLES, QuoteStatus, RequisitionStatus
 from ...database import get_db
 from ...dependencies import require_user
 from ...models import CustomerSite, Offer, Quote, Requisition, User
-from ...schemas.crm import QuoteCreate, QuoteReopen, QuoteResult, QuoteSendOverride, QuoteUpdate
+from ...schemas.crm import QuoteCreate, QuoteReopen, QuoteResult, QuoteSendOverride
 from ...schemas.responses import QuoteDetailResponse
 from ...services.status_machine import require_valid_transition
 from ._helpers import (
@@ -323,32 +323,6 @@ async def create_quote(
     return result
 
 
-@router.put("/api/quotes/{quote_id}")
-async def update_quote(
-    quote_id: int,
-    payload: QuoteUpdate,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    from ...dependencies import get_quote_for_user
-
-    quote = get_quote_for_user(db, user, quote_id)
-    if not quote:
-        raise HTTPException(404, "Quote not found")
-    if quote.status not in (QuoteStatus.DRAFT.value, None):
-        raise HTTPException(400, "Only draft quotes can be edited")
-    updates = payload.model_dump(exclude_unset=True)
-    if "line_items" in updates:
-        quote.line_items = updates.pop("line_items")
-        quote.subtotal, quote.total_cost, quote.total_margin_pct = _compute_quote_totals(quote.line_items or [])
-    for field, value in updates.items():
-        setattr(quote, field, value)
-    db.commit()
-    # Eager-load relations for serialization
-    quote = db.query(Quote).options(*_quote_load_options()).filter(Quote.id == quote.id).first()
-    return quote_to_dict(quote, db)
-
-
 @router.delete("/api/quotes/{quote_id}")
 async def delete_quote(
     quote_id: int,
@@ -491,19 +465,6 @@ async def quote_result(
         "req_status": req.status if req else None,
         "status_changed": True,
     }
-
-
-@router.post("/api/quotes/{quote_id}/revise")
-async def revise_quote(quote_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
-    from ...dependencies import get_quote_for_user
-
-    old = get_quote_for_user(db, user, quote_id)
-    if not old:
-        raise HTTPException(404, "Quote not found")
-    new_quote = _build_revision(old, user)
-    db.add(new_quote)
-    db.commit()
-    return quote_to_dict(new_quote, db)
 
 
 @router.post("/api/quotes/{quote_id}/reopen")
