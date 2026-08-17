@@ -16,6 +16,7 @@ Depends on: buyplan_scoring, buyplan_po (_line_amount), buyplan_reports
 """
 
 from datetime import UTC, datetime
+from decimal import ROUND_HALF_UP, Decimal
 
 from loguru import logger
 from sqlalchemy import select
@@ -39,6 +40,7 @@ from ...models.buy_plan import (
 from ..buyplan_scoring import assign_buyer, score_offer
 from .buyplan_po import _line_amount
 from .buyplan_reports import generate_case_report
+from .money import CENT, pct, to_money
 
 # ── Workflow: Submit ─────────────────────────────────────────────────
 
@@ -791,11 +793,13 @@ def _apply_line_edits(plan: BuyPlan, edits: list[dict], db: Session):
             if not offer:
                 raise ValueError(f"Offer {edit['offer_id']} not found")
 
-            unit_cost = float(offer.unit_price) if offer.unit_price else None
-            unit_sell = float(requirement.target_price) if requirement and requirement.target_price else None
+            # Decimal end-to-end (QC money-math-float): unit_price/target_price are
+            # Numeric columns — a float round-trip here re-introduces cent drift.
+            unit_cost = offer.unit_price if offer.unit_price else None
+            unit_sell = requirement.target_price if requirement and requirement.target_price else None
             margin_pct = None
             if unit_sell and unit_cost and unit_sell > 0:
-                margin_pct = round(((unit_sell - unit_cost) / unit_sell) * 100, 2)
+                margin_pct = pct(unit_sell - unit_cost, unit_sell)
 
             buyer, reason = assign_buyer(offer, offer.vendor_card, db)
             ai_score = score_offer(offer, requirement, offer.vendor_card) if requirement else None
@@ -830,11 +834,12 @@ def _apply_line_overrides(plan: BuyPlan, overrides: list[dict], db: Session):
             offer = db.get(Offer, ovr["offer_id"])
             if offer:
                 line.offer_id = offer.id
-                line.unit_cost = float(offer.unit_price) if offer.unit_price else None
-                if line.unit_sell and line.unit_cost and float(line.unit_sell) > 0:
-                    line.margin_pct = round(
-                        ((float(line.unit_sell) - float(line.unit_cost)) / float(line.unit_sell)) * 100, 2
-                    )
+                line.unit_cost = offer.unit_price if offer.unit_price else None
+                # to_money: unit_sell may still be an in-session float from a legacy
+                # writer — coerce exactly before Decimal arithmetic.
+                sell, cost = to_money(line.unit_sell), to_money(line.unit_cost)
+                if sell and cost and sell > 0:
+                    line.margin_pct = pct(sell - cost, sell)
 
         if ovr.get("quantity"):
             line.quantity = ovr["quantity"]
@@ -858,22 +863,24 @@ def _recalculate_financials(plan: BuyPlan):
     free-sample) reports ``0.0`` ("$0.00", a real fact) instead of ``None`` ("no data",
     which would be wrong — the data IS there, it's just zero).
     """
-    total_cost = 0.0
-    total_revenue = 0.0
+    total_cost = Decimal("0")
+    total_revenue = Decimal("0")
     has_cost = False
     has_revenue = False
     for line in plan.lines:
+        # to_money: a line freshly written this session may still carry a float from a
+        # legacy writer — coerce exactly (via str) before Decimal arithmetic.
         if line.unit_cost is not None and line.quantity:
-            total_cost += float(line.unit_cost) * line.quantity
+            total_cost += to_money(line.unit_cost) * line.quantity
             has_cost = True
         if line.unit_sell is not None and line.quantity:
-            total_revenue += float(line.unit_sell) * line.quantity
+            total_revenue += to_money(line.unit_sell) * line.quantity
             has_revenue = True
 
-    plan.total_cost = round(total_cost, 2) if has_cost else None
-    plan.total_revenue = round(total_revenue, 2) if has_revenue else None
+    plan.total_cost = total_cost.quantize(CENT, rounding=ROUND_HALF_UP) if has_cost else None
+    plan.total_revenue = total_revenue.quantize(CENT, rounding=ROUND_HALF_UP) if has_revenue else None
     if total_revenue > 0:
-        plan.total_margin_pct = round(((total_revenue - total_cost) / total_revenue) * 100, 2)
+        plan.total_margin_pct = pct(total_revenue - total_cost, total_revenue)
     else:
         plan.total_margin_pct = None
 

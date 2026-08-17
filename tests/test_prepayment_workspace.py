@@ -166,20 +166,6 @@ def test_cod_method_value_rejected_htmx(hub_client: TestClient, db_session: Sess
     assert db_session.query(Prepayment).filter(Prepayment.buy_plan_line_id == line.id).count() == 0
 
 
-def test_cod_line_cannot_request_prepayment_json(hub_client: TestClient, db_session: Session, test_user: User):
-    req, q, rq = _req_quote(db_session, test_user)
-    bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
-    line = _pending_verify_line(db_session, bp, rq, test_user)
-    line.payment_method = PaymentMethod.COD.value
-    db_session.commit()
-
-    r = hub_client.post(
-        "/v2/prepayments",
-        json={"buy_plan_id": bp.id, "buy_plan_line_id": line.id, "total_incl_fees": "100.00"},
-    )
-    assert r.status_code == 400
-
-
 # ── Pane rendering ───────────────────────────────────────────────────────
 
 

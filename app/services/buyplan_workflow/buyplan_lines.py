@@ -31,6 +31,7 @@ from .buyplan_approval import (
     _recalculate_financials,
     check_completion,
 )
+from .money import pct, to_money
 
 # ── Workflow: Re-source (PO cancelled → open claim pool) ─────────────
 
@@ -376,10 +377,14 @@ def _ensure_can_edit_lines(user: User, plan: BuyPlan) -> None:
         raise PermissionError("You cannot edit this buy plan's lines in its current status.")
 
 
-def _line_margin_pct(unit_sell: float | None, unit_cost: float | None) -> float | None:
-    """Per-line margin % from sell/cost (None when sell is missing/zero)."""
-    if unit_sell and unit_cost and unit_sell > 0:
-        return round(((unit_sell - unit_cost) / unit_sell) * 100, 2)
+def _line_margin_pct(unit_sell, unit_cost):
+    """Per-line margin % from sell/cost (None when sell is missing/zero).
+
+    Decimal end-to-end (QC money-math-float); number-like legacy inputs coerced exactly.
+    """
+    sell, cost = to_money(unit_sell), to_money(unit_cost)
+    if sell and cost and sell > 0:
+        return pct(sell - cost, sell)
     return None
 
 
@@ -543,7 +548,7 @@ def _apply_line_edit(
             )
             edits.append(FieldEdit(field="vendor", old=old_vendor, new=offer.vendor_name or str(offer.id)))
             line.offer_id = offer.id
-            line.unit_cost = float(offer.unit_price) if offer.unit_price is not None else None
+            line.unit_cost = offer.unit_price if offer.unit_price is not None else None
             # Stale-score fix: an offer swap must re-score the line against the NEW
             # offer, same as a fresh add via _build_new_line — otherwise ai_score keeps
             # scoring the line against a vendor it no longer points at.
@@ -563,7 +568,7 @@ def _apply_line_edit(
             line.quantity = quantity_int
 
     if unit_sell is not _UNSET:
-        new_sell = float(unit_sell) if unit_sell is not None else None
+        new_sell = to_money(unit_sell)
         edits.extend(diff_fields(line, {"unit_sell": new_sell}))
         line.unit_sell = new_sell
 
@@ -587,17 +592,14 @@ def _apply_line_edit(
             line.estimated_ship_date = estimated_ship_date
 
     if unit_cost is not _UNSET and unit_cost is not None:
-        new_cost = float(unit_cost)
+        new_cost = to_money(unit_cost)
         if diff_fields(line, {"unit_cost": new_cost}):
             if not _manager_verify_override(actor, line):
                 raise ValueError("Only a manager can edit the unit cost at verify.")
             edits.extend(diff_fields(line, {"unit_cost": new_cost}))
             line.unit_cost = new_cost
 
-    line.margin_pct = _line_margin_pct(
-        float(line.unit_sell) if line.unit_sell is not None else None,
-        float(line.unit_cost) if line.unit_cost is not None else None,
-    )
+    line.margin_pct = _line_margin_pct(line.unit_sell, line.unit_cost)
     return edits
 
 
@@ -649,11 +651,11 @@ def _build_new_line(
         raise ValueError(f"Offer {offer_id} not found")
     _ensure_offer_attachable(offer, plan, requirement.id)
 
-    unit_cost = float(offer.unit_price) if offer.unit_price is not None else None
+    unit_cost = offer.unit_price if offer.unit_price is not None else None
     resolved_sell = (
-        float(unit_sell)
+        to_money(unit_sell)
         if unit_sell is not None
-        else (float(requirement.target_price) if requirement.target_price else None)
+        else (requirement.target_price if requirement.target_price else None)
     )
     buyer, reason = assign_buyer(offer, offer.vendor_card, db)
     return BuyPlanLine(

@@ -32,8 +32,9 @@ from app.models import Company, User
 from app.models.excess import ExcessList
 from app.routers.resell import _close_at_display, _detail_context, _is_live, _list_cards
 from app.services.excess_mirror import publish_list
-from app.services.excess_service import create_excess_list, import_line_items
+from app.services.excess_service import create_excess_list
 from tests.conftest import engine
+from tests.fixtures.excess_import import import_line_items
 
 _ = engine  # Ensure test DB tables are created
 
