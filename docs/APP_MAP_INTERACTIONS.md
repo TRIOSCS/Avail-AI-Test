@@ -2760,6 +2760,19 @@ send.) A weekly ACTIVE re-search job exists but ships **flag-OFF**
 `hotlist_research_max_parts`, ICS/NC/TBF via the workers' 7-day dedup) — owner
 enables it later; see the master backlog.
 
+**"Looking again" → one-tap clone:** a sent digest line whose tracked outcome is
+`looking_again` renders a **Clone to Active** button in its outcome cell
+(`_outreach_line_cells.html`). `POST /v2/partials/proactive/lines/{id}/clone`
+(`proactive_line_clone`) calls `proactive_digest.clone_line_to_active` — same edit
+rights as tracking (line's salesperson or manager/admin) — which resolves the source
+part (the match's `requirement_id`, else the newest requirement for the same
+normalized MPN on one of the company's requisitions), copies it via
+`clone_parts_to_active` (§ 1c: fresh OPEN requisition, `cloned_from_id`
+provenance, reference offers, buyer task), stamps
+`ProactiveOutreachLine.produced_requisition_id`, and fires `run_search_and_publish`
+as a background task. The row re-renders with "Cloned → REQ-xxx" in place of the
+button (idempotent — a second tap is refused on the stamped id).
+
 ### Unified AI Email Drafting (RFQ rephrase · vendor reply · follow-up)
 
 ```
