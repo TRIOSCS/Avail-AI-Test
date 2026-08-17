@@ -162,14 +162,14 @@ pip-audit==2.10.1
     # via -r requirements-dev.in
 pip-requirements-parser==32.0.1
     # via pip-audit
-pip-tools==7.6.0
+pip-tools==7.6.1
     # via -r requirements-dev.in
 platformdirs==4.10.0
     # via
     #   pip-audit
     #   python-discovery
     #   virtualenv
-playwright==1.61.0
+playwright==1.62.0
     # via
     #   -r requirements-dev.in
     #   pytest-playwright
@@ -177,7 +177,7 @@ pluggy==1.6.0
     # via
     #   pytest
     #   pytest-cov
-pre-commit==4.6.1
+pre-commit==4.6.2
     # via -r requirements-dev.in
 prompt-toolkit==3.0.52
     # via ipython
@@ -229,7 +229,7 @@ pytest-base-url==2.1.0
     # via pytest-playwright
 pytest-cov==7.1.0
     # via -r requirements-dev.in
-pytest-playwright==0.8.0
+pytest-playwright==0.9.0
     # via -r requirements-dev.in
 pytest-timeout==2.4.0
     # via -r requirements-dev.in
@@ -272,7 +272,7 @@ rpds-py==2026.5.1
     # via
     #   jsonschema
     #   referencing
-ruff==0.16.1
+ruff==0.16.3
     # via -r requirements-dev.in
 schemathesis==4.24.3
     # via -r requirements-dev.in
