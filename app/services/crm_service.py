@@ -34,10 +34,10 @@ def next_quote_number(db: Session) -> str:
     """Generate next sequential quote number: Q-YYYY-NNNN.
 
     Takes the MAX numeric sequence across the year's quote numbers rather than
-    trusting the newest row: revising a non-latest quote re-issues its
-    canonical number on a NEW row (the old one becomes ...-R{n}), so
-    newest-by-id can lag the real maximum and every subsequent create would
-    collide on the unique constraint (QC 2026-08-08). The newest-row SELECT
+    trusting the newest row (QC 2026-08-08): under the oq-04 convention a
+    revision row carries `{base}-R{n}` — the prefix regex still reads its base
+    sequence, and newest-by-id can lag the real maximum, so every subsequent
+    create would collide on the unique constraint. The newest-row SELECT
     FOR UPDATE is retained as the concurrency mutex it always was.
     """
     year = datetime.now(UTC).year
