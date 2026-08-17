@@ -63,12 +63,14 @@ def _make_quote(
     site: CustomerSite,
     subtotal: float,
     created_at: datetime | None = None,
+    result: str | None = "won",
 ) -> Quote:
     q = Quote(
         requisition_id=req.id,
         customer_site_id=site.id,
-        quote_number=f"Q-{req.id}-001",
+        quote_number=f"Q-{req.id}-{subtotal:.0f}",
         status="sent",
+        result=result,
         line_items=[],
         subtotal=subtotal,
         total_cost=subtotal * 0.5,
@@ -154,6 +156,25 @@ class TestCompanyCommercialStats:
         result = company_commercial_stats(db_session, [co.id])
         assert co.id in result
         assert result[co.id]["revenue_90d"] == pytest.approx(5000.0)
+
+    def test_revenue_90d_counts_only_the_won_quote(self, db_session: Session):
+        """QC oq-06: a WON requisition carries the original, revisions, and lost
+        attempts — only the quote that actually WON may count, or the deal is
+        double/triple-counted."""
+        from app.services.crm_service import company_commercial_stats
+
+        co = _make_company(db_session, "DoubleCount Co")
+        site = _make_site(db_session, co)
+        real_now = datetime.now(UTC)
+        req = _make_req(db_session, site, "won", created_at=real_now - timedelta(days=10))
+        _make_quote(db_session, req, site, subtotal=8000.0, created_at=real_now - timedelta(days=10), result="won")
+        # superseded revision + a lost attempt on the SAME won requisition
+        _make_quote(db_session, req, site, subtotal=7500.0, created_at=real_now - timedelta(days=12), result=None)
+        _make_quote(db_session, req, site, subtotal=7000.0, created_at=real_now - timedelta(days=14), result="lost")
+        db_session.commit()
+
+        result = company_commercial_stats(db_session, [co.id])
+        assert result[co.id]["revenue_90d"] == pytest.approx(8000.0)
 
     def test_last_req_date_is_max_created_at(self, db_session: Session):
         """last_req_date is the ISO string of the most recent requisition's
