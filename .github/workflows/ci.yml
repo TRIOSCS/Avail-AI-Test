@@ -29,10 +29,13 @@ jobs:
     # ~24 min on a 2-vCPU runner and the timeout had been re-tuned three times
     # as the suite grew (15 → 25 → 40). Sharded into a 2-way matrix via
     # scripts/ci_shard.py (deterministic sorted-file round-robin — see that
-    # script's header) so each shard carries ~half the pytest wall-clock;
-    # 25 min = ~12 min of test-running headroom plus the one-time setup/gate
-    # cost that shard 0 alone still pays (see the per-step `if:` gates below).
-    timeout-minutes: 25
+    # script's header) so each shard carries ~half the pytest wall-clock.
+    # 2026-08-17: 25 min became the cliff — green shards were already at 15-21
+    # min and the #878/#879/#880 test additions pushed main past it (both
+    # shards "cancelled" at exactly 25:00 = job timeout, not a hang). 40 min
+    # restores headroom; when shards pass ~30 min real, move to a 3-way matrix
+    # instead of raising this again.
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
