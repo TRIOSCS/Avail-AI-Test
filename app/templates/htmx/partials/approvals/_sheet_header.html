@@ -83,7 +83,10 @@
           <template x-if="!editing">
             <span class="inline-flex items-center gap-1">
               {% if value %}{{ copy_chip(value, label=label ~ ' ' ~ value) }}{% endif %}
-              <button type="button" @click="editing = true; $nextTick(() => $refs.inp.focus())"
+              {# $refs from an x-if clone can lag a tick — fall back to a query and
+                 never throw (a missed autofocus is cosmetic; a TypeError kills the
+                 handler chain). #}
+              <button type="button" @click="editing = true; $nextTick(() => ($refs.inp || $root.querySelector('input'))?.focus())"
                       class="cursor-pointer rounded px-1 -mx-0.5 text-xs hover:bg-brand-50 transition-colors border-b border-dashed border-brand-200 {{ 'text-gray-300' if not value else 'text-gray-500' }}"
                       title="Click to edit {{ label }}">{{ '✎' if value else label ~ ' —' }}</button>
             </span>
