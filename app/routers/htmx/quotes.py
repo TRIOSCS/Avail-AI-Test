@@ -37,6 +37,7 @@ from ...models import (
     User,
 )
 from ...services.buyplan_naming import summarize_top_flag
+from ...services.crm_service import quote_base_number, revision_quote_number
 from ...services.quote_requisitions import (
     link_quote_to_requisitions,
     requisition_ids_for_quote,
@@ -604,7 +605,9 @@ async def revise_quote_htmx(
     new_quote = Quote(
         requisition_id=quote.requisition_id,
         customer_site_id=quote.customer_site_id,
-        quote_number=f"{quote.quote_number}-R{new_rev}",
+        # oq-04 convention: base + -R{revision-1}; strips any existing suffix so
+        # re-revising Q-X-R1 yields Q-X-R2, not Q-X-R1-R2.
+        quote_number=revision_quote_number(quote_base_number(quote.quote_number), new_rev),
         revision=new_rev,
         line_items=quote.line_items or [],
         subtotal=quote.subtotal,
