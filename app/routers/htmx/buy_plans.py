@@ -170,6 +170,7 @@ async def sales_order_new(
     request: Request,
     requisition_id: int | None = None,
     order_type: str = "",
+    embed: str = "",
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -183,11 +184,10 @@ async def sales_order_new(
     the one-segment retired-lens redirect ``{tab}`` converter.
 
     ``order_type`` drives the path (spec §3): SOURCING types (New / Revision) list open
-    (OPEN_PIPELINE) requisitions carrying at least one ACTIVE offer and build via the
-    per-requirement offer/sell form; NON-SOURCING types (Stock Sale / Testing Service /
-    Comps) take the LITE path — any open requisition qualifies (no offers needed) and
-    the builder collapses to a create-only confirm. Access via ``get_req_for_user``
-    (404 for a restricted role that does not own the requisition).
+    (OPEN_PIPELINE) requisitions carrying at least one ACTIVE offer; NON-SOURCING types
+    (Stock Sale / Testing Service / Comps) take the LITE path — any open requisition
+    qualifies. Deal Sheet T3: picking a row CREATES the draft directly (recommended
+    offers auto-picked by the builder) — the create route enforces requisition access.
     """
     from sqlalchemy import func
 
@@ -197,9 +197,7 @@ async def sales_order_new(
         RequisitionStatus,
         SalesOrderType,
     )
-    from ...dependencies import get_req_for_user
     from ...models import Offer, Requirement
-    from ...services.quote_builder_service import apply_smart_defaults, get_builder_data
 
     otype = _normalize_order_type(order_type)
     sourcing = otype in {t.value for t in SOURCING_ORDER_TYPES}
@@ -209,17 +207,13 @@ async def sales_order_new(
             "order_type": otype,
             "sourcing": sourcing,
             "order_type_choices": [(t.value, t.value.replace("_", " ").title()) for t in SalesOrderType],
+            # Deal Sheet T3: embed=aw hosts the picker inside #aw-pane (list stays
+            # alive). Picking a requisition CREATES the draft directly (recommended
+            # offers auto-picked) — the old per-requirement builder grid is gone; the
+            # sheet's offer picker is the one line editor.
+            "embed": "aw" if embed == "aw" else "",
         }
     )
-
-    if requisition_id is not None:
-        req = get_req_for_user(db, user, requisition_id)
-        lines = []
-        if sourcing:
-            lines = get_builder_data(req.id, db)
-            apply_smart_defaults(lines)
-        ctx.update({"selected_req": req, "lines": lines})
-        return template_response("htmx/partials/approvals/_sales_order_new.html", ctx)
 
     # Picker mode: open requisitions, scoped to the viewer. Sourcing types additionally
     # require at least one active offer (the plan is built FROM offers); non-sourcing
@@ -325,24 +319,40 @@ async def sales_order_create(
         # An open Sales Order already exists for this requisition — open it instead of
         # 500ing. The exception carries the existing plan id, so no re-query is needed.
         existing_id = exc.existing_plan_id
-        resp = await buy_plan_detail_partial(request, existing_id, user, db)
-        resp.headers["HX-Trigger"] = json.dumps(
-            {
-                "showToast": {
-                    "message": f"There is already an open buy plan for this requisition (plan #{existing_id}).",
-                    "type": "warning",
-                }
+        resp = await _sales_order_created_response(request, user, db, existing_id, form)
+        toast = {
+            "showToast": {
+                "message": f"There is already an open buy plan for this requisition (plan #{existing_id}).",
+                "type": "warning",
             }
-        )
-        resp.headers["HX-Push-Url"] = f"/v2/buy-plans/{existing_id}"
+        }
+        if form.get("embed") == "aw":
+            toast["awListRefresh"] = True
+            toast["aw-mark"] = {"key": f"plan-{existing_id}"}
+        resp.headers["HX-Trigger"] = json.dumps(toast)
         return resp
     except ValueError as e:
         # Any other origination failure (e.g. requisition has no requirements). Return a
         # curated client message rather than echoing the raw builder error.
         raise HTTPException(400, "Could not build a buy plan from the selected offers.") from e
 
-    resp = await buy_plan_detail_partial(request, plan.id, user, db)
-    resp.headers["HX-Push-Url"] = f"/v2/buy-plans/{plan.id}"
+    resp = await _sales_order_created_response(request, user, db, plan.id, form)
+    if form.get("embed") == "aw":
+        resp.headers["HX-Trigger"] = json.dumps({"awListRefresh": True, "aw-mark": {"key": f"plan-{plan.id}"}})
+    return resp
+
+
+async def _sales_order_created_response(request: Request, user: User, db: Session, plan_id: int, form):
+    """Post-origination render: the workspace pane (embed=aw — the pane becomes the new
+    draft's Deal Sheet, deep-link pushed) or the legacy detail page."""
+    if form.get("embed") == "aw":
+        from .approvals_hub import render_plan_pane
+
+        resp = render_plan_pane(request, user, db, plan_id, lens="sales-orders")
+        resp.headers["HX-Push-Url"] = f"/v2/approvals?tab=sales-orders&select={plan_id}"
+        return resp
+    resp = await buy_plan_detail_partial(request, plan_id, user, db)
+    resp.headers["HX-Push-Url"] = f"/v2/buy-plans/{plan_id}"
     return resp
 
 

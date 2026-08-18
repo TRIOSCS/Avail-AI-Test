@@ -1,0 +1,12 @@
+{#
+  approvals/_pane_blank.html — the workspace pane's empty state ("select an item"),
+  extracted from _workspace_split.html so origination's Cancel (and anything else)
+  can restore it via GET /v2/partials/approvals/pane/blank.
+  Receives: nothing. Called by: _workspace_split.html + approvals_hub.pane_blank.
+#}
+<div class="h-full flex items-center justify-center text-sm text-gray-400 p-8 text-center">
+  Select an item from the list — or start a
+  <button class="text-accent-600 font-medium mx-1"
+          hx-get="/v2/partials/buy-plans/sales-orders/new?embed=aw"
+          hx-target="#aw-pane" hx-swap="innerHTML" hx-indicator="#aw-pane-ind">new sales order</button>.
+</div>

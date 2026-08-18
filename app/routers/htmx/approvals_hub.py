@@ -502,6 +502,13 @@ async def approvals_plan_pane(
     return render_plan_pane(request, user, db, plan_id, lens)
 
 
+@router.get("/v2/partials/approvals/pane/blank", response_class=HTMLResponse)
+async def approvals_pane_blank(request: Request, user: User = Depends(require_user)):
+    """The pane's empty state — origination's Cancel restores it without touching the
+    list (Deal Sheet T3)."""
+    return template_response("htmx/partials/approvals/_pane_blank.html", {"request": request})
+
+
 @router.post("/v2/partials/approvals/plan/{plan_id:int}/qp-sales", response_class=HTMLResponse)
 async def approvals_plan_qp_sales(
     request: Request,

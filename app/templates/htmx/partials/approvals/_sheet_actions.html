@@ -34,9 +34,18 @@
       </button>
     </form>
   </div>
-  {% if bp.approval_notes %}
-  <div class="text-xs text-gray-500 italic">Last decision note: “{{ bp.approval_notes }}”</div>
-  {% endif %}
+  <div class="flex items-center justify-between gap-2">
+    {% if bp.approval_notes %}
+    <div class="text-xs text-gray-500 italic">Last decision note: “{{ bp.approval_notes }}”</div>
+    {% else %}<span></span>{% endif %}
+    <form hx-post="/v2/partials/buy-plans/{{ bp.id }}/cancel" hx-target="#aw-pane" hx-swap="innerHTML" class="inline"
+          hx-confirm="Discard this draft? It moves to cancelled and disappears from the live list.">
+      <input type="hidden" name="origin" value="approvals_workspace">
+      <input type="hidden" name="lens" value="{{ lens }}">
+      <input type="hidden" name="reason" value="Discarded draft">
+      <button type="submit" data-loading-disable class="text-[11px] text-gray-400 hover:text-rose-600 underline decoration-dashed">Discard draft</button>
+    </form>
+  </div>
 </div>
 
 {% elif bp.status == 'pending' and can_decide %}

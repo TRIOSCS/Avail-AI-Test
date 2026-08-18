@@ -29,14 +29,12 @@ from ...dependencies import (
     require_user,
 )
 from ...models import (
-    BuyPlanLine,
     CustomerSite,
     Offer,
     Quote,
     QuoteLine,
     User,
 )
-from ...services.buyplan_naming import summarize_top_flag
 from ...services.crm_service import quote_base_number, revision_quote_number
 from ...services.quote_requisitions import (
     link_quote_to_requisitions,
@@ -50,7 +48,7 @@ from ...services.quote_send import (
 )
 from ...services.status_machine import require_valid_transition
 from ...template_env import template_response
-from ._shared import _base_ctx, _is_ops_member, _parse_date_safe
+from ._shared import _base_ctx, _parse_date_safe
 
 router = APIRouter(tags=["htmx-views"])
 
@@ -746,9 +744,11 @@ async def build_buy_plan_htmx(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Build a buy plan from a won quote.
+    """Build a buy plan from a won quote, then land on its Deal Sheet.
 
-    Returns buy plan detail partial.
+    Deal Sheet T3: responds HX-Redirect into the Approvals Workspace deep link
+    (the pane opens the new draft, URL truthful) — the old hand-rolled render of
+    the legacy detail page (incomplete context, no pushed URL) is gone.
     """
     from ...services.buyplan_builder import build_buy_plan
 
@@ -767,12 +767,6 @@ async def build_buy_plan_htmx(
 
     logger.info("Buy plan #{} built from quote #{} by {}", plan.id, quote_id, user.email)
 
-    # Return buy plan detail partial
-    bp_lines = db.query(BuyPlanLine).filter(BuyPlanLine.buy_plan_id == plan.id).all()
-    ctx = _base_ctx(request, user, "buy-plans")
-    ctx["bp"] = plan
-    ctx["lines"] = bp_lines
-    ctx["user"] = user
-    ctx["is_ops_member"] = _is_ops_member(user, db)
-    ctx["top_flag"] = summarize_top_flag(plan.ai_flags)
-    return template_response("htmx/partials/buy_plans/detail.html", ctx)
+    resp = HTMLResponse("")
+    resp.headers["HX-Redirect"] = f"/v2/approvals?tab=sales-orders&select={plan.id}"
+    return resp

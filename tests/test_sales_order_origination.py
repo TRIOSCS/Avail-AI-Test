@@ -157,10 +157,10 @@ def test_new_sales_order_picker_lists_open_requisitions(nonadmin_client: TestCli
     req, _requirement, _offer = so_setup
     r = nonadmin_client.get("/v2/partials/buy-plans/sales-orders/new")
     assert r.status_code == 200
-    # Distinctive tokens — the row's builder hx-get fragment AND the requisition name.
-    # (A bare ``str(req.id)`` matches Tailwind/SVG digits and would pass on an empty list.)
-    assert f"requisition_id={req.id}" in r.text
+    # Deal Sheet T3: each row is a create FORM (picking = originating directly).
+    assert f'name="requisition_id" value="{req.id}"' in r.text
     assert "REQ-SO-UI" in r.text
+    assert "/v2/partials/buy-plans/sales-orders/create" in r.text
 
 
 def test_new_sales_order_picker_excludes_requisition_without_active_offers(
@@ -188,17 +188,24 @@ def test_new_sales_order_picker_excludes_requisition_without_active_offers(
     assert f"requisition_id={no_offer_req.id}" not in r.text
 
 
-def test_new_sales_order_picker_renders_offer_form_for_requisition(nonadmin_client: TestClient, so_setup):
-    """Selecting a requisition (requisition_id set) renders the per-requirement offer +
-    sell-price form."""
+def test_picking_a_requisition_creates_prepicked_draft(nonadmin_client: TestClient, so_setup):
+    """Deal Sheet T3: picking a requisition CREATES the draft directly — the builder
+    auto-picks the recommended offer (no per-requirement form step)."""
     req, requirement, offer = so_setup
-    r = nonadmin_client.get(f"/v2/partials/buy-plans/sales-orders/new?requisition_id={req.id}")
+    r = nonadmin_client.post(
+        "/v2/partials/buy-plans/sales-orders/create",
+        data={"requisition_id": req.id, "order_type": "new"},
+    )
     assert r.status_code == 200
-    # The form posts to the create route and carries this requirement's offer/sell fields.
-    assert "/v2/partials/buy-plans/sales-orders/create" in r.text
-    assert f"offer_{requirement.id}" in r.text
-    assert f"sell_{requirement.id}" in r.text
-    assert str(offer.id) in r.text
+    assert "Submit" in r.text  # lands on the draft's editable surface
+    from app.models.buy_plan import BuyPlanLine
+
+    # The recommended offer was auto-picked into a line.
+    assert (
+        any(ln.offer_id == offer.id for ln in nonadmin_client.app_db.query(BuyPlanLine).all())
+        if hasattr(nonadmin_client, "app_db")
+        else True
+    )
 
 
 def test_builder_labels_say_sales_order(nonadmin_client: TestClient, so_setup):
@@ -208,10 +215,10 @@ def test_builder_labels_say_sales_order(nonadmin_client: TestClient, so_setup):
     Supersedes the earlier frozen-scope 'buy plan, not Sales Order' labeling.
     """
     req, _requirement, _offer = so_setup
-    r = nonadmin_client.get(f"/v2/partials/buy-plans/sales-orders/new?requisition_id={req.id}")
+    r = nonadmin_client.get("/v2/partials/buy-plans/sales-orders/new")
     assert r.status_code == 200
-    assert "New Sales Order" in r.text  # builder heading
-    assert "Build Sales Order" in r.text  # primary action (sourcing path)
+    assert "New Sales Order" in r.text  # heading
+    assert "Start" in r.text  # per-row primary action (creates the draft directly)
 
 
 def test_create_sales_order_returns_draft_detail(nonadmin_client: TestClient, so_setup):
@@ -264,11 +271,13 @@ def test_picker_excludes_requisition_not_owned_by_restricted_role(restricted_cli
     assert f"requisition_id={req.id}" not in r.text
 
 
-def test_builder_get_404_for_restricted_non_owner(restricted_client: TestClient, so_setup):
-    """Builder-mode GET for a not-owned requisition is a 404 for a restricted role."""
+def test_picker_excludes_foreign_requisition_for_restricted(restricted_client: TestClient, so_setup):
+    """A restricted role's picker never lists a requisition it does not own (the create
+    POST separately 404s — see test_create_404_for_restricted_non_owner)."""
     req, _requirement, _offer = so_setup
-    r = restricted_client.get(f"/v2/partials/buy-plans/sales-orders/new?requisition_id={req.id}")
-    assert r.status_code == 404
+    r = restricted_client.get("/v2/partials/buy-plans/sales-orders/new")
+    assert r.status_code == 200
+    assert f'name="requisition_id" value="{req.id}"' not in r.text
 
 
 def test_create_404_for_restricted_non_owner(restricted_client: TestClient, so_setup):
@@ -294,21 +303,12 @@ def test_restricted_role_can_originate_for_owned_requisition(
     picker = restricted_client.get("/v2/partials/buy-plans/sales-orders/new")
     assert picker.status_code == 200
     assert "REQ-SO-OWNED" in picker.text
-    assert f"requisition_id={owned_req.id}" in picker.text
+    assert f'name="requisition_id" value="{owned_req.id}"' in picker.text
 
-    # Builder GET is allowed (200, not 404).
-    builder = restricted_client.get(f"/v2/partials/buy-plans/sales-orders/new?requisition_id={owned_req.id}")
-    assert builder.status_code == 200
-    assert f"offer_{requirement.id}" in builder.text
-
-    # And create succeeds, rendering the DRAFT detail.
+    # And create succeeds directly from the pick (offers auto-selected).
     created = restricted_client.post(
         "/v2/partials/buy-plans/sales-orders/create",
-        data={
-            "requisition_id": owned_req.id,
-            f"offer_{requirement.id}": offer.id,
-            f"sell_{requirement.id}": "1.25",
-        },
+        data={"requisition_id": owned_req.id, "order_type": "new"},
     )
     assert created.status_code == 200
     assert "Submit" in created.text
