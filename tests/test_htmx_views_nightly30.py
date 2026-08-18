@@ -851,9 +851,11 @@ class TestBuyPlanDetail:
         assert resp.status_code == 404
 
     def test_detail_found(self, client: TestClient, test_buy_plan):
-        resp = client.get(f"/v2/partials/buy-plans/{test_buy_plan.id}", headers=HX)
-        assert resp.status_code == 200
-        assert f"Buy Plan #{test_buy_plan.id}" in resp.text
+        # The detail page retired into the workspace (Deal Sheet T3b): a found plan 308s
+        # to the deep link (a missing one still 404s first — see test_detail_not_found).
+        resp = client.get(f"/v2/partials/buy-plans/{test_buy_plan.id}", headers=HX, follow_redirects=False)
+        assert resp.status_code == 308
+        assert resp.headers["location"] == f"/v2/approvals?tab=sales-orders&select={test_buy_plan.id}"
 
 
 class TestBuyPlanSubmit:

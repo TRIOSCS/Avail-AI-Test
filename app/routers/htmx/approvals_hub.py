@@ -615,9 +615,9 @@ def render_po_pane(request: Request, user: User, db: Session, line_id: int) -> H
     display-only sent-mail detection. Approved/re-sourcing/issue states render their
     stamps.
     """
-    from ...constants import PO_LINE_PAYMENT_METHODS
+    from ...constants import PO_LINE_PAYMENT_METHODS, LineIssueType
     from ...dependencies import get_buyplan_for_user, is_manager_or_admin
-    from ...services.buyplan_workflow import can_edit_buy_plan_lines
+    from ...services.buyplan_workflow import _can_halt, can_edit_buy_plan_lines
     from ...services.field_audit import manager_edited_line_ids
     from ...services.qp_workspace import qp_for_line
     from ...services.stale_guard import stale_token
@@ -649,6 +649,8 @@ def render_po_pane(request: Request, user: User, db: Session, line_id: int) -> H
     limit = getattr(user, "purchase_order_approval_limit", None)
     amount = float(line.unit_cost or 0) * (line.quantity or 0)
 
+    from ...dependencies import can_request_prepayment
+    from ...services.prepayment_service import prepayment_state_for_lines
     from .buy_plans import _can_resource  # lazy: buy_plans lazily imports this module back
 
     ctx = _base_ctx(request, user, "buy-plans")
@@ -675,6 +677,15 @@ def render_po_pane(request: Request, user: User, db: Session, line_id: int) -> H
             # Stale-edit guard (2.1): the confirm-PO / line-edit forms round-trip the
             # LINE's token (narrowest edited object).
             "line_stale_token": stale_token(line),
+            # Prepayment affordances (Deal Sheet T3): the request button + state pill
+            # moved here when the legacy detail page retired — call-site gated exactly
+            # like the old detail lines were.
+            "can_request_prepay": can_request_prepayment(user, line),
+            "prepay_state": prepayment_state_for_lines(db, [line.id]).get(line.id),
+            # Issue relay (Deal Sheet T3b): flag/resolve moved here from the retired
+            # detail page. Resolve mirrors the service's supervisor/ops gate (_can_halt).
+            "issue_types": [(t.value, t.value.replace("_", " ").title()) for t in LineIssueType],
+            "can_resolve_issue": _can_halt(user, db),
             # Manager edit-anything at verify (2.3): the pane shows the edit form with
             # the SAME predicate the /lines/{id}/edit service gate enforces (manager on
             # an editable plan, line at pending_verify), plus the edited-by marker.

@@ -28,7 +28,7 @@ from datetime import UTC, datetime
 import pytest
 from fastapi.testclient import TestClient
 
-from app.constants import BuyPlanLineStatus, BuyPlanStatus
+from app.constants import BuyPlanStatus
 from app.dependencies import require_user
 from app.main import app
 from app.models import User
@@ -36,7 +36,6 @@ from app.models.buy_plan import BuyPlan, BuyPlanLine
 from tests.conftest import _buyplan_line as _line
 from tests.conftest import _buyplan_plan as _plan
 from tests.conftest import _buyplan_req as _req
-from tests.conftest import _buyplan_requirement_of as _requirement_of
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -96,13 +95,14 @@ def test_new_param_lands_hub_on_create_flow(client: TestClient):
 
 
 def test_approvals_buy_plan_list_has_new_sales_order_link(client: TestClient):
-    """The workspace SO/BP lists carry the origination entry point (spec §8) — now a
-    direct load of the self-hosted picker into #main-content (hub ?new=1 retired)."""
+    """The workspace SO/BP lists carry the origination entry point (spec §8) — the
+    picker loads INTO the workspace pane (embed=aw; the list stays alive, Deal Sheet
+    T3)."""
     resp = client.get("/v2/partials/approvals/buy-plans/list")
     assert resp.status_code == 200
     assert "New sales order" in resp.text
-    assert 'hx-get="/v2/partials/buy-plans/sales-orders/new"' in resp.text
-    assert 'hx-target="#main-content"' in resp.text
+    assert 'hx-get="/v2/partials/buy-plans/sales-orders/new?embed=aw"' in resp.text
+    assert 'hx-target="#aw-pane"' in resp.text
 
 
 # ══ I — role×status edit gate ════════════════════════════════════════
@@ -151,39 +151,11 @@ def test_gate_terminal_locked_for_everyone(db_session, sales_user, manager_user,
     assert can_edit_buy_plan_lines(admin_user, plan) is False
 
 
-# ══ I — add / edit / remove recompute the header ═════════════════════
-
-
-def test_add_line_recomputes_header(db_session, test_user, test_requisition, test_offer):
-    from app.services.buyplan_workflow import add_buy_plan_line
-
-    plan = _plan(db_session, test_requisition, status=BuyPlanStatus.DRAFT.value)
-    _line(db_session, plan, quantity=100, unit_cost=1.00, unit_sell=2.00)  # cost 100, rev 200
-    requirement = _requirement_of(db_session, test_requisition)
-    # Attaching an offer now also validates requirement_id + ACTIVE status (mirrors the
-    # vendor picker) — anchor test_offer to the target requirement.
-    test_offer.requirement_id = requirement.id
-    db_session.commit()
-
-    # test_offer: unit_price 0.50; add 1000 @ sell 0.50 → cost 500, rev 500.
-    add_buy_plan_line(plan.id, requirement.id, test_offer.id, 1000, test_user, db_session, unit_sell=0.50)
-    db_session.commit()
-    db_session.refresh(plan)
-
-    assert len(plan.lines) == 2
-    assert float(plan.total_cost) == 600.0
-    assert float(plan.total_revenue) == 700.0
-
-
-def test_add_line_foreign_requirement_rejected(db_session, test_user, test_requisition, test_offer):
-    from app.services.buyplan_workflow import add_buy_plan_line
-
-    plan = _plan(db_session, test_requisition, status=BuyPlanStatus.DRAFT.value)
-    other = _req(db_session, test_user)  # a different requisition
-    foreign_req = _requirement_of(db_session, other)
-
-    with pytest.raises(ValueError, match="requisition"):
-        add_buy_plan_line(plan.id, foreign_req.id, test_offer.id, 10, test_user, db_session)
+# ══ I — line edits recompute the header ══════════════════════════════
+# Add / remove went through the bulk save when the per-line services were retired
+# (Deal Sheet T3b) — those invariants (recompute-on-add, foreign-requirement reject,
+# removal-by-omission recompute, cut-PO lines survive omission) live in
+# tests/test_buyplan_bulk_edit.py against bulk_edit_buy_plan_lines.
 
 
 def test_edit_line_unit_sell_recomputes_margin(db_session, test_user, test_requisition):
@@ -200,33 +172,6 @@ def test_edit_line_unit_sell_recomputes_margin(db_session, test_user, test_requi
     assert float(line.unit_sell) == 5.00
     assert float(plan.total_revenue) == 500.0  # 5 * 100
     assert float(plan.total_margin_pct) == 80.0  # (500-100)/500
-
-
-def test_remove_line_recomputes_header(db_session, test_user, test_requisition):
-    from app.services.buyplan_workflow import remove_buy_plan_line
-
-    plan = _plan(db_session, test_requisition, status=BuyPlanStatus.DRAFT.value)
-    keep = _line(db_session, plan, quantity=100, unit_cost=1.00, unit_sell=2.00)  # cost 100 rev 200
-    drop = _line(db_session, plan, quantity=50, unit_cost=4.00, unit_sell=6.00)  # cost 200 rev 300
-
-    remove_buy_plan_line(plan.id, drop.id, test_user, db_session)
-    db_session.commit()
-    db_session.refresh(plan)
-
-    assert [ln.id for ln in plan.lines] == [keep.id]
-    assert float(plan.total_cost) == 100.0
-    assert float(plan.total_revenue) == 200.0
-
-
-def test_remove_cut_po_line_rejected(db_session, manager_user, test_requisition):
-    from app.services.buyplan_workflow import remove_buy_plan_line
-
-    plan = _plan(db_session, test_requisition, status=BuyPlanStatus.ACTIVE.value)
-    line = _line(db_session, plan, status=BuyPlanLineStatus.PENDING_VERIFY.value)
-
-    # A manager passes the post-approval edit gate but STILL cannot remove a cut-PO line.
-    with pytest.raises(ValueError, match="cut PO|PO is cut"):
-        remove_buy_plan_line(plan.id, line.id, manager_user, db_session)
 
 
 # ── I — endpoint gate (HTTP 403/200) ─────────────────────────────────
@@ -273,28 +218,19 @@ def test_edit_endpoint_terminal_forbidden(client, db_session, sales_user, manage
     assert resp.status_code == 403
 
 
-def test_detail_renders_editable_line_ui_for_editor(client, db_session, manager_user, test_requisition, test_offer):
-    """Manager viewing an ACTIVE plan sees the whole-plan editable line UI (Edit plan
-    toggle, the bulk-save endpoint reference, add-line/add-vendor affordances) render
-    end-to-end without a Jinja error."""
-    # Anchor the offer to the plan's requirement so it appears in the vendor picker + add form.
-    requirement = _requirement_of(db_session, test_requisition)
-    test_offer.requirement_id = requirement.id
-    db_session.commit()
+def test_detail_url_redirects_into_workspace(client, db_session, manager_user, test_requisition):
+    """The legacy detail page is retired (Deal Sheet T3b): its URL 308s into the
+    workspace deep link.
 
+    The editable line UI itself (the offer picker) is covered in
+    tests/test_approvals_workspace_pane.py.
+    """
     plan = _plan(db_session, test_requisition, status=BuyPlanStatus.ACTIVE.value)
-    _line(db_session, plan, offer_id=test_offer.id)
 
     with _acting_as(manager_user):
-        resp = client.get(f"/v2/partials/buy-plans/{plan.id}")
-    assert resp.status_code == 200
-    body = resp.text
-    assert f"buyPlanLinesEditor({plan.id}," in body  # whole-plan editor seeded with this plan id
-    assert "Edit plan" in body  # whole-table edit toggle (replaces per-row Edit)
-    assert "Save all" in body
-    assert "+ Add line" in body
-    assert "+ Add vendor" in body  # split-vendor add, one per part group
-    assert test_offer.vendor_name in body  # offer surfaced in the vendor picker
+        resp = client.get(f"/v2/partials/buy-plans/{plan.id}", follow_redirects=False)
+    assert resp.status_code == 308
+    assert resp.headers["location"] == f"/v2/approvals?tab=sales-orders&select={plan.id}"
 
 
 # ══ J — Sales Order number ═══════════════════════════════════════════
@@ -303,10 +239,10 @@ def test_detail_renders_editable_line_ui_for_editor(client, db_session, manager_
 def test_set_so_number_persists(db_session, test_user, test_requisition):
     # Deal Sheet matrix (2026-08-18): the owner's SO# edit window is draft/pending;
     # active is manager-only. The canonical owner flow sets it at DRAFT.
-    from app.services.buyplan_workflow import set_sales_order_number
+    from app.services.buyplan_workflow import set_plan_header_fields
 
     plan = _plan(db_session, test_requisition, status=BuyPlanStatus.DRAFT.value, sales_order_number=None)
-    set_sales_order_number(plan.id, "TS00190738", test_user, db_session)
+    set_plan_header_fields(plan.id, test_user, db_session, sales_order_number="TS00190738")
     db_session.commit()
     db_session.refresh(plan)
     assert plan.sales_order_number == "TS00190738"
@@ -314,18 +250,18 @@ def test_set_so_number_persists(db_session, test_user, test_requisition):
 
 @pytest.mark.parametrize("status", [BuyPlanStatus.COMPLETED.value, BuyPlanStatus.CANCELLED.value])
 def test_set_so_number_rejected_on_terminal(db_session, test_user, test_requisition, status):
-    from app.services.buyplan_workflow import set_sales_order_number
+    from app.services.buyplan_workflow import set_plan_header_fields
 
     plan = _plan(db_session, test_requisition, status=status)
     # Terminal statuses are gated by can_edit_plan → PermissionError (was a
     # service ValueError before the Deal Sheet header-writer unification).
     with pytest.raises(PermissionError, match="header fields"):
-        set_sales_order_number(plan.id, "TS-1", test_user, db_session)
+        set_plan_header_fields(plan.id, test_user, db_session, sales_order_number="TS-1")
 
 
 def test_so_endpoint_owner_persists(client, db_session, test_user, test_requisition):
     plan = _plan(db_session, test_requisition, status=BuyPlanStatus.DRAFT.value, sales_order_number=None)
-    resp = client.post(f"/v2/partials/buy-plans/{plan.id}/so-number", data={"sales_order_number": "TS-999"})
+    resp = client.post(f"/v2/partials/approvals/plan/{plan.id}/header", data={"sales_order_number": "TS-999"})
     assert resp.status_code == 200
     db_session.expire_all()
     assert db_session.get(BuyPlan, plan.id).sales_order_number == "TS-999"
@@ -333,7 +269,7 @@ def test_so_endpoint_owner_persists(client, db_session, test_user, test_requisit
 
 def test_so_endpoint_terminal_403(client, db_session, test_requisition):
     plan = _plan(db_session, test_requisition, status=BuyPlanStatus.COMPLETED.value)
-    resp = client.post(f"/v2/partials/buy-plans/{plan.id}/so-number", data={"sales_order_number": "TS-1"})
+    resp = client.post(f"/v2/partials/approvals/plan/{plan.id}/header", data={"sales_order_number": "TS-1"})
     assert resp.status_code == 403  # can_edit_plan gate (was a 400 service error)
 
 
@@ -341,7 +277,7 @@ def test_so_endpoint_non_owner_non_manager_403(client, db_session, sales_user, t
     # Plan owned by sales_user; the acting user (test_user, a buyer) is neither owner nor mgr.
     req = _req(db_session, sales_user)
     plan = _plan(db_session, req, status=BuyPlanStatus.ACTIVE.value)
-    resp = client.post(f"/v2/partials/buy-plans/{plan.id}/so-number", data={"sales_order_number": "X"})
+    resp = client.post(f"/v2/partials/approvals/plan/{plan.id}/header", data={"sales_order_number": "X"})
     assert resp.status_code == 403
 
 

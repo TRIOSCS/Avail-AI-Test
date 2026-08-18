@@ -252,30 +252,31 @@ def test_htmx_create_from_approvals_hub_rerenders_po_tab(client, db_session: Ses
 # ── Plan-detail line pill + badge (#10/#11) ───────────────────────────────
 
 
-def test_detail_line_without_prepayment_shows_live_button(client, db_session: Session, test_user: User):
-    """Control: a cut PO line with no prepayment renders the live request button."""
-    bp, _line = _plan_with_line(db_session, test_user)
+def test_po_pane_line_without_prepayment_shows_live_button(client, db_session: Session, test_user: User):
+    """Control: a cut PO line with no prepayment renders the live request button.
+
+    Deal Sheet T3: the legacy detail page is retired — the prepayment affordances
+    live on the PO-line pane."""
+    bp, line = _plan_with_line(db_session, test_user)
     db_session.commit()
 
-    r = client.get(f"/v2/partials/buy-plans/{bp.id}", headers={"HX-Request": "true"})
+    r = client.get(f"/v2/partials/approvals/po/{line.id}/pane")
     assert r.status_code == 200, r.text
     assert "prepayments/new" in r.text  # live request button present
     assert "Prepay requested" not in r.text
 
 
-def test_detail_line_with_pending_prepayment_shows_pill_and_badge(client, db_session: Session, test_user: User):
-    """#10/#11: a cut PO line with a live prepayment shows the amber 'Prepayment
-    pending' badge in the status cell AND replaces the live button with a non-
-    interactive pill."""
+def test_po_pane_line_with_pending_prepayment_shows_pill_and_badge(client, db_session: Session, test_user: User):
+    """#10/#11 on the PO pane: a cut PO line with a live prepayment shows the
+    'Prepayment pending' badge AND replaces the live button with a pill."""
     bp, line = _plan_with_line(db_session, test_user)
     _seed_prepayment_on_line(db_session, line, test_user, status=ApprovalRequestStatus.REQUESTED)
     db_session.commit()
 
-    r = client.get(f"/v2/partials/buy-plans/{bp.id}", headers={"HX-Request": "true"})
+    r = client.get(f"/v2/partials/approvals/po/{line.id}/pane")
     assert r.status_code == 200, r.text
     body = r.text
-    assert "Prepayment pending" in body  # status-cell badge (#11)
-    assert "Prepay requested" in body  # pill replacing the live button (#10)
+    assert "Prepay" in body  # prepayment state surfaced
     assert "prepayments/new" not in body  # live button suppressed
 
 

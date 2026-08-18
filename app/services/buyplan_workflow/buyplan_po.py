@@ -41,6 +41,11 @@ def confirm_po(
     """
     from ...constants import PO_LINE_PAYMENT_METHODS
 
+    # Deal Sheet T3: the payment method is REQUIRED — the payload-incomplete legacy
+    # detail-page "Enter PO" widget died with detail.html, and the contract can never
+    # fork between forms again (accounting needs the method for the prepayment/wire path).
+    if payment_method is None or not str(payment_method).strip():
+        raise ValueError("Pick the payment method — it is required to confirm a PO.")
     if payment_method is not None:
         valid = {m.value for m in PO_LINE_PAYMENT_METHODS}
         if payment_method not in valid:

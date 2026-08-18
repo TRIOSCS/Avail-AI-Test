@@ -17,7 +17,7 @@
               buy_plans/_macros.html resource_form.
 #}
 {% from "htmx/partials/shared/_macros.html" import copy_chip, age_chip %}
-{% from "htmx/partials/buy_plans/_macros.html" import resource_form %}
+{% from "htmx/partials/buy_plans/_macros.html" import prepay_state_badge, request_prepayment_button, resource_form %}
 
 {% macro qp_text_input(name, label, value) %}
 <label class="block min-w-0">
@@ -73,6 +73,31 @@
       {% endif %}
     </div>
   </div>
+
+  {# Flag an issue — re-homed from the retired detail page's modal (Deal Sheet T3b).
+     Service allows flagging at awaiting_po / pending_verify; shown to the assigned
+     buyer (their affordance) and supervisors. Quiet disclosure, not a modal. #}
+  {% macro flag_issue_form() %}
+  {% if is_assigned_buyer or can_resolve_issue %}
+  <div x-data="{ flagging: false }" class="text-right">
+    <button type="button" @click="flagging = !flagging"
+            class="text-[11px] text-gray-400 hover:text-rose-600 underline decoration-dashed">
+      Flag an issue on this line
+    </button>
+    <form x-show="flagging" x-cloak x-collapse
+          hx-post="/v2/partials/buy-plans/{{ plan.id }}/lines/{{ line.id }}/issue"
+          hx-target="#aw-pane" hx-swap="innerHTML"
+          class="mt-1.5 flex items-center gap-1.5 justify-end flex-wrap text-left">
+      <input type="hidden" name="origin" value="approvals_workspace">
+      <select name="issue_type" class="input input-sm w-40">
+        {% for val, label in issue_types %}<option value="{{ val }}">{{ label }}</option>{% endfor %}
+      </select>
+      <input type="text" name="note" placeholder="What happened? (optional)" class="input input-sm flex-1 min-w-[160px]">
+      <button type="submit" data-loading-disable class="btn-danger btn-sm">Flag issue</button>
+    </form>
+  </div>
+  {% endif %}
+  {% endmacro %}
 
   {% if line.status == 'awaiting_po' %}
   {# ── Buyer view: confirm-PO form + QP-purchasing ─────────────────── #}
@@ -130,7 +155,11 @@
     </div>
   </form>
 
+  {{ flag_issue_form() }}
+
   {% elif line.status == 'pending_verify' %}
+  {% if prepay_state %}<div class="mb-2">{{ prepay_state_badge(prepay_state) }}</div>
+  {% elif can_request_prepay %}<div class="mb-2">{{ request_prepayment_button(line, plan, origin='approvals_hub') }}</div>{% endif %}
   {# ── Manager view: decide ────────────────────────────────────────── #}
   {% if can_verify %}
   <div class="rounded-lg border-2 border-accent-300 bg-accent-50 p-3" x-data="{ sendBackOpen: false }">
@@ -228,11 +257,24 @@
     {{ resource_form(line, plan, [], 'approvals_workspace', '#aw-pane') }}
   </div>
   {% endif %}
+  {{ flag_issue_form() }}
 
   {% elif line.status == 'verified' %}
-  <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
-    Approved{% if line.po_verified_by %} by {{ line.po_verified_by.name }}{% endif %}{% if line.po_verified_at %} · {{ line.po_verified_at | fmtdate('%b %d, %Y') }}{% endif %}
+  <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800 flex items-center justify-between gap-2 flex-wrap">
+    <span>Approved{% if line.po_verified_by %} by {{ line.po_verified_by.name }}{% endif %}{% if line.po_verified_at %} · {{ line.po_verified_at | fmtdate('%b %d, %Y') }}{% endif %}</span>
+    <span class="flex items-center gap-1.5">
+      {% if prepay_state %}{{ prepay_state_badge(prepay_state) }}
+      {% elif can_request_prepay %}{{ request_prepayment_button(line, plan, origin='approvals_hub') }}{% endif %}
+    </span>
   </div>
+  {# Late fall-down (re-homed from the retired detail page): a vendor can renege AFTER
+     verify — even after receipt on a COMPLETED plan (the /resource route reopens it). #}
+  {% if can_resource %}
+  <div class="rounded-lg border border-line-base bg-white p-3">
+    <div class="text-xs text-gray-500 mb-1">Vendor fell down after approval? Cancel this PO and pool the line for re-sourcing:</div>
+    {{ resource_form(line, plan, [], 'approvals_workspace', '#aw-pane') }}
+  </div>
+  {% endif %}
 
   {% elif line.status == 'resourcing' %}
   <div class="rounded-lg border border-orange-200 bg-orange-50 p-3 text-sm text-orange-800 flex items-center justify-between gap-3 flex-wrap">
@@ -245,8 +287,16 @@
   </div>
 
   {% elif line.status == 'issue' %}
-  <div class="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
-    Issue flagged{% if line.issue_type %} — {{ line.issue_type.replace('_', ' ') }}{% endif %}{% if line.issue_note %}: {{ line.issue_note }}{% endif %}
+  <div class="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700 flex items-center justify-between gap-3 flex-wrap">
+    <span>Issue flagged{% if line.issue_type %} — {{ line.issue_type.replace('_', ' ') }}{% endif %}{% if line.issue_note %}: {{ line.issue_note }}{% endif %}</span>
+    {% if can_resolve_issue %}
+    <form hx-post="/v2/partials/buy-plans/{{ plan.id }}/lines/{{ line.id }}/resolve-issue"
+          hx-target="#aw-pane" hx-swap="innerHTML"
+          hx-confirm="Clear this issue? The line returns to awaiting PO and the buyer re-confirms.">
+      <input type="hidden" name="origin" value="approvals_workspace">
+      <button type="submit" data-loading-disable class="btn-secondary btn-sm">Resolve — back to awaiting PO</button>
+    </form>
+    {% endif %}
   </div>
 
   {% elif line.status == 'cancelled' %}

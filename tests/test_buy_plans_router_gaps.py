@@ -146,8 +146,8 @@ def test_create_so_duplicate_error(client, test_requisition):
     ):
         with patch("app.dependencies.require_requisition_access"):
             with patch(
-                "app.routers.htmx.buy_plans.buy_plan_detail_partial",
-                new=AsyncMock(return_value=_ok_html()),
+                "app.routers.htmx.approvals_hub.render_plan_pane",
+                return_value=_ok_html(),
             ):
                 resp = client.post(
                     "/v2/partials/buy-plans/sales-orders/create",
@@ -175,7 +175,7 @@ def test_create_so_value_error(client, test_requisition):
 
 
 def test_create_so_success(client, test_requisition):
-    """Happy-path create renders detail and sets HX-Push-Url (lines 354-356)."""
+    """Happy-path create renders the workspace pane and pushes its deep link."""
     mock_plan = MagicMock()
     mock_plan.id = 42
 
@@ -185,8 +185,8 @@ def test_create_so_success(client, test_requisition):
     ):
         with patch("app.dependencies.require_requisition_access"):
             with patch(
-                "app.routers.htmx.buy_plans.buy_plan_detail_partial",
-                new=AsyncMock(return_value=_ok_html()),
+                "app.routers.htmx.approvals_hub.render_plan_pane",
+                return_value=_ok_html(),
             ):
                 resp = client.post(
                     "/v2/partials/buy-plans/sales-orders/create",
@@ -198,7 +198,7 @@ def test_create_so_success(client, test_requisition):
                 )
 
     assert resp.status_code == 200
-    assert "/v2/buy-plans/42" in resp.headers.get("HX-Push-Url", "")
+    assert resp.headers.get("HX-Push-Url", "") == "/v2/approvals?tab=sales-orders&select=42"
 
 
 # ── prepay_request_decide error branches (lines 389-390) ─────────────
@@ -355,21 +355,21 @@ def test_approve_value_error(approver_client, buy_plan):
 def test_approve_stale_my_queue_origin_falls_through_to_detail(approver_client, buy_plan):
     """The my_queue origin retired with its surface — a stale origin=my_queue post falls
     through to the default detail-partial re-render."""
-    detail_mock = AsyncMock(return_value=_ok_html())
+    pane_mock = MagicMock(return_value=_ok_html())
     with patch("app.services.buyplan_workflow.approve_buy_plan"):
         with patch("app.services.buyplan_notifications.run_notify_bg", new=AsyncMock()):
             with patch(
-                "app.routers.htmx.buy_plans.buy_plan_detail_partial",
-                new=detail_mock,
+                "app.routers.htmx.approvals_hub.render_plan_pane",
+                new=pane_mock,
             ):
                 resp = approver_client.post(
                     f"/v2/partials/buy-plans/{buy_plan.id}/approve",
                     data={"action": "approve", "origin": "my_queue"},
                 )
     assert resp.status_code == 200
-    # The fall-through IS the claim: the default detail partial was rendered
+    # The fall-through IS the claim: the default workspace-pane render ran
     # and its body is what came back (not a my_queue surface, not an error page).
-    detail_mock.assert_awaited_once()
+    pane_mock.assert_called_once()
     assert resp.text == _ok_html().body.decode()
 
 
@@ -414,20 +414,20 @@ def test_halt_stale_my_queue_origin_falls_through_to_detail(client, buy_plan):
     mock_plan = MagicMock()
     mock_plan.id = buy_plan.id
 
-    detail_mock = AsyncMock(return_value=_ok_html())
+    pane_mock = MagicMock(return_value=_ok_html())
     with patch("app.services.buyplan_workflow.halt_plan", return_value=mock_plan):
         with patch("app.services.buyplan_notifications.run_notify_bg", new=AsyncMock()):
             with patch(
-                "app.routers.htmx.buy_plans.buy_plan_detail_partial",
-                new=detail_mock,
+                "app.routers.htmx.approvals_hub.render_plan_pane",
+                new=pane_mock,
             ):
                 resp = client.post(
                     f"/v2/partials/buy-plans/{buy_plan.id}/halt",
                     data={"origin": "my_queue", "reason": "stop"},
                 )
     assert resp.status_code == 200
-    # The fall-through IS the claim: the default detail partial rendered the body.
-    detail_mock.assert_awaited_once()
+    # The fall-through IS the claim: the default workspace-pane render ran.
+    pane_mock.assert_called_once()
     assert resp.text == _ok_html().body.decode()
 
 
@@ -529,18 +529,18 @@ def test_verify_po_stale_my_queue_origin_falls_through_to_detail(po_approver_cli
     with patch("app.services.buyplan_workflow.verify_po"):
         with patch("app.services.buyplan_workflow.check_completion", return_value=None):
             with patch("app.services.buyplan_notifications.run_notify_bg", new=AsyncMock()):
-                detail_mock = AsyncMock(return_value=_ok_html())
+                pane_mock = MagicMock(return_value=_ok_html())
                 with patch(
-                    "app.routers.htmx.buy_plans.buy_plan_detail_partial",
-                    new=detail_mock,
+                    "app.routers.htmx.approvals_hub.render_plan_pane",
+                    new=pane_mock,
                 ):
                     resp = po_approver_client.post(
                         f"/v2/partials/buy-plans/{buy_plan.id}/lines/1/verify-po",
                         data={"action": "approve", "origin": "my_queue"},
                     )
     assert resp.status_code == 200
-    # The fall-through IS the claim: the default detail partial rendered the body.
-    detail_mock.assert_awaited_once()
+    # The fall-through IS the claim: the default workspace-pane render ran.
+    pane_mock.assert_called_once()
     assert resp.text == _ok_html().body.decode()
 
 

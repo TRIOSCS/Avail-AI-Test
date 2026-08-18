@@ -44,7 +44,6 @@ from ...models import (
     Requisition,
     User,
 )
-from ...services.buyplan_naming import summarize_top_flag
 from ...services.stale_guard import StaleEditError, ensure_not_stale, stale_conflict_response
 from ...template_env import template_response
 from ._shared import _base_ctx, _is_ops_member
@@ -136,6 +135,26 @@ def _workspace_pane_response(request: Request, user: User, db: Session, plan_id:
     from .approvals_hub import render_plan_pane
 
     resp = render_plan_pane(request, user, db, plan_id, lens=str(form.get("lens", "sales-orders")))
+    resp.headers["HX-Trigger"] = "awListRefresh"
+    return resp
+
+
+def _line_action_pane_response(
+    request: Request, user: User, db: Session, plan_id: int, line_id: int, form
+) -> HTMLResponse:
+    """The per-LINE action re-render (receive / flag-issue / resolve-issue): with a
+    ``lens`` the SO/BP plan pane (the action came from the plan pane's kanban), without
+    one the PO-line pane (the PO tab).
+
+    Both nudge the work list.
+    """
+    from .approvals_hub import render_plan_pane, render_po_pane
+
+    lens = str(form.get("lens") or "")
+    if lens:
+        resp = render_plan_pane(request, user, db, plan_id, lens=lens)
+    else:
+        resp = render_po_pane(request, user, db, line_id)
     resp.headers["HX-Trigger"] = "awListRefresh"
     return resp
 
@@ -343,16 +362,12 @@ async def sales_order_create(
 
 
 async def _sales_order_created_response(request: Request, user: User, db: Session, plan_id: int, form):
-    """Post-origination render: the workspace pane (embed=aw — the pane becomes the new
-    draft's Deal Sheet, deep-link pushed) or the legacy detail page."""
-    if form.get("embed") == "aw":
-        from .approvals_hub import render_plan_pane
+    """Post-origination render: the workspace pane — the pane becomes the new draft's
+    Deal Sheet, with the workspace deep link pushed (the legacy detail page is gone)."""
+    from .approvals_hub import render_plan_pane
 
-        resp = render_plan_pane(request, user, db, plan_id, lens="sales-orders")
-        resp.headers["HX-Push-Url"] = f"/v2/approvals?tab=sales-orders&select={plan_id}"
-        return resp
-    resp = await buy_plan_detail_partial(request, plan_id, user, db)
-    resp.headers["HX-Push-Url"] = f"/v2/buy-plans/{plan_id}"
+    resp = render_plan_pane(request, user, db, plan_id, lens="sales-orders")
+    resp.headers["HX-Push-Url"] = f"/v2/approvals?tab=sales-orders&select={plan_id}"
     return resp
 
 
@@ -459,96 +474,22 @@ async def prepay_request_decide(
     return render_tab_body(request, user, db, "prepayments", hub_scope)
 
 
-@router.get("/v2/partials/buy-plans/{plan_id:int}", response_class=HTMLResponse)
+@router.get("/v2/partials/buy-plans/{plan_id:int}")
 async def buy_plan_detail_partial(
-    request: Request,
     plan_id: int,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
-):
-    """Return buy plan detail as HTML partial.
+) -> RedirectResponse:
+    """Retired legacy plan-detail page → 308 into the Approvals Workspace deep link.
 
-    The ``{plan_id:int}`` path convertor is load-bearing: it makes this route match ONLY
-    integer segments, so the sibling retired-lens redirect ``/v2/partials/buy-plans/{tab}``
-    (str) and the literal ``/pipeline-archive`` never shadow a numeric plan id and
-    vice-versa.
+    The Deal Sheet (the workspace pane) is the plan's one surface (T3). The
+    per-record ownership gate stays IN FRONT of the redirect — a restricted
+    non-owner still 404s here, exactly as the old page did (IDOR pins hold).
+    The ``{plan_id:int}`` convertor stays load-bearing so the retired-lens
+    ``{tab}`` redirect never captures a numeric id.
     """
-    bp = get_buyplan_for_user(
-        db,
-        user,
-        plan_id,
-        options=[
-            joinedload(BuyPlan.lines).joinedload(BuyPlanLine.offer),
-            joinedload(BuyPlan.lines).joinedload(BuyPlanLine.requirement),
-            joinedload(BuyPlan.lines).joinedload(BuyPlanLine.buyer),
-            joinedload(BuyPlan.quote),
-            joinedload(BuyPlan.requisition),
-            joinedload(BuyPlan.submitted_by),
-            joinedload(BuyPlan.approved_by),
-        ],
-    )
-
-    from ...services.buyplan_workflow import can_edit_buy_plan_lines, plan_needs_approver_reason
-    from ...services.prepayment_service import prepayment_state_for_lines
-
-    lines = bp.lines or []
-
-    # Editing surface (epics I/J/K). ``can_edit_lines`` is the SAME server-side gate the
-    # add/edit/remove endpoints enforce, so the template hides the controls with the exact
-    # predicate the POSTs check (never UI-only). ``can_manage_plan`` = owner-or-manager, the
-    # gate the Cancel + SO-number endpoints enforce. Offers/requirements power the vendor
-    # picker + add-line form; loaded only when the viewer can actually edit (no wasted query).
-    can_edit_lines = can_edit_buy_plan_lines(user, bp)
-    can_manage_plan = is_manager_or_admin(user) or (bp.requisition and bp.requisition.created_by == user.id)
-    terminal = bp.status in (BuyPlanStatus.COMPLETED.value, BuyPlanStatus.CANCELLED.value)
-    offers_by_requirement: dict[int, list] = {}
-    plan_requirements: list = []
-    if can_edit_lines:
-        from ...constants import OfferStatus
-        from ...models import Offer, Requirement
-
-        plan_requirements = (
-            db.query(Requirement).filter(Requirement.requisition_id == bp.requisition_id).order_by(Requirement.id).all()
-        )
-        active_offers = (
-            db.query(Offer)
-            .options(joinedload(Offer.vendor_card))
-            .filter(Offer.requisition_id == bp.requisition_id, Offer.status == OfferStatus.ACTIVE.value)
-            .order_by(Offer.unit_price)
-            .all()
-        )
-        for off in active_offers:
-            if off.requirement_id is not None:
-                offers_by_requirement.setdefault(off.requirement_id, []).append(off)
-
-    ctx = _base_ctx(request, user, "buy-plans")
-    ctx.update(
-        {
-            "bp": bp,
-            "lines": lines,
-            "is_ops_member": _is_ops_member(user, db),
-            "can_resource": _can_resource(user),
-            # Supervisors/ops resolve flagged-issue lines (the buyer who raised them can't).
-            "can_supervise": _can_supervise(user, db),
-            "user": user,
-            # Line-editing gate (epic I) + owner/manager gate for Cancel + SO number (J/K).
-            "can_edit_lines": can_edit_lines,
-            "can_manage_plan": can_manage_plan,
-            # Resume is manager-only and only meaningful on a halted plan (epic K).
-            "can_resume": is_manager_or_admin(user) and bp.status == BuyPlanStatus.HALTED.value,
-            # SO number is editable by owner/manager at any non-terminal status (epic J).
-            "can_edit_so": can_manage_plan and not terminal,
-            "offers_by_requirement": offers_by_requirement,
-            "plan_requirements": plan_requirements,
-            # Most-urgent flag reason so the indicator states the issue at first glance.
-            "top_flag": summarize_top_flag(bp.ai_flags),
-            # Why the plan is silently stalled for lack of a configured approver (or None).
-            "no_approver_reason": plan_needs_approver_reason(bp, db),
-            # Live prepayment state per line (badge #11 + button→pill #10), one batch query.
-            "prepay_state": prepayment_state_for_lines(db, [ln.id for ln in lines]),
-        }
-    )
-    return template_response("htmx/partials/buy_plans/detail.html", ctx)
+    get_buyplan_for_user(db, user, plan_id)
+    return RedirectResponse(f"/v2/approvals?tab=sales-orders&select={plan_id}", status_code=308)
 
 
 # ── Retired hub lens redirects (registered AFTER the {plan_id:int} detail route so a
@@ -625,9 +566,7 @@ async def buy_plan_submit_partial(
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
 
-    if form.get("origin") == "approvals_workspace":
-        return _workspace_pane_response(request, user, db, plan_id, form)
-    return await buy_plan_detail_partial(request, plan_id, user, db)
+    return _workspace_pane_response(request, user, db, plan_id, form)
 
 
 @router.post("/v2/partials/buy-plans/{plan_id}/withdraw", response_class=HTMLResponse)
@@ -656,9 +595,7 @@ async def buy_plan_withdraw_partial(
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
 
-    if form.get("origin") == "approvals_workspace":
-        return _workspace_pane_response(request, user, db, plan_id, form)
-    return await buy_plan_detail_partial(request, plan_id, user, db)
+    return _workspace_pane_response(request, user, db, plan_id, form)
 
 
 @router.post("/v2/partials/buy-plans/{plan_id}/approve", response_class=HTMLResponse)
@@ -793,7 +730,7 @@ async def buy_plan_approve_partial(
 
         return render_tab_body(request, user, db, "buy-plan", hub_scope)
 
-    return await buy_plan_detail_partial(request, plan_id, user, db)
+    return _workspace_pane_response(request, user, db, plan_id, form)
 
 
 @router.post("/v2/partials/buy-plans/{plan_id}/halt", response_class=HTMLResponse)
@@ -833,7 +770,7 @@ async def buy_plan_halt_partial(
     if origin == "approvals_workspace":
         return _workspace_pane_response(request, user, db, plan_id, form)
 
-    return await buy_plan_detail_partial(request, plan_id, user, db)
+    return _workspace_pane_response(request, user, db, plan_id, form)
 
 
 @router.post("/v2/partials/buy-plans/{plan_id}/lines/{line_id}/confirm-po", response_class=HTMLResponse)
@@ -941,7 +878,7 @@ async def buy_plan_confirm_po_partial(
         resp.headers["HX-Trigger"] = "awListRefresh"
         return resp
 
-    return await buy_plan_detail_partial(request, plan_id, user, db)
+    return _workspace_pane_response(request, user, db, plan_id, form)
 
 
 async def _resource_lines_and_alert(
@@ -1042,7 +979,7 @@ async def buy_plan_resource_line_partial(
 
         return render_tab_body(request, user, db, "po-approval", hub_scope)
 
-    return await buy_plan_detail_partial(request, plan_id, user, db)
+    return _workspace_pane_response(request, user, db, plan_id, form)
 
 
 @router.post("/v2/partials/buy-plans/{plan_id}/lines/{line_id}/claim", response_class=HTMLResponse)
@@ -1080,7 +1017,7 @@ async def buy_plan_claim_line_partial(
         resp.headers["HX-Trigger"] = "awListRefresh"
         return resp
 
-    return await buy_plan_detail_partial(request, plan_id, user, db)
+    return _workspace_pane_response(request, user, db, plan_id, form)
 
 
 @router.post("/v2/partials/buy-plans/{plan_id}/lines/{line_id}/verify-po", response_class=HTMLResponse)
@@ -1153,7 +1090,7 @@ async def buy_plan_verify_po_partial(
 
         return render_tab_body(request, user, db, "po-approval", hub_scope)
 
-    return await buy_plan_detail_partial(request, plan_id, user, db)
+    return _workspace_pane_response(request, user, db, plan_id, form)
 
 
 @router.post("/v2/partials/buy-plans/{plan_id}/lines/{line_id}/receive", response_class=HTMLResponse)
@@ -1177,7 +1114,6 @@ async def buy_plan_receive_line_partial(
     from ...services.buyplan_workflow import mark_line_received
 
     form = await request.form()
-    origin = form.get("origin", "")
 
     try:
         mark_line_received(plan_id, line_id, user, db)
@@ -1187,18 +1123,7 @@ async def buy_plan_receive_line_partial(
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
 
-    if origin == "approvals_workspace":
-        from .approvals_hub import render_plan_pane, render_po_pane
-
-        lens = str(form.get("lens") or "")
-        if lens:
-            resp = render_plan_pane(request, user, db, plan_id, lens=lens)
-        else:
-            resp = render_po_pane(request, user, db, line_id)
-        resp.headers["HX-Trigger"] = "awListRefresh"
-        return resp
-
-    return await buy_plan_detail_partial(request, plan_id, user, db)
+    return _line_action_pane_response(request, user, db, plan_id, line_id, form)
 
 
 @router.post("/v2/partials/buy-plans/{plan_id}/lines/{line_id}/issue", response_class=HTMLResponse)
@@ -1209,7 +1134,12 @@ async def buy_plan_flag_issue_partial(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Buyer flags issue on a line — returns refreshed detail."""
+    """Buyer flags an issue on a line (Deal Sheet: lives on the PO pane since the legacy
+    detail page retired).
+
+    With a ``lens`` the SO/BP pane re-renders (kanban
+    origin), without one the PO-line pane.
+    """
     from ...services.buyplan_workflow import flag_line_issue
 
     # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation.
@@ -1225,7 +1155,7 @@ async def buy_plan_flag_issue_partial(
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
 
-    return await buy_plan_detail_partial(request, plan_id, user, db)
+    return _line_action_pane_response(request, user, db, plan_id, line_id, form)
 
 
 @router.post("/v2/partials/buy-plans/{plan_id}/lines/{line_id}/resolve-issue", response_class=HTMLResponse)
@@ -1238,12 +1168,15 @@ async def buy_plan_resolve_issue_partial(
 ):
     """Supervisor clears a flagged issue → line back to awaiting_po.
 
-    Returns refreshed detail.
+    Same pane
+    routing as flag: with a ``lens`` the SO/BP pane, without one the PO-line pane.
     """
     from ...services.buyplan_workflow import resolve_line_issue
 
     # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation.
     get_buyplan_for_user(db, user, plan_id)
+
+    form = await request.form()
 
     try:
         resolve_line_issue(plan_id, line_id, user, db)
@@ -1253,7 +1186,7 @@ async def buy_plan_resolve_issue_partial(
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
 
-    return await buy_plan_detail_partial(request, plan_id, user, db)
+    return _line_action_pane_response(request, user, db, plan_id, line_id, form)
 
 
 @router.post("/v2/partials/buy-plans/{plan_id}/cancel", response_class=HTMLResponse)
@@ -1292,7 +1225,7 @@ async def buy_plan_cancel_partial(
     if form.get("origin") == "approvals_workspace":
         return _workspace_pane_response(request, user, db, plan_id, form)
 
-    return await buy_plan_detail_partial(request, plan_id, user, db)
+    return _workspace_pane_response(request, user, db, plan_id, form)
 
 
 @router.post("/v2/partials/buy-plans/{plan_id}/resume", response_class=HTMLResponse)
@@ -1325,7 +1258,7 @@ async def buy_plan_resume_partial(
     if form.get("origin") == "approvals_workspace":
         return _workspace_pane_response(request, user, db, plan_id, form)
 
-    return await buy_plan_detail_partial(request, plan_id, user, db)
+    return _workspace_pane_response(request, user, db, plan_id, form)
 
 
 @router.post("/v2/partials/buy-plans/{plan_id}/complete-lite", response_class=HTMLResponse)
@@ -1354,91 +1287,7 @@ async def buy_plan_complete_lite_partial(
         raise HTTPException(400, str(e)) from e
 
     form = await request.form()
-    if form.get("origin") == "approvals_workspace":
-        return _workspace_pane_response(request, user, db, plan_id, form)
-    return await buy_plan_detail_partial(request, plan_id, user, db)
-
-
-@router.post("/v2/partials/buy-plans/{plan_id}/so-number", response_class=HTMLResponse)
-async def buy_plan_set_so_partial(
-    request: Request,
-    plan_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Set/edit the plan's active Sales Order number (epic J).
-
-    Owner (salesperson) or manager, at any non-terminal status. A non-owner restricted
-    role 404s; a non-owner non-manager 403s; a terminal plan 400s (service ValueError).
-    """
-    from ...services.buyplan_workflow import set_sales_order_number
-
-    plan = get_buyplan_for_user(db, user, plan_id, options=[joinedload(BuyPlan.requisition)])
-    if not (is_manager_or_admin(user) or (plan.requisition and plan.requisition.created_by == user.id)):
-        raise HTTPException(403, "Only the plan owner or a manager can edit the Sales Order number.")
-
-    form = await request.form()
-    # Stale-edit guard (2.1): the narrowest edited object is the PLAN (SO# lives on it).
-    try:
-        ensure_not_stale(plan, form.get("expected_updated_at"))
-    except StaleEditError:
-        return stale_conflict_response()
-    try:
-        set_sales_order_number(plan_id, form.get("sales_order_number"), user, db)
-        db.commit()
-    except PermissionError as e:
-        raise HTTPException(403, str(e)) from e
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from e
-
-    return await buy_plan_detail_partial(request, plan_id, user, db)
-
-
-@router.post("/v2/partials/buy-plans/{plan_id}/lines/add", response_class=HTMLResponse)
-async def buy_plan_add_line_partial(
-    request: Request,
-    plan_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Add a line (vendor offer + qty + sell) to an editable plan (epic I).
-
-    Role×status gate is enforced in the service (PermissionError → 403). Bad input (non-
-    numeric / missing offer / wrong requisition) → 400.
-    """
-    from ...services.buyplan_workflow import add_buy_plan_line
-
-    # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation. Same
-    # loader options as add_buy_plan_line's own db.get() so the ownership pre-check's
-    # load isn't silently wasted — a bare Session.get() on a PK already in the identity
-    # map does NOT retroactively apply new loader options, so without this the service's
-    # joinedload(BuyPlan.lines)/joinedload(BuyPlan.requisition) would do nothing and
-    # plan.lines/plan.requisition would lazy-load one row at a time instead.
-    plan = get_buyplan_for_user(db, user, plan_id, options=[joinedload(BuyPlan.lines), joinedload(BuyPlan.requisition)])
-
-    form = await request.form()
-    # Stale-edit guard (2.1): a new line's narrowest EXISTING object is the plan.
-    try:
-        ensure_not_stale(plan, form.get("expected_updated_at"))
-    except StaleEditError:
-        return stale_conflict_response()
-    try:
-        requirement_id = int(form.get("requirement_id") or 0)
-        offer_id = int(form.get("offer_id") or 0)
-        quantity = int(form.get("quantity") or 0)
-    except (TypeError, ValueError) as e:
-        raise HTTPException(400, "Requirement, vendor offer and a whole-number quantity are required.") from e
-    unit_sell = _parse_optional_float(form.get("unit_sell"))
-
-    try:
-        add_buy_plan_line(plan_id, requirement_id, offer_id, quantity, user, db, unit_sell=unit_sell)
-        db.commit()
-    except PermissionError as e:
-        raise HTTPException(403, str(e)) from e
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from e
-
-    return await buy_plan_detail_partial(request, plan_id, user, db)
+    return _workspace_pane_response(request, user, db, plan_id, form)
 
 
 @router.post("/v2/partials/buy-plans/{plan_id}/lines/{line_id}/edit", response_class=HTMLResponse)
@@ -1513,51 +1362,7 @@ async def buy_plan_edit_line_partial(
         resp.headers["HX-Trigger"] = "awListRefresh"
         return resp
 
-    return await buy_plan_detail_partial(request, plan_id, user, db)
-
-
-@router.post("/v2/partials/buy-plans/{plan_id}/lines/{line_id}/remove", response_class=HTMLResponse)
-async def buy_plan_remove_line_partial(
-    request: Request,
-    plan_id: int,
-    line_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Remove a line from an editable plan (epic I).
-
-    Role×status gate in the service (PermissionError → 403); removing a cut-PO line →
-    400. ``remove_buy_plan_line`` already auto-completes at service depth (removing the
-    plan's last open line can leave every remaining line terminal); the returned plan's
-    ``.status`` is read BEFORE commit to drive ``_notify_if_completed`` without re-
-    deriving the fact via a second ``check_completion`` scan.
-    """
-    from ...services.buyplan_workflow import remove_buy_plan_line
-
-    # Per-record ownership: non-owner SALES/TRADER → 404 before any mutation. Matches
-    # remove_buy_plan_line's own loader options (see buy_plan_add_line_partial).
-    plan = get_buyplan_for_user(db, user, plan_id, options=[joinedload(BuyPlan.lines), joinedload(BuyPlan.requisition)])
-
-    # Stale-edit guard (2.1): the narrowest edited object is the LINE being removed.
-    form = await request.form()
-    target_line = next((ln for ln in (plan.lines or []) if ln.id == line_id), None)
-    if target_line is not None:
-        try:
-            ensure_not_stale(target_line, form.get("expected_updated_at"))
-        except StaleEditError:
-            return stale_conflict_response()
-
-    try:
-        updated = remove_buy_plan_line(plan_id, line_id, user, db)
-        just_completed = updated.status == BuyPlanStatus.COMPLETED.value
-        db.commit()
-        await _notify_if_completed(plan_id, just_completed)
-    except PermissionError as e:
-        raise HTTPException(403, str(e)) from e
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from e
-
-    return await buy_plan_detail_partial(request, plan_id, user, db)
+    return _workspace_pane_response(request, user, db, plan_id, form)
 
 
 @router.post("/v2/partials/buy-plans/{plan_id}/lines/bulk", response_class=HTMLResponse)
@@ -1620,9 +1425,7 @@ async def buy_plan_bulk_lines_partial(
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
 
-    if form.get("origin") == "approvals_workspace":
-        return _workspace_pane_response(request, user, db, plan_id, form)
-    return await buy_plan_detail_partial(request, plan_id, user, db)
+    return _workspace_pane_response(request, user, db, plan_id, form)
 
 
 @router.post("/v2/partials/buy-plans/{plan_id}/reset", response_class=HTMLResponse)
@@ -1648,4 +1451,4 @@ async def buy_plan_reset_partial(
     if form.get("origin") == "approvals_workspace":
         return _workspace_pane_response(request, user, db, plan_id, form)
 
-    return await buy_plan_detail_partial(request, plan_id, user, db)
+    return _workspace_pane_response(request, user, db, plan_id, form)

@@ -397,7 +397,7 @@ def _line_margin_pct(unit_sell, unit_cost):
 
 def _has_cut_po(line: BuyPlanLine) -> bool:
     """Delegate to :attr:`BuyPlanLine.has_cut_po` — the model owns the single source of
-    truth (also read directly by the whole-plan-editor template's locked-row seed)."""
+    truth (also read directly by the offer picker's locked-row seed)."""
     return line.has_cut_po
 
 
@@ -405,12 +405,12 @@ def _ensure_offer_attachable(offer: Offer, plan: BuyPlan, requirement_id: int | 
     """Reject an offer that isn't in the exact universe the vendor picker/add-form ever
     shows for *requirement_id* on *plan*.
 
-    Mirrors ALL THREE filters ``buy_plan_detail_partial`` applies (app/routers/htmx/
-    buy_plans.py): same requisition (``Offer.requisition_id == bp.requisition_id``),
-    same part (the picker groups active offers into ``offers_by_requirement[
-    off.requirement_id]``, so an offer never appears under a requirement it isn't
-    ``requirement_id``-tagged for), and ACTIVE status (``Offer.status ==
-    OfferStatus.ACTIVE.value`` — the picker query filters this explicitly). An offer
+    Mirrors ALL THREE filters the offer picker's seed query applies (``_sheet_ctx`` in
+    app/routers/htmx/approvals_hub.py): same requisition (``Offer.requisition_id ==
+    bp.requisition_id``), same part (offers group under their own
+    ``requirement_id``, so an offer never appears under a requirement it isn't
+    tagged for), and ACTIVE status (``Offer.status == OfferStatus.ACTIVE.value`` —
+    the picker rows carry inactive attached offers for display only). An offer
     from a different requisition/part, or one that has since gone SOLD/EXPIRED/etc., is
     refused, not just hidden from the UI.
 
@@ -635,8 +635,7 @@ def _build_new_line(
     offer_lookup: dict[int, Offer] | None = None,
 ) -> BuyPlanLine:
     """Validate + construct a new AWAITING_PO line — no gating, no ``plan.lines``
-    append, no recalc (caller's job). Shared by :func:`add_buy_plan_line` and the bulk
-    "save all" add path.
+    append, no recalc (caller's job). Used by the bulk "save all" add path.
 
     Quantity goes through :func:`_require_int_quantity` (rejects a fractional value
     like ``3.5`` instead of truncating it) and must be positive. The requirement must
@@ -677,43 +676,6 @@ def _build_new_line(
         assignment_reason=reason,
         status=BuyPlanLineStatus.AWAITING_PO.value,
     )
-
-
-def add_buy_plan_line(
-    plan_id: int,
-    requirement_id: int,
-    offer_id: int,
-    quantity: int,
-    user: User,
-    db: Session,
-    *,
-    unit_sell: float | None = None,
-) -> BuyPlan:
-    """Add a new line (vendor offer + qty + sell) and recompute the header rollups.
-
-    Gated by :func:`can_edit_buy_plan_lines`; validation + construction delegate to
-    :func:`_build_new_line` (shared with the bulk "save all" add path). Caller commits.
-    """
-    plan = db.get(BuyPlan, plan_id, options=[joinedload(BuyPlan.lines), joinedload(BuyPlan.requisition)])
-    if not plan:
-        raise ValueError(f"Buy plan {plan_id} not found")
-    _ensure_can_edit_lines(user, plan)
-
-    new_line = _build_new_line(plan, requirement_id, offer_id, quantity, unit_sell, db)
-    plan.lines.append(new_line)
-    _recalculate_financials(plan)
-    db.flush()
-    # Field-audit (2.1): one row per save. The flush above assigned new_line.id, so the
-    # row attributes to the created line via its FK column.
-    log_field_edits(
-        db,
-        user=user,
-        buy_plan_id=plan.id,
-        buy_plan_line_id=new_line.id,
-        edits=[FieldEdit(field="line added", old="", new=_line_audit_label(new_line))],
-    )
-    logger.info("Buy plan {} line added by {} (req {}, offer {})", plan_id, user.email, requirement_id, offer_id)
-    return plan
 
 
 def edit_buy_plan_line(
@@ -787,11 +749,11 @@ def bulk_edit_buy_plan_lines(
 ) -> BuyPlan:
     """Save an entire plan's lines in one shot — edits, adds, and removal-by-omission.
 
-    The "save all" counterpart to :func:`add_buy_plan_line` / :func:`edit_buy_plan_line` /
-    :func:`remove_buy_plan_line`; the per-field edit rules live in the shared
+    THE line writer (the per-line add/remove services retired with the legacy detail
+    page — Deal Sheet T3b); the per-field edit rules live in the shared
     :func:`_apply_line_edit` helper (also used by :func:`edit_buy_plan_line`) and new-
-    line validation/construction lives in :func:`_build_new_line` (also used by
-    :func:`add_buy_plan_line`), so there is exactly one place each rule is encoded:
+    line validation/construction lives in :func:`_build_new_line`, so there is
+    exactly one place each rule is encoded:
       - an entry with ``line_id`` edits that existing line. ``offer_id`` and ``quantity``
         use KEY-PRESENCE semantics like ``unit_sell``: the key absent leaves the field
         unchanged; the key present maps its value straight through to
@@ -811,11 +773,9 @@ def bulk_edit_buy_plan_lines(
       - an entry without ``line_id`` adds a new line (requirement must belong to the
         plan's requisition; offer must exist AND be attachable to it — same requisition,
         same requirement/part, ACTIVE status; qty must be a positive whole number — a
-        fractional qty like ``3.5`` is rejected, not truncated), same as
-        :func:`add_buy_plan_line`;
+        fractional qty like ``3.5`` is rejected, not truncated);
       - any existing, non-PO-cut line whose id does NOT appear in the payload is
-        removed (same PO-cut guard as :func:`remove_buy_plan_line`, applied by omission
-        instead of an explicit call) — a PO-cut line left out of the payload is simply
+        removed (the PO-cut guard applied by omission instead of an explicit call) — a PO-cut line left out of the payload is simply
         left untouched, never implicitly removed. When *known_line_ids* is given,
         removal-by-omission is further scoped to ids IN that set: a line added by
         someone else after the client's form loaded (present on the plan, but never in
@@ -985,38 +945,6 @@ def bulk_edit_buy_plan_lines(
     return plan
 
 
-def remove_buy_plan_line(plan_id: int, line_id: int, user: User, db: Session) -> BuyPlan:
-    """Remove a line and recompute the header rollups.
-
-    Gated by :func:`can_edit_buy_plan_lines`. A line with a cut PO cannot be removed (it must
-    be re-sourced / cancelled through the PO lifecycle). Auto-completes at service depth
-    afterward (mirrors ``verify_po`` in ``buyplan_po.py``) — removing the plan's last
-    open line can leave every remaining line terminal, so this prevents an ACTIVE plan
-    getting stranded short of COMPLETED. Caller commits.
-    """
-    plan = db.get(BuyPlan, plan_id, options=[joinedload(BuyPlan.lines), joinedload(BuyPlan.requisition)])
-    if not plan:
-        raise ValueError(f"Buy plan {plan_id} not found")
-    _ensure_can_edit_lines(user, plan)
-
-    line = next((ln for ln in plan.lines if ln.id == line_id), None)
-    if not line:
-        raise ValueError(f"Line {line_id} not found in plan {plan_id}")
-    if _has_cut_po(line):
-        raise ValueError("Cannot remove a line once a PO is cut on it.")
-
-    # Field-audit (2.1): capture the label BEFORE removal; the removed line's id rides
-    # the JSON edit (line_id), never the FK column — the line row is gone after this.
-    removal_edit = FieldEdit(field="line removed", old=_line_audit_label(line), new="", line_id=line.id)
-    plan.lines.remove(line)
-    _recalculate_financials(plan)
-    log_field_edits(db, user=user, buy_plan_id=plan.id, edits=[removal_edit])
-    db.flush()
-    check_completion(plan_id, db)
-    logger.info("Buy plan {} line {} removed by {}", plan_id, line_id, user.email)
-    return plan
-
-
 # ── Editing: Sales Order number (epic J) ──────────────────────────────
 
 
@@ -1076,10 +1004,3 @@ def set_plan_header_fields(
     db.flush()
     logger.info("Buy plan {} header fields {} set by {}", plan_id, sorted(updates), user.email)
     return plan
-
-
-def set_sales_order_number(plan_id: int, sales_order_number: str | None, user: User, db: Session) -> BuyPlan:
-    """Set/clear the Sales Order number — thin delegate to
-    :func:`set_plan_header_fields` (kept for the legacy /so-number route until the Deal
-    Sheet retires it)."""
-    return set_plan_header_fields(plan_id, user, db, sales_order_number=sales_order_number)

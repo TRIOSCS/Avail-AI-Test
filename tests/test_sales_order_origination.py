@@ -188,10 +188,17 @@ def test_new_sales_order_picker_excludes_requisition_without_active_offers(
     assert f"requisition_id={no_offer_req.id}" not in r.text
 
 
-def test_picking_a_requisition_creates_prepicked_draft(nonadmin_client: TestClient, so_setup):
+def test_picking_a_requisition_creates_prepicked_draft(
+    nonadmin_client: TestClient, so_setup, db_session: Session, test_user: User
+):
     """Deal Sheet T3: picking a requisition CREATES the draft directly — the builder
-    auto-picks the recommended offer (no per-requirement form step)."""
+    auto-picks the recommended offer (no per-requirement form step) and the pane lands
+    on the OWNER's editable sheet (Submit present)."""
     req, requirement, offer = so_setup
+    # The sheet's edit gate keys off plan ownership (via the requisition) — make the
+    # acting client the owner so the draft renders editable, as the sales flow does.
+    req.created_by = test_user.id
+    db_session.commit()
     r = nonadmin_client.post(
         "/v2/partials/buy-plans/sales-orders/create",
         data={"requisition_id": req.id, "order_type": "new"},
@@ -221,10 +228,14 @@ def test_builder_labels_say_sales_order(nonadmin_client: TestClient, so_setup):
     assert "Start" in r.text  # per-row primary action (creates the draft directly)
 
 
-def test_create_sales_order_returns_draft_detail(nonadmin_client: TestClient, so_setup):
-    """Posting the offer/sell selections creates a DRAFT buy plan and renders its detail
-    (with the Submit form)."""
+def test_create_sales_order_returns_draft_detail(
+    nonadmin_client: TestClient, so_setup, db_session: Session, test_user: User
+):
+    """Posting the offer/sell selections creates a DRAFT buy plan and renders its
+    editable sheet (with the inline Submit)."""
     req, requirement, offer = so_setup
+    req.created_by = test_user.id  # act as the owner (editable sheet ⇒ Submit present)
+    db_session.commit()
     r = nonadmin_client.post(
         "/v2/partials/buy-plans/sales-orders/create",
         data={
@@ -237,10 +248,14 @@ def test_create_sales_order_returns_draft_detail(nonadmin_client: TestClient, so
     assert "Submit" in r.text  # buy-plan detail submit form
 
 
-def test_create_duplicate_open_so_returns_existing_with_toast(nonadmin_client: TestClient, so_setup):
+def test_create_duplicate_open_so_returns_existing_with_toast(
+    nonadmin_client: TestClient, so_setup, db_session: Session, test_user: User
+):
     """A second create for the same requisition does NOT 500 — it renders the existing
-    open SO's detail, fires a toast (HX-Trigger), AND pushes the existing plan's URL."""
+    open SO's sheet, fires a toast (HX-Trigger), AND pushes the workspace deep link."""
     req, requirement, offer = so_setup
+    req.created_by = test_user.id  # act as the owner (editable sheet ⇒ Submit present)
+    db_session.commit()
     payload = {
         "requisition_id": req.id,
         f"offer_{requirement.id}": offer.id,
@@ -256,7 +271,7 @@ def test_create_duplicate_open_so_returns_existing_with_toast(nonadmin_client: T
     assert "showToast" in trigger
     assert "already" in json.loads(trigger)["showToast"]["message"].lower()
     # The duplicate path also pushes the existing plan's canonical URL (parity with success).
-    assert second.headers.get("HX-Push-Url", "").startswith("/v2/buy-plans/")
+    assert second.headers.get("HX-Push-Url", "").startswith("/v2/approvals?tab=sales-orders&select=")
 
 
 # ── Role-scoping (restricted SALES/TRADER) ──────────────────────────────────────────

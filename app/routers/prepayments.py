@@ -212,9 +212,12 @@ async def prepayment_request_create(
 
         resp = render_tab_body(request, current_user, db, "po-approval", hub_scope)
     else:
-        from .htmx.buy_plans import buy_plan_detail_partial
+        # Deal Sheet T3: the legacy detail page is retired — the plan's pane is the
+        # one render surface.
+        from .htmx.approvals_hub import render_plan_pane
 
-        resp = await buy_plan_detail_partial(request, buy_plan_id, current_user, db)
+        resp = render_plan_pane(request, current_user, db, buy_plan_id)
+        resp.headers["HX-Trigger"] = "awListRefresh"
 
     _prepayment_toast(resp, "Prepayment request submitted for approval.", "success")
     return resp

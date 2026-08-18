@@ -102,76 +102,11 @@ def _draft_plan_with_line(db: Session, user: User):
 # ── /so-number ───────────────────────────────────────────────────────────
 
 
-class TestSoNumberAudit:
-    def test_edit_writes_one_field_edit_row(self, hub_client, db_session, test_user):
-        _req, _rq, bp, _line_ = _draft_plan_with_line(db_session, test_user)
-
-        r = hub_client.post(f"/v2/partials/buy-plans/{bp.id}/so-number", data={"sales_order_number": "SO-77"})
-        assert r.status_code == 200
-        rows = _field_edit_rows(db_session)
-        assert len(rows) == 1
-        assert rows[0].buy_plan_id == bp.id
-        assert rows[0].details["edits"] == [{"field": "sales_order_number", "old": "", "new": "SO-77"}]
-
-    def test_no_change_writes_no_row(self, hub_client, db_session, test_user):
-        _req, _rq, bp, _line_ = _draft_plan_with_line(db_session, test_user)
-        bp.sales_order_number = "SO-77"
-        db_session.commit()
-
-        r = hub_client.post(f"/v2/partials/buy-plans/{bp.id}/so-number", data={"sales_order_number": "SO-77"})
-        assert r.status_code == 200
-        assert _field_edit_rows(db_session) == []
-
-    def test_stale_token_409s_without_writing(self, hub_client, db_session, test_user):
-        _req, _rq, bp, _line_ = _draft_plan_with_line(db_session, test_user)
-
-        r = hub_client.post(
-            f"/v2/partials/buy-plans/{bp.id}/so-number",
-            data={"sales_order_number": "SO-99", "expected_updated_at": STALE},
-        )
-        assert r.status_code == 409
-        assert r.headers.get("HX-Reswap") == "none"
-        db_session.expire_all()
-        assert bp.sales_order_number is None
-        assert _field_edit_rows(db_session) == []
-
-
-# ── /lines/add ───────────────────────────────────────────────────────────
-
-
-class TestAddLineAudit:
-    def test_add_writes_line_added_row(self, hub_client, db_session, test_user):
-        req, rq, bp, _line_ = _draft_plan_with_line(db_session, test_user)
-        off = _attachable_offer(db_session, req, rq)
-        db_session.commit()
-
-        r = hub_client.post(
-            f"/v2/partials/buy-plans/{bp.id}/lines/add",
-            data={"requirement_id": rq.id, "offer_id": off.id, "quantity": 25, "unit_sell": "5.0"},
-        )
-        assert r.status_code == 200
-        rows = _field_edit_rows(db_session)
-        assert len(rows) == 1
-        (edit,) = rows[0].details["edits"]
-        assert edit["field"] == "line added"
-        assert "SwapVendor" in edit["new"] and "×25" in edit["new"]
-        new_line = db_session.query(BuyPlanLine).filter(BuyPlanLine.offer_id == off.id).one()
-        assert rows[0].buy_plan_line_id == new_line.id
-
-    def test_stale_token_409s_without_writing(self, hub_client, db_session, test_user):
-        req, rq, bp, _line_ = _draft_plan_with_line(db_session, test_user)
-        off = _attachable_offer(db_session, req, rq)
-        db_session.commit()
-        before = db_session.query(BuyPlanLine).count()
-
-        r = hub_client.post(
-            f"/v2/partials/buy-plans/{bp.id}/lines/add",
-            data={"requirement_id": rq.id, "offer_id": off.id, "quantity": 25, "expected_updated_at": STALE},
-        )
-        assert r.status_code == 409
-        db_session.expire_all()
-        assert db_session.query(BuyPlanLine).count() == before
-        assert _field_edit_rows(db_session) == []
+# The /so-number, /lines/add, and /lines/{id}/remove routes retired with the legacy
+# detail page (Deal Sheet T3b). Their audit invariants live on with their successors:
+# SO# via POST /v2/partials/approvals/plan/{id}/header (TestHeaderEndpoint below) and
+# add/remove via /lines/bulk (TestBulkAudit below — adds audit "line added", omission
+# audits "line removed", stale 409s write nothing).
 
 
 # ── /lines/{id}/edit ─────────────────────────────────────────────────────
@@ -221,37 +156,6 @@ class TestEditLineAudit:
         assert _field_edit_rows(db_session) == []
 
 
-# ── /lines/{id}/remove ───────────────────────────────────────────────────
-
-
-class TestRemoveLineAudit:
-    def test_remove_writes_line_removed_row(self, hub_client, db_session, test_user):
-        _req, _rq, bp, line = _draft_plan_with_line(db_session, test_user)
-        line_id = line.id
-
-        r = hub_client.post(f"/v2/partials/buy-plans/{bp.id}/lines/{line_id}/remove")
-        assert r.status_code == 200
-        rows = _field_edit_rows(db_session)
-        assert len(rows) == 1
-        (edit,) = rows[0].details["edits"]
-        assert edit["field"] == "line removed"
-        assert "Acme Dist" in edit["old"] and edit["new"] == ""
-        assert edit["line_id"] == line_id  # survives the line's deletion as plain JSON
-        assert db_session.get(BuyPlanLine, line_id) is None
-
-    def test_stale_token_409s_without_writing(self, hub_client, db_session, test_user):
-        _req, _rq, bp, line = _draft_plan_with_line(db_session, test_user)
-
-        r = hub_client.post(
-            f"/v2/partials/buy-plans/{bp.id}/lines/{line.id}/remove",
-            data={"expected_updated_at": STALE},
-        )
-        assert r.status_code == 409
-        db_session.expire_all()
-        assert db_session.get(BuyPlanLine, line.id) is not None
-        assert _field_edit_rows(db_session) == []
-
-
 # ── /lines/bulk ──────────────────────────────────────────────────────────
 
 
@@ -296,6 +200,28 @@ class TestBulkAudit:
         db_session.expire_all()
         assert line.quantity == 100
         assert _field_edit_rows(db_session) == []
+
+    def test_add_via_bulk_writes_line_added_row(self, hub_client, db_session, test_user):
+        req, rq, bp, line1 = _draft_plan_with_line(db_session, test_user)
+        off = _attachable_offer(db_session, req, rq)
+        db_session.commit()
+
+        payload = {
+            "lines": [
+                {"line_id": line1.id},
+                {"requirement_id": rq.id, "offer_id": off.id, "quantity": 25, "unit_sell": 5.0},
+            ],
+            "known_line_ids": [line1.id],
+        }
+        r = hub_client.post(f"/v2/partials/buy-plans/{bp.id}/lines/bulk", data={"payload": json.dumps(payload)})
+        assert r.status_code == 200
+        rows = _field_edit_rows(db_session)
+        assert len(rows) == 1
+        (edit,) = rows[0].details["edits"]
+        assert edit["field"] == "line added"
+        assert "SwapVendor" in edit["new"] and "×25" in edit["new"]
+        new_line = db_session.query(BuyPlanLine).filter(BuyPlanLine.offer_id == off.id).one()
+        assert edit["line_id"] == new_line.id
 
     def test_removal_by_omission_logs_in_same_row(self, hub_client, db_session, test_user):
         req, rq, bp, line1 = _draft_plan_with_line(db_session, test_user)
@@ -485,6 +411,15 @@ class TestHeaderEndpoint:
         bp2 = db_session.get(BuyPlan, bp.id)
         assert bp2.customer_po_number == "CPO-1"  # absent field never touched
         assert bp2.salesperson_notes == "keep me"
+
+    def test_no_change_save_writes_no_row(self, hub_client, db_session, test_user):
+        _req, _rq, bp, _line_ = _draft_plan_with_line(db_session, test_user)
+        bp.sales_order_number = "SO-77"
+        db_session.commit()
+
+        r = hub_client.post(f"/v2/partials/approvals/plan/{bp.id}/header", data={"sales_order_number": "SO-77"})
+        assert r.status_code == 200
+        assert _field_edit_rows(db_session) == []
 
     def test_provided_blank_is_explicit_clear(self, hub_client, db_session, test_user):
         _req, _rq, bp, _line_ = _draft_plan_with_line(db_session, test_user)

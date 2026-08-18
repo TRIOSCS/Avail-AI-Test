@@ -502,7 +502,7 @@ class TestConfirmPO:
         db_session.refresh(plan)
 
         ship_date = datetime.now(UTC) + timedelta(days=7)
-        result = confirm_po(plan.id, line.id, "PO-123", ship_date, test_user, db_session)
+        result = confirm_po(plan.id, line.id, "PO-123", ship_date, test_user, db_session, payment_method="wire")
 
         assert result.po_number == "PO-123"
         assert result.status == BuyPlanLineStatus.PENDING_VERIFY.value
@@ -511,7 +511,7 @@ class TestConfirmPO:
 
     def test_confirm_po_plan_not_found(self, db_session: Session, test_user: User):
         with pytest.raises(ValueError, match="not found"):
-            confirm_po(9999, 1, "PO-X", datetime.now(UTC), test_user, db_session)
+            confirm_po(9999, 1, "PO-X", datetime.now(UTC), test_user, db_session, payment_method="wire")
 
     def test_confirm_po_plan_not_active(
         self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
@@ -519,14 +519,14 @@ class TestConfirmPO:
         plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.DRAFT.value)
         line = _make_line(db_session, plan)
         with pytest.raises(ValueError, match="Plan must be active"):
-            confirm_po(plan.id, line.id, "PO-X", datetime.now(UTC), test_user, db_session)
+            confirm_po(plan.id, line.id, "PO-X", datetime.now(UTC), test_user, db_session, payment_method="wire")
 
     def test_confirm_po_line_not_found(
         self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
     ):
         plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.ACTIVE.value)
         with pytest.raises(ValueError, match="Line .* not found"):
-            confirm_po(plan.id, 9999, "PO-X", datetime.now(UTC), test_user, db_session)
+            confirm_po(plan.id, 9999, "PO-X", datetime.now(UTC), test_user, db_session, payment_method="wire")
 
     def test_confirm_po_wrong_status(
         self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
@@ -534,7 +534,7 @@ class TestConfirmPO:
         plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.ACTIVE.value)
         line = _make_line(db_session, plan, status=BuyPlanLineStatus.VERIFIED.value)
         with pytest.raises(ValueError, match="Line must be awaiting PO"):
-            confirm_po(plan.id, line.id, "PO-X", datetime.now(UTC), test_user, db_session)
+            confirm_po(plan.id, line.id, "PO-X", datetime.now(UTC), test_user, db_session, payment_method="wire")
 
 
 # ── PO Verification ──────────────────────────────────────────────────

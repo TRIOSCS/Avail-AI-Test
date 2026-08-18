@@ -83,14 +83,26 @@ def test_confirm_po_rejects_invalid_payment_method(db_session: Session, test_use
     assert line.status == BuyPlanLineStatus.AWAITING_PO.value  # nothing moved
 
 
-def test_confirm_po_none_payment_method_leaves_column(db_session: Session, test_user: User):
+def test_confirm_po_requires_payment_method(db_session: Session, test_user: User):
+    """payment_method is REQUIRED (Deal Sheet T3b — the optional legacy fork is gone, so
+    the two confirm forms can never diverge again).
+
+    None or blank → ValueError, nothing moves; a real method persists on the line.
+    """
     req, q, rq = _req_quote(db_session, test_user)
     bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
     line = _line(db_session, bp, rq, test_user, status=BuyPlanLineStatus.AWAITING_PO.value)
     db_session.commit()
 
-    updated = confirm_po(bp.id, line.id, "PO-77", datetime.now(UTC), test_user, db_session)
-    assert updated.payment_method is None  # legacy callers unchanged
+    for missing in (None, "   "):
+        with pytest.raises(ValueError, match="payment method"):
+            confirm_po(bp.id, line.id, "PO-77", datetime.now(UTC), test_user, db_session, payment_method=missing)
+        db_session.rollback()
+        assert line.status == BuyPlanLineStatus.AWAITING_PO.value  # nothing moved
+
+    updated = confirm_po(bp.id, line.id, "PO-77", datetime.now(UTC), test_user, db_session, payment_method="wire")
+    assert updated.payment_method == "wire"
+    assert updated.status == BuyPlanLineStatus.PENDING_VERIFY.value
 
 
 # ── apply_qp_purchasing (service) ────────────────────────────────────────
