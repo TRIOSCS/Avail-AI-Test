@@ -18,8 +18,10 @@ from ..config import settings
 
 _SALT = "buyplan-po-confirm"
 
-# Long enough that a busy week doesn't expire the buyer's link; the line's own state
-# machine (awaiting_po only) is the real guard, so a long window leaks nothing.
+# Long enough that a busy week doesn't expire the buyer's link. The line's state
+# machine (awaiting_po only) guards ACTIONS; the page itself shows part/vendor/qty
+# (never money) to anyone holding the link inside this window — so the window is a
+# deliberate exposure trade-off, not a free choice.
 MAX_AGE_SECONDS = 21 * 24 * 3600
 
 

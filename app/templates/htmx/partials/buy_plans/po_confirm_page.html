@@ -89,11 +89,13 @@
       {% else %}{# form #}
       <h1>Confirm the PO you cut</h1>
       <p class="muted">Buy plan #{{ plan.id }} · SO {{ plan.sales_order_number or '—' }}</p>
+      {# No money on this page: it is reachable by ANYONE holding the link for the
+         token window (forwarded email, shared inbox, link-scanner caches). The buyer
+         already has cost in the approval email — identification is all confirm needs. #}
       <dl>
         <dt>Part</dt><dd>{{ mpn }}</dd>
         <dt>Vendor</dt><dd>{{ vendor }}</dd>
         <dt>Qty</dt><dd>{{ '{:,}'.format(line.quantity or 0) }}</dd>
-        <dt>Unit cost</dt><dd>${{ '%.4f' | format(line.unit_cost | float) if line.unit_cost is not none else '—' }}</dd>
         {% if need_by %}<dt>Need by</dt><dd>{{ need_by | fmtdate('%b %d, %Y') }}</dd>{% endif %}
       </dl>
 

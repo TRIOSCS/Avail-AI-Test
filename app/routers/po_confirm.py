@@ -126,11 +126,21 @@ async def po_confirm_post(
         return _render(request, line, _mode(line))
 
     from ..services.buyplan_workflow import confirm_po
+    from ..services.field_audit import diff_fields, log_field_edits
 
     try:
         ship_date = datetime.fromisoformat(estimated_ship_date) if estimated_ship_date else datetime.now(UTC)
     except ValueError:
         ship_date = datetime.now(UTC)
+
+    method = (payment_method or "").strip() or None
+    # Field-audit, mirroring the in-app confirm route: diff BEFORE confirm_po mutates,
+    # one row per save, attributed to the token's buyer — the public path must leave
+    # the same trail ("every change is audit-logged").
+    line_updates: dict = {"po_number": (po_number or "").strip(), "estimated_ship_date": ship_date}
+    if method is not None:
+        line_updates["payment_method"] = method
+    line_edits = diff_fields(line, line_updates)
 
     try:
         confirm_po(
@@ -140,8 +150,9 @@ async def po_confirm_post(
             ship_date,
             buyer,
             db,
-            payment_method=(payment_method or "").strip() or None,
+            payment_method=method,
         )
+        log_field_edits(db, user=buyer, buy_plan_id=line.buy_plan_id, buy_plan_line_id=line.id, edits=line_edits)
         db.commit()
     except ValueError as e:
         db.rollback()

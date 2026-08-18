@@ -91,6 +91,21 @@ def test_post_confirms_line_as_the_token_buyer(client: TestClient, db_session, t
     again = client.get(f"/po/confirm/{token}")
     assert "Already confirmed" in again.text
 
+    # The public path leaves the SAME audit trail the in-app confirm leaves —
+    # one field-edit row attributed to the token's buyer.
+    from app.constants import ActivityType
+    from app.models.intelligence import ActivityLog
+
+    rows = (
+        db_session.query(ActivityLog)
+        .filter_by(activity_type=ActivityType.FIELD_EDIT.value, buy_plan_line_id=line.id)
+        .all()
+    )
+    assert len(rows) == 1
+    assert rows[0].user_id == test_user.id
+    edited = {e["field"] for e in rows[0].details["edits"]}
+    assert "po_number" in edited
+
 
 def test_post_without_payment_method_rerenders_form_with_error(client: TestClient, db_session, test_user: User):
     _bp, line = _active_line(db_session, test_user)
