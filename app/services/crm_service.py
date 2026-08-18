@@ -34,10 +34,10 @@ def next_quote_number(db: Session) -> str:
     """Generate next sequential quote number: Q-YYYY-NNNN.
 
     Takes the MAX numeric sequence across the year's quote numbers rather than
-    trusting the newest row: revising a non-latest quote re-issues its
-    canonical number on a NEW row (the old one becomes ...-R{n}), so
-    newest-by-id can lag the real maximum and every subsequent create would
-    collide on the unique constraint (QC 2026-08-08). The newest-row SELECT
+    trusting the newest row (QC 2026-08-08): under the oq-04 convention a
+    revision row carries `{base}-R{n}` — the prefix regex still reads its base
+    sequence, and newest-by-id can lag the real maximum, so every subsequent
+    create would collide on the unique constraint. The newest-row SELECT
     FOR UPDATE is retained as the concurrency mutex it always was.
     """
     year = datetime.now(UTC).year
@@ -58,6 +58,31 @@ def next_quote_number(db: Session) -> str:
         if match:
             seq = max(seq, int(match.group(1)))
     return f"{prefix}{seq + 1:04d}"
+
+
+_REVISION_SUFFIX_RE = re.compile(r"(?:-R\d+)+$")
+
+
+def quote_base_number(number: str | None) -> str:
+    """Strip any trailing ``-R<n>`` suffix chain: 'Q-2026-0142-R2' → 'Q-2026-0142'.
+
+    Also flattens legacy compounded numbers ('...-R2-R3') from the pre-unification
+    HTMX path back to their base.
+    """
+    return _REVISION_SUFFIX_RE.sub("", number or "")
+
+
+def revision_quote_number(base_number: str, revision: int) -> str:
+    """Owner-chosen revision convention (oq-04, 2026-08-17): the ORIGINAL quote keeps
+    the base number forever; each revision carries an explicit trail suffix — Q-0142 →
+    Q-0142-R1 → Q-0142-R2.
+
+    ``revision`` is the Quote.revision field
+    (1 = original), so the first revision (revision=2) renders R1.
+    """
+    if revision <= 1:
+        return base_number
+    return f"{base_number}-R{revision - 1}"
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -771,7 +796,10 @@ def company_commercial_stats(db: Session, company_ids: list[int]) -> dict[int, d
         result[row.company_id]["win_rate"] = wr
         result[row.company_id]["last_req_date"] = row.last_req_date.isoformat() if row.last_req_date else None
 
-    # 90-day won revenue — CustomerSite → Requisition → Quote join
+    # 90-day won revenue — CustomerSite → Requisition → Quote join. Only quotes that
+    # actually WON count (QC oq-06): a won requisition can carry the original, its
+    # revisions, and lost/draft attempts — summing every quote double/triple-counted
+    # the deal. Quote.result is stamped by the result route / apply_quote_result.
     rev_cutoff = datetime.now(UTC) - timedelta(days=90)
     rev_rows = (
         db.query(
@@ -783,6 +811,7 @@ def company_commercial_stats(db: Session, company_ids: list[int]) -> dict[int, d
         .filter(
             CustomerSite.company_id.in_(company_ids),
             Requisition.status == RequisitionStatus.WON,
+            Quote.result == "won",
             Quote.created_at >= rev_cutoff,
         )
         .group_by(CustomerSite.company_id)

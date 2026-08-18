@@ -22,9 +22,25 @@ from collections.abc import Callable, Iterable
 
 from alembic.autogenerate import compare_metadata
 from alembic.runtime.migration import MigrationContext
-from sqlalchemy import create_engine
+from sqlalchemy import CheckConstraint, create_engine
 
 from app.models import Base
+
+
+def _include_object(obj, name, type_, reflected, compare_to) -> bool:
+    """Keep the gate's original scope: CHECK constraints are invisible to it.
+
+    Alembic 1.19 turned on CHECK-constraint autogenerate detection; our ~33 checks live
+    in raw migration DDL, not on the models, so the new detection reports them all as
+    remove_constraint "drift". Excluding the TYPE (both directions) reproduces the
+    pre-1.19 comparison exactly — this gate has always been about
+    tables/columns/indexes, and check-constraint coverage would be a deliberate follow-
+    up (declare all 33 on models), not a side effect of a dependency bump.
+    """
+    if type_ == "check_constraint" or isinstance(obj, CheckConstraint):
+        return False
+    return True
+
 
 # ---------------------------------------------------------------------------
 # Grandfathered pre-existing drift (pre-dates the schema-drift gate).
@@ -226,7 +242,7 @@ def main() -> int:
         return 2
     engine = create_engine(db_url)
     with engine.connect() as conn:
-        ctx = MigrationContext.configure(conn)
+        ctx = MigrationContext.configure(conn, opts={"include_object": _include_object})
         raw_diffs = list(compare_metadata(ctx, Base.metadata))
     filtered = filter_allowlist(raw_diffs)
     if filtered:

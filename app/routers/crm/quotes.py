@@ -50,16 +50,21 @@ def _compute_quote_totals(line_items: list[dict]) -> tuple[float, float, float]:
 
 def _build_revision(old: Quote, user: User) -> Quote:
     """Mark ``old`` as revised and return a fresh Quote carrying its line items and
-    terms forward at the next revision number."""
+    terms forward at the next revision number.
+
+    Numbering convention (oq-04, unified 2026-08-17): the superseded quote KEEPS its
+    number; the new revision carries the -R trail (Q-0142 → Q-0142-R1 → -R2).
+    """
+    from ...services.crm_service import quote_base_number, revision_quote_number
+
     require_valid_transition("quote", old.status, QuoteStatus.REVISED)
     old.status = QuoteStatus.REVISED
-    base_number = old.quote_number
-    old.quote_number = f"{base_number}-R{old.revision}"
+    new_revision = (old.revision or 1) + 1
     return Quote(
         requisition_id=old.requisition_id,
         customer_site_id=old.customer_site_id,
-        quote_number=base_number,
-        revision=old.revision + 1,
+        quote_number=revision_quote_number(quote_base_number(old.quote_number), new_revision),
+        revision=new_revision,
         line_items=old.line_items,
         payment_terms=old.payment_terms,
         shipping_terms=old.shipping_terms,
