@@ -3382,7 +3382,7 @@ Alpine.data('offerPicker', (bpId, seedGroups, knownLineIds, opts) => ({
   get totals() {
     let cost = 0; let rev = 0;
     for (const g of this.groups) {
-      const sell = parseFloat(g.sell) || 0;
+      const sell = Number(g.sell) || 0;
       for (const o of g.offers) {
         if (!o.checked) continue;
         const q = parseInt(o.qty, 10) || 0;
@@ -3393,9 +3393,11 @@ Alpine.data('offerPicker', (bpId, seedGroups, knownLineIds, opts) => ({
   },
 
   get invalid() {
-    // every checked, unlocked row needs a positive whole qty
+    // every checked, unlocked row needs a positive whole qty; a NON-EMPTY sell must be
+    // a real number ("1,200" / "$12" would otherwise save as 1 / clear the group's sell)
     const bad = [];
     for (const g of this.groups) {
+      if (g.sell !== '' && g.sell !== null && !Number.isFinite(Number(g.sell))) bad.push(g.mpn);
       for (const o of g.offers) {
         if (o.checked && !o.locked) {
           const q = Number(o.qty);
@@ -3414,7 +3416,7 @@ Alpine.data('offerPicker', (bpId, seedGroups, knownLineIds, opts) => ({
     this.saving = true;
     const rows = [];
     for (const g of this.groups) {
-      const sell = g.sell === '' ? null : parseFloat(g.sell);
+      const sell = (g.sell === '' || g.sell === null) ? null : Number(g.sell);
       for (const o of g.offers) {
         if (o.locked && o.line_id) { rows.push({ line_id: o.line_id, unit_sell: sell }); continue; }
         if (!o.checked) continue;

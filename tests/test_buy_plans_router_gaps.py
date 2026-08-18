@@ -151,7 +151,7 @@ def test_create_so_duplicate_error(client, test_requisition):
             ):
                 resp = client.post(
                     "/v2/partials/buy-plans/sales-orders/create",
-                    data={"requisition_id": str(test_requisition.id), "offer_1": "1"},
+                    data={"requisition_id": str(test_requisition.id), "offer_1": "1", "embed": "aw"},
                 )
 
     assert resp.status_code == 200
@@ -168,7 +168,7 @@ def test_create_so_value_error(client, test_requisition):
         with patch("app.dependencies.require_requisition_access"):
             resp = client.post(
                 "/v2/partials/buy-plans/sales-orders/create",
-                data={"requisition_id": str(test_requisition.id), "offer_1": "1"},
+                data={"requisition_id": str(test_requisition.id), "offer_1": "1", "embed": "aw"},
             )
 
     assert resp.status_code == 400
@@ -194,6 +194,7 @@ def test_create_so_success(client, test_requisition):
                         "requisition_id": str(test_requisition.id),
                         "offer_1": "1",
                         "sell_1": "2.50",
+                        "embed": "aw",
                     },
                 )
 

@@ -18,16 +18,21 @@
 
 <div id="sheet-actions">
 {% if bp.status == 'draft' and can_edit_plan %}
-<div class="rounded-lg border-2 border-gray-300 bg-gray-50 p-3 space-y-2">
+<div class="rounded-lg border-2 border-gray-300 bg-gray-50 p-3 space-y-2"
+     x-data='{ notes: {{ (bp.salesperson_notes or "") | tojson }}, orig: {{ (bp.salesperson_notes or "") | tojson }} }'>
   <div class="flex items-start gap-2">
     <textarea rows="1" placeholder="Notes for the manager (saved as you type away)"
-              class="input input-sm flex-1"
-              x-data='{ orig: {{ (bp.salesperson_notes or "") | tojson }} }'
-              @blur='if ($el.value !== orig) { htmx.ajax("POST", "/v2/partials/approvals/plan/{{ bp.id }}/header", { target: "#aw-pane", swap: "innerHTML", indicator: "#aw-pane-ind", values: { salesperson_notes: $el.value, lens: {{ lens | tojson }}, expected_updated_at: {{ plan_stale_token | tojson }} } }); }'
-    >{{ bp.salesperson_notes or '' }}</textarea>
+              class="input input-sm flex-1" x-model="notes"
+              @blur='if (notes !== orig) { htmx.ajax("POST", "/v2/partials/approvals/plan/{{ bp.id }}/header", { target: "#aw-pane", swap: "innerHTML", indicator: "#aw-pane-ind", values: { salesperson_notes: notes, lens: {{ lens | tojson }}, expected_updated_at: {{ plan_stale_token | tojson }} } }); }'
+    ></textarea>
+    {# The typed notes RIDE the submit POST too (submit delegates non-blank values to
+       the header writer) — clicking Submit fires the textarea's blur-autosave
+       concurrently, and if submit wins that race the autosave 409s on the stale
+       token; carrying the value here means the note lands either way. #}
     <form hx-post="/v2/partials/buy-plans/{{ bp.id }}/submit" hx-target="#aw-pane" hx-swap="innerHTML" class="flex-shrink-0">
       <input type="hidden" name="origin" value="approvals_workspace">
       <input type="hidden" name="lens" value="{{ lens }}">
+      <input type="hidden" name="salesperson_notes" :value="notes">
       <button type="submit" data-loading-disable class="btn-primary btn-sm"
               {% if not bp.sales_order_number %}disabled title="Add the SO# first (the readiness chip shows what's left)"{% endif %}>
         Submit for approval

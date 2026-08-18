@@ -153,7 +153,7 @@ def test_create_route_lite_branch(lite_client: TestClient, db_session: Session, 
     req = _open_req(db_session, test_user)
     r = lite_client.post(
         "/v2/partials/buy-plans/sales-orders/create",
-        data={"requisition_id": req.id, "order_type": "stock_sale"},
+        data={"requisition_id": req.id, "order_type": "stock_sale", "embed": "aw"},
     )
     assert r.status_code == 200
 

@@ -249,6 +249,41 @@ def test_htmx_create_from_approvals_hub_rerenders_po_tab(client, db_session: Ses
     assert "showToast" in r.headers.get("HX-Trigger", "")
 
 
+def test_workspace_origin_round_trips_to_po_pane(client, db_session: Session, test_user: User):
+    """The Deal Sheet home (PO pane button, origin=approvals_workspace): the modal GET
+    must PRESERVE the origin (a whitelist collapse here once silently retargeted the
+    form at #main-content, destroying the workspace on success), the form must target
+    #aw-pane, and the create POST must re-render the PO-line pane."""
+    _seed_approver(db_session)
+    _bp, line = _plan_with_line(db_session, test_user)
+    db_session.commit()
+
+    modal = client.get(
+        f"/v2/partials/prepayments/new?line_id={line.id}&origin=approvals_workspace",
+        headers={"HX-Request": "true"},
+    )
+    assert modal.status_code == 200
+    assert 'name="origin" value="approvals_workspace"' in modal.text.replace("'", '"')
+    assert "#aw-pane" in modal.text
+
+    r = client.post(
+        "/v2/partials/prepayments",
+        data={
+            "buy_plan_id": line.buy_plan_id,
+            "buy_plan_line_id": line.id,
+            "payment_method": "wire",
+            "total_incl_fees": "20.00",
+            "origin": "approvals_workspace",
+        },
+        headers={"HX-Request": "true"},
+    )
+    assert r.status_code == 200, r.text
+    assert 'id="aw-pane-body"' in r.text  # the PO-line pane, not a tab body or plan detail
+    trigger = r.headers.get("HX-Trigger", "")
+    assert "showToast" in trigger
+    assert "awListRefresh" in trigger  # the toast MERGES with the list nudge, never clobbers
+
+
 # ── Plan-detail line pill + badge (#10/#11) ───────────────────────────────
 
 

@@ -407,6 +407,7 @@ def _sheet_ctx(db: Session, user: User, bp: BuyPlan, *, is_sourcing: bool) -> di
     is_owner = _owns_plan(user, bp)
 
     picker_groups: list[dict] = []
+    rendered_line_ids: set[int] = set()
     if can_edit and is_sourcing and bp.requisition_id:
         requirements = db.scalars(
             select(Requirement).where(Requirement.requisition_id == bp.requisition_id).order_by(Requirement.id)
@@ -432,6 +433,8 @@ def _sheet_ctx(db: Session, user: User, bp: BuyPlan, *, is_sourcing: bool) -> di
             rows = []
             for off in offers + stale_offers:
                 ln = lines_by_offer.get(off.id)
+                if ln is not None:
+                    rendered_line_ids.add(ln.id)
                 rows.append(
                     {
                         "offer_id": off.id,
@@ -481,7 +484,11 @@ def _sheet_ctx(db: Session, user: User, bp: BuyPlan, *, is_sourcing: bool) -> di
         "is_plan_owner": is_owner,
         "plan_stale_token": stale_token(bp),
         "picker_groups": picker_groups,
-        "picker_known_line_ids": [ln.id for ln in lines],
+        # ONLY lines the picker actually rendered: known_line_ids drives removal-by-
+        # omission in the bulk save, so a line the picker could NOT show (orphaned
+        # offer/requirement after a delete, or two lines sharing one offer) must be
+        # UNKNOWN to it — unknown lines are left untouched, never silently removed.
+        "picker_known_line_ids": sorted(rendered_line_ids),
         "readiness_missing": [r for r in checklist if not r["ok"]],
     }
 

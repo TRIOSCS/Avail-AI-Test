@@ -232,6 +232,13 @@ def withdraw_buy_plan(plan_id: int, user: User, db: Session) -> BuyPlan:
     the decision stamps, and audits — a withdraw is NOT a rejection, so no
     rejecting user/reason is stamped. Caller commits.
     """
+    # Row lock, mirroring submit_buy_plan's: serializes a withdraw racing an approve.
+    # Without it, an approve committing between our read and the engine-cancel below
+    # finds nothing to cancel (no error) and we'd force DRAFT over a now-ACTIVE plan.
+    # The status check runs AFTER the lock so it sees the racer's committed state.
+    # (SQLite no-ops FOR UPDATE.)
+    if db.scalar(select(BuyPlan.id).where(BuyPlan.id == plan_id).with_for_update()) is None:
+        raise ValueError(f"Buy plan {plan_id} not found")
     plan = db.get(BuyPlan, plan_id, options=[joinedload(BuyPlan.requisition)])
     if not plan:
         raise ValueError(f"Buy plan {plan_id} not found")

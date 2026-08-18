@@ -401,6 +401,30 @@ def test_sheet_picker_groups_render_for_editor(hub_client, db_session, test_user
     assert "no longer active" in body  # the picked line's non-requisition offer renders as the truth option
 
 
+def test_picker_known_line_ids_exclude_unrendered_lines(hub_client, db_session, test_user):
+    """A line the picker can NOT render (its offer was deleted → offer_id NULL) must be
+    UNKNOWN to the bulk save — known_line_ids drives removal-by-omission, so including
+    an invisible line would let an unrelated save silently delete it."""
+    req, q, rq = _req_quote(db_session, test_user)
+    bp = _plan(db_session, req, q, status=BuyPlanStatus.DRAFT.value)
+    from tests.test_approvals_hub_tabs import _line as _mk_line
+
+    rendered = _mk_line(db_session, bp, rq, test_user, status="awaiting_po")
+    orphan = _mk_line(db_session, bp, rq, test_user, status="awaiting_po", offer_id=None)
+    db_session.commit()
+
+    body = hub_client.get(f"/v2/partials/approvals/plan/{bp.id}/pane").text
+    # The known_line_ids literal is the flat array between the groups arg and the opts
+    # object in the offerPicker(...) call.
+    import re
+
+    m = re.search(r"\], (\[[^\]]*\]), \{", body.split("offerPicker(", 1)[1])
+    assert m, "known_line_ids literal not found in the picker call"
+    known = m.group(1)
+    assert str(rendered.id) in known
+    assert str(orphan.id) not in known
+
+
 def test_withdraw_returns_pending_plan_to_draft(hub_client, db_session, test_user):
     """The submitting owner pulls a PENDING plan back to DRAFT; the open engine request
     is cancelled (no orphaned REQUESTED row)."""

@@ -201,7 +201,7 @@ def test_picking_a_requisition_creates_prepicked_draft(
     db_session.commit()
     r = nonadmin_client.post(
         "/v2/partials/buy-plans/sales-orders/create",
-        data={"requisition_id": req.id, "order_type": "new"},
+        data={"requisition_id": req.id, "order_type": "new", "embed": "aw"},
     )
     assert r.status_code == 200
     assert "Submit" in r.text  # lands on the draft's editable surface
@@ -242,6 +242,7 @@ def test_create_sales_order_returns_draft_detail(
             "requisition_id": req.id,
             f"offer_{requirement.id}": offer.id,
             f"sell_{requirement.id}": "1.25",
+            "embed": "aw",
         },
     )
     assert r.status_code == 200
@@ -260,6 +261,7 @@ def test_create_duplicate_open_so_returns_existing_with_toast(
         "requisition_id": req.id,
         f"offer_{requirement.id}": offer.id,
         f"sell_{requirement.id}": "1.25",
+        "embed": "aw",
     }
     first = nonadmin_client.post("/v2/partials/buy-plans/sales-orders/create", data=payload)
     assert first.status_code == 200
@@ -295,6 +297,23 @@ def test_picker_excludes_foreign_requisition_for_restricted(restricted_client: T
     assert f'name="requisition_id" value="{req.id}"' not in r.text
 
 
+def test_non_embedded_create_redirects_into_workspace(
+    nonadmin_client: TestClient, so_setup, db_session: Session, test_user: User
+):
+    """A create WITHOUT embed=aw (a stale bookmark of the retired standalone picker) HX-
+    Redirects into the workspace deep link — a bare pane fragment in #main-content would
+    strand its #aw-pane-targeted actions."""
+    req, _requirement, _offer = so_setup
+    req.created_by = test_user.id
+    db_session.commit()
+    r = nonadmin_client.post(
+        "/v2/partials/buy-plans/sales-orders/create",
+        data={"requisition_id": req.id, "order_type": "new"},
+    )
+    assert r.status_code == 200
+    assert r.headers.get("HX-Redirect", "").startswith("/v2/approvals?tab=sales-orders&select=")
+
+
 def test_create_404_for_restricted_non_owner(restricted_client: TestClient, so_setup):
     """POST create for a not-owned requisition is a 404 for a restricted role."""
     req, requirement, offer = so_setup
@@ -323,7 +342,7 @@ def test_restricted_role_can_originate_for_owned_requisition(
     # And create succeeds directly from the pick (offers auto-selected).
     created = restricted_client.post(
         "/v2/partials/buy-plans/sales-orders/create",
-        data={"requisition_id": owned_req.id, "order_type": "new"},
+        data={"requisition_id": owned_req.id, "order_type": "new", "embed": "aw"},
     )
     assert created.status_code == 200
     assert "Submit" in created.text

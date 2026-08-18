@@ -341,17 +341,23 @@ async def _sales_order_created_response(request: Request, user: User, db: Sessio
     Owns the whole HX-Trigger contract for BOTH create outcomes: an optional *toast*
     dict (the duplicate-open-SO warning) merges with the ``embed=aw`` list nudge
     (awListRefresh + aw-mark highlight) so the two call sites can't drift.
+
+    A NON-embedded create (a stale bookmark of the retired standalone picker) gets an
+    HX-Redirect into the workspace deep link instead — swapping a bare pane fragment
+    into #main-content would strand its #aw-pane-targeted actions with no shell.
     """
+    deep_link = f"/v2/approvals?tab=sales-orders&select={plan_id}"
+    if form.get("embed") != "aw":
+        return HTMLResponse("", headers={"HX-Redirect": deep_link})
+
     from .approvals_hub import render_plan_pane
 
     resp = render_plan_pane(request, user, db, plan_id, lens="sales-orders")
-    resp.headers["HX-Push-Url"] = f"/v2/approvals?tab=sales-orders&select={plan_id}"
+    resp.headers["HX-Push-Url"] = deep_link
     trigger = dict(toast or {})
-    if form.get("embed") == "aw":
-        trigger["awListRefresh"] = True
-        trigger["aw-mark"] = {"key": f"plan-{plan_id}"}
-    if trigger:
-        resp.headers["HX-Trigger"] = json.dumps(trigger)
+    trigger["awListRefresh"] = True
+    trigger["aw-mark"] = {"key": f"plan-{plan_id}"}
+    resp.headers["HX-Trigger"] = json.dumps(trigger)
     return resp
 
 

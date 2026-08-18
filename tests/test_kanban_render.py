@@ -223,6 +223,9 @@ def test_resourcing_lane_card_carries_claim_button(ws_client: TestClient, db_ses
     slice_ = _lane_slice(body, "resourcing")
     assert f"/v2/partials/buy-plans/{bp.id}/lines/{line.id}/claim" in slice_
     assert "Claim this line" in slice_
+    # lens rides the POST so the response re-renders THIS plan pane (a lens-less
+    # line action renders the isolated PO-line pane instead — wrong surface here).
+    assert 'name="lens"' in slice_
 
 
 def test_verified_card_offers_mark_received_pending_does_not(
