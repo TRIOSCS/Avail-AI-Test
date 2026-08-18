@@ -17,6 +17,7 @@
        dragging: false,
        sel: null,
        paneUrl: null,
+       advance: false,
        startDrag(e) { this.dragging = true; e.preventDefault(); },
        onDrag(e) {
          if (!this.dragging) return;
@@ -29,12 +30,39 @@
        select(key, url) {
          this.sel = key; this.paneUrl = url;
          htmx.ajax('GET', url, { target: '#aw-pane', swap: 'innerHTML', indicator: '#aw-pane-ind' });
+         if (window.innerWidth < 900) {
+           this.$root.querySelector('#aw-pane')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+         }
+       },
+       move(d) {
+         const rows = Array.from(this.$root.querySelectorAll('#aw-list [data-row-key]'));
+         if (!rows.length) return;
+         const idx = rows.findIndex(r => r.dataset.rowKey === this.sel);
+         const next = rows[idx + d] || (idx === -1 ? rows[0] : null);
+         if (next) { next.click(); next.scrollIntoView({ block: 'nearest' }); }
+       },
+       key(e) {
+         if (e.metaKey || e.ctrlKey || e.altKey) return;
+         if (e.target.closest('input, textarea, select, [contenteditable]')) return;
+         if (e.key === 'j' || e.key === 'ArrowDown') { e.preventDefault(); this.move(1); }
+         else if (e.key === 'k' || e.key === 'ArrowUp') { e.preventDefault(); this.move(-1); }
+         else if (e.key === '/') { e.preventDefault(); this.$root.querySelector('#aw-filters [name=q]')?.focus(); }
+       },
+       maybeAdvance(e) {
+         if (!this.advance || e.target.id !== 'aw-list') return;
+         this.advance = false;
+         const next = this.$root.querySelector('[data-aw-needs] [data-row-key]');
+         if (next && next.dataset.rowKey !== this.sel) next.click();
        }
      }"
      x-ref="container"
      @mousemove.window="onDrag($event)"
      @mouseup.window="stopDrag()"
+     @keydown.window="key($event)"
      @aw-select.window="select($event.detail.key, $event.detail.url)"
+     @aw-mark.window="sel = $event.detail.key"
+     @aw-advance.window="advance = true"
+     @htmx:after-settle.window="maybeAdvance($event)"
      @aw-default.window="if (!sel) select($event.detail.key, $event.detail.url)">
 
   {# ── Left: the work list ─────────────────────────────────────────── #}
@@ -48,7 +76,7 @@
        only the baked ?scope applies; on refetches the form's values are appended
        after it and Starlette's last-value-wins resolution makes them authoritative. #}
     <div id="aw-list" class="flex-1 flex flex-col min-h-0 md:overflow-y-auto"
-         hx-get="/v2/partials/approvals/{{ tab }}/list?scope={{ scope }}{% if select %}&select={{ select }}{% endif %}"
+         hx-get="/v2/partials/approvals/{{ tab }}/list?scope={{ scope }}{% if select %}&select={{ select }}{% endif %}{% if q %}&q={{ q | urlencode }}{% endif %}{% if show_closed %}&show_closed=1{% endif %}"
          hx-include="#aw-filters"
          hx-trigger="load, awListRefresh from:body"
          hx-target="this"
@@ -58,6 +86,9 @@
          replaces it with the list's real filter form. #}
       <form id="aw-filters" hidden></form>
       <div class="p-6 text-center text-gray-400 text-sm">Loading {{ tab_label|lower }}…</div>
+    </div>
+    <div class="hidden md:block flex-shrink-0 px-3 py-1 text-[11px] text-gray-300 border-t border-line-subtle select-none">
+      <kbd>j</kbd>/<kbd>k</kbd> walk the list · <kbd>/</kbd> search
     </div>
   </div>
 
@@ -74,13 +105,7 @@
        lives OUTSIDE #aw-pane so the innerHTML swap never removes it. #}
     <div id="aw-pane-ind" class="htmx-indicator h-0.5 bg-accent-500 animate-pulse flex-shrink-0"></div>
     <div id="aw-pane" class="flex-1 min-h-0">
-      <div class="flex flex-col items-center justify-center h-full min-h-[200px] text-gray-400 p-8">
-        <svg class="h-12 w-12 mb-3 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
-        </svg>
-        <p class="text-sm font-medium text-gray-600">Select an item</p>
-        <p class="text-secondary mt-1">Pick a row on the left to review and decide</p>
-      </div>
+      {% include "htmx/partials/approvals/_pane_blank.html" %}
     </div>
   </div>
 </div>

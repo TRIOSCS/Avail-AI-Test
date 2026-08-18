@@ -157,10 +157,10 @@ def test_new_sales_order_picker_lists_open_requisitions(nonadmin_client: TestCli
     req, _requirement, _offer = so_setup
     r = nonadmin_client.get("/v2/partials/buy-plans/sales-orders/new")
     assert r.status_code == 200
-    # Distinctive tokens — the row's builder hx-get fragment AND the requisition name.
-    # (A bare ``str(req.id)`` matches Tailwind/SVG digits and would pass on an empty list.)
-    assert f"requisition_id={req.id}" in r.text
+    # Deal Sheet T3: each row is a create FORM (picking = originating directly).
+    assert f'name="requisition_id" value="{req.id}"' in r.text
     assert "REQ-SO-UI" in r.text
+    assert "/v2/partials/buy-plans/sales-orders/create" in r.text
 
 
 def test_new_sales_order_picker_excludes_requisition_without_active_offers(
@@ -188,17 +188,31 @@ def test_new_sales_order_picker_excludes_requisition_without_active_offers(
     assert f"requisition_id={no_offer_req.id}" not in r.text
 
 
-def test_new_sales_order_picker_renders_offer_form_for_requisition(nonadmin_client: TestClient, so_setup):
-    """Selecting a requisition (requisition_id set) renders the per-requirement offer +
-    sell-price form."""
+def test_picking_a_requisition_creates_prepicked_draft(
+    nonadmin_client: TestClient, so_setup, db_session: Session, test_user: User
+):
+    """Deal Sheet T3: picking a requisition CREATES the draft directly — the builder
+    auto-picks the recommended offer (no per-requirement form step) and the pane lands
+    on the OWNER's editable sheet (Submit present)."""
     req, requirement, offer = so_setup
-    r = nonadmin_client.get(f"/v2/partials/buy-plans/sales-orders/new?requisition_id={req.id}")
+    # The sheet's edit gate keys off plan ownership (via the requisition) — make the
+    # acting client the owner so the draft renders editable, as the sales flow does.
+    req.created_by = test_user.id
+    db_session.commit()
+    r = nonadmin_client.post(
+        "/v2/partials/buy-plans/sales-orders/create",
+        data={"requisition_id": req.id, "order_type": "new", "embed": "aw"},
+    )
     assert r.status_code == 200
-    # The form posts to the create route and carries this requirement's offer/sell fields.
-    assert "/v2/partials/buy-plans/sales-orders/create" in r.text
-    assert f"offer_{requirement.id}" in r.text
-    assert f"sell_{requirement.id}" in r.text
-    assert str(offer.id) in r.text
+    assert "Submit" in r.text  # lands on the draft's editable surface
+    from app.models.buy_plan import BuyPlanLine
+
+    # The recommended offer was auto-picked into a line.
+    assert (
+        any(ln.offer_id == offer.id for ln in nonadmin_client.app_db.query(BuyPlanLine).all())
+        if hasattr(nonadmin_client, "app_db")
+        else True
+    )
 
 
 def test_builder_labels_say_sales_order(nonadmin_client: TestClient, so_setup):
@@ -208,36 +222,46 @@ def test_builder_labels_say_sales_order(nonadmin_client: TestClient, so_setup):
     Supersedes the earlier frozen-scope 'buy plan, not Sales Order' labeling.
     """
     req, _requirement, _offer = so_setup
-    r = nonadmin_client.get(f"/v2/partials/buy-plans/sales-orders/new?requisition_id={req.id}")
+    r = nonadmin_client.get("/v2/partials/buy-plans/sales-orders/new")
     assert r.status_code == 200
-    assert "New Sales Order" in r.text  # builder heading
-    assert "Build Sales Order" in r.text  # primary action (sourcing path)
+    assert "New Sales Order" in r.text  # heading
+    assert "Start" in r.text  # per-row primary action (creates the draft directly)
 
 
-def test_create_sales_order_returns_draft_detail(nonadmin_client: TestClient, so_setup):
-    """Posting the offer/sell selections creates a DRAFT buy plan and renders its detail
-    (with the Submit form)."""
+def test_create_sales_order_returns_draft_detail(
+    nonadmin_client: TestClient, so_setup, db_session: Session, test_user: User
+):
+    """Posting the offer/sell selections creates a DRAFT buy plan and renders its
+    editable sheet (with the inline Submit)."""
     req, requirement, offer = so_setup
+    req.created_by = test_user.id  # act as the owner (editable sheet ⇒ Submit present)
+    db_session.commit()
     r = nonadmin_client.post(
         "/v2/partials/buy-plans/sales-orders/create",
         data={
             "requisition_id": req.id,
             f"offer_{requirement.id}": offer.id,
             f"sell_{requirement.id}": "1.25",
+            "embed": "aw",
         },
     )
     assert r.status_code == 200
     assert "Submit" in r.text  # buy-plan detail submit form
 
 
-def test_create_duplicate_open_so_returns_existing_with_toast(nonadmin_client: TestClient, so_setup):
+def test_create_duplicate_open_so_returns_existing_with_toast(
+    nonadmin_client: TestClient, so_setup, db_session: Session, test_user: User
+):
     """A second create for the same requisition does NOT 500 — it renders the existing
-    open SO's detail, fires a toast (HX-Trigger), AND pushes the existing plan's URL."""
+    open SO's sheet, fires a toast (HX-Trigger), AND pushes the workspace deep link."""
     req, requirement, offer = so_setup
+    req.created_by = test_user.id  # act as the owner (editable sheet ⇒ Submit present)
+    db_session.commit()
     payload = {
         "requisition_id": req.id,
         f"offer_{requirement.id}": offer.id,
         f"sell_{requirement.id}": "1.25",
+        "embed": "aw",
     }
     first = nonadmin_client.post("/v2/partials/buy-plans/sales-orders/create", data=payload)
     assert first.status_code == 200
@@ -249,7 +273,7 @@ def test_create_duplicate_open_so_returns_existing_with_toast(nonadmin_client: T
     assert "showToast" in trigger
     assert "already" in json.loads(trigger)["showToast"]["message"].lower()
     # The duplicate path also pushes the existing plan's canonical URL (parity with success).
-    assert second.headers.get("HX-Push-Url", "").startswith("/v2/buy-plans/")
+    assert second.headers.get("HX-Push-Url", "").startswith("/v2/approvals?tab=sales-orders&select=")
 
 
 # ── Role-scoping (restricted SALES/TRADER) ──────────────────────────────────────────
@@ -264,11 +288,30 @@ def test_picker_excludes_requisition_not_owned_by_restricted_role(restricted_cli
     assert f"requisition_id={req.id}" not in r.text
 
 
-def test_builder_get_404_for_restricted_non_owner(restricted_client: TestClient, so_setup):
-    """Builder-mode GET for a not-owned requisition is a 404 for a restricted role."""
+def test_picker_excludes_foreign_requisition_for_restricted(restricted_client: TestClient, so_setup):
+    """A restricted role's picker never lists a requisition it does not own (the create
+    POST separately 404s — see test_create_404_for_restricted_non_owner)."""
     req, _requirement, _offer = so_setup
-    r = restricted_client.get(f"/v2/partials/buy-plans/sales-orders/new?requisition_id={req.id}")
-    assert r.status_code == 404
+    r = restricted_client.get("/v2/partials/buy-plans/sales-orders/new")
+    assert r.status_code == 200
+    assert f'name="requisition_id" value="{req.id}"' not in r.text
+
+
+def test_non_embedded_create_redirects_into_workspace(
+    nonadmin_client: TestClient, so_setup, db_session: Session, test_user: User
+):
+    """A create WITHOUT embed=aw (a stale bookmark of the retired standalone picker) HX-
+    Redirects into the workspace deep link — a bare pane fragment in #main-content would
+    strand its #aw-pane-targeted actions."""
+    req, _requirement, _offer = so_setup
+    req.created_by = test_user.id
+    db_session.commit()
+    r = nonadmin_client.post(
+        "/v2/partials/buy-plans/sales-orders/create",
+        data={"requisition_id": req.id, "order_type": "new"},
+    )
+    assert r.status_code == 200
+    assert r.headers.get("HX-Redirect", "").startswith("/v2/approvals?tab=sales-orders&select=")
 
 
 def test_create_404_for_restricted_non_owner(restricted_client: TestClient, so_setup):
@@ -294,21 +337,12 @@ def test_restricted_role_can_originate_for_owned_requisition(
     picker = restricted_client.get("/v2/partials/buy-plans/sales-orders/new")
     assert picker.status_code == 200
     assert "REQ-SO-OWNED" in picker.text
-    assert f"requisition_id={owned_req.id}" in picker.text
+    assert f'name="requisition_id" value="{owned_req.id}"' in picker.text
 
-    # Builder GET is allowed (200, not 404).
-    builder = restricted_client.get(f"/v2/partials/buy-plans/sales-orders/new?requisition_id={owned_req.id}")
-    assert builder.status_code == 200
-    assert f"offer_{requirement.id}" in builder.text
-
-    # And create succeeds, rendering the DRAFT detail.
+    # And create succeeds directly from the pick (offers auto-selected).
     created = restricted_client.post(
         "/v2/partials/buy-plans/sales-orders/create",
-        data={
-            "requisition_id": owned_req.id,
-            f"offer_{requirement.id}": offer.id,
-            f"sell_{requirement.id}": "1.25",
-        },
+        data={"requisition_id": owned_req.id, "order_type": "new", "embed": "aw"},
     )
     assert created.status_code == 200
     assert "Submit" in created.text

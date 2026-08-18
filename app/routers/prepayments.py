@@ -54,8 +54,26 @@ _TRUTHY = {"true", "on", "1", "yes"}
 
 
 def _prepayment_toast(response: HTMLResponse, message: str, kind: str = "success") -> None:
-    """Attach a showToast HX-Trigger so the Alpine $store.toast surfaces feedback."""
-    response.headers["HX-Trigger"] = json.dumps({"showToast": {"message": message, "type": kind}})
+    """Attach a showToast HX-Trigger so the Alpine $store.toast surfaces feedback.
+
+    MERGES with any HX-Trigger already on the response (bare event name or JSON dict)
+    instead of clobbering it — the create route sets awListRefresh before toasting.
+    """
+    trigger: dict = {"showToast": {"message": message, "type": kind}}
+    existing = response.headers.get("HX-Trigger")
+    if existing:
+        try:
+            parsed = json.loads(existing)
+        except ValueError:
+            parsed = None
+        if isinstance(parsed, dict):
+            trigger.update({k: v for k, v in parsed.items() if k != "showToast"})
+        else:
+            # htmx's bare form: one event name, or several comma-separated.
+            for event in str(existing).split(","):
+                if event.strip():
+                    trigger[event.strip()] = True
+    response.headers["HX-Trigger"] = json.dumps(trigger)
 
 
 def _cod_guard_response(message: str) -> HTMLResponse:
@@ -102,9 +120,10 @@ def prepayment_request_modal(
     applied here too so the modal can't be opened against a plan the actor can't access.
 
     ``origin``/``hub_scope`` (mirroring resource_form) thread the caller's surface through to
-    the create POST so it re-renders the RIGHT surface: ``''`` → plan detail into
-    #main-content; ``approvals_hub`` → the PO Approval tab body into #ap-hub-body (at the
-    preserved SEE-ALL/MINE ``hub_scope``).
+    the create POST so it re-renders the RIGHT surface: ``approvals_workspace`` → the
+    PO-line pane into #aw-pane (the Deal Sheet home); ``approvals_hub`` → the PO Approval
+    tab body into #ap-hub-body (at the preserved SEE-ALL/MINE ``hub_scope``); anything
+    else collapses to ``''`` → plan pane into #main-content.
     """
     line = db.get(BuyPlanLine, line_id)
     if line is None:
@@ -123,7 +142,7 @@ def prepayment_request_modal(
         "vendor_name": vendor_name,
         "amount": _line_amount(line),
         "payment_methods": _PAYMENT_METHOD_CHOICES,
-        "origin": "approvals_hub" if origin == "approvals_hub" else "",
+        "origin": origin if origin in ("approvals_hub", "approvals_workspace") else "",
         "hub_scope": "mine" if hub_scope == "mine" else "all",
     }
     return template_response("htmx/partials/prepayments/request_modal.html", ctx)
@@ -211,10 +230,19 @@ async def prepayment_request_create(
         from .htmx.approvals_hub import render_tab_body
 
         resp = render_tab_body(request, current_user, db, "po-approval", hub_scope)
-    else:
-        from .htmx.buy_plans import buy_plan_detail_partial
+    elif origin == "approvals_workspace":
+        # The button's home since the Deal Sheet: the workspace PO-line pane (#aw-pane).
+        from .htmx.approvals_hub import render_po_pane
 
-        resp = await buy_plan_detail_partial(request, buy_plan_id, current_user, db)
+        resp = render_po_pane(request, current_user, db, buy_plan_line_id)
+        resp.headers["HX-Trigger"] = "awListRefresh"
+    else:
+        # Deal Sheet T3: the legacy detail page is retired — the plan's pane is the
+        # one render surface.
+        from .htmx.approvals_hub import render_plan_pane
+
+        resp = render_plan_pane(request, current_user, db, buy_plan_id)
+        resp.headers["HX-Trigger"] = "awListRefresh"
 
     _prepayment_toast(resp, "Prepayment request submitted for approval.", "success")
     return resp

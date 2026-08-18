@@ -33,7 +33,6 @@ from app.services.buyplan_workflow import (
     check_completion,
     confirm_po,
     flag_line_issue,
-    resubmit_buy_plan,
     submit_buy_plan,
     verify_po,
 )
@@ -285,7 +284,15 @@ class TestBuyPlanFullLifecycle:
         assert plan.status == BuyPlanStatus.ACTIVE.value
 
         # Confirm PO
-        line = confirm_po(plan.id, line.id, "PO-12345", datetime(2026, 4, 1, tzinfo=UTC), ctx["buyer"], db_session)
+        line = confirm_po(
+            plan.id,
+            line.id,
+            "PO-12345",
+            datetime(2026, 4, 1, tzinfo=UTC),
+            ctx["buyer"],
+            db_session,
+            payment_method="wire",
+        )
         assert line.status == BuyPlanLineStatus.PENDING_VERIFY.value
 
         # Verify PO
@@ -329,7 +336,7 @@ class TestBuyPlanFullLifecycle:
         assert plan.status == BuyPlanStatus.DRAFT.value
 
         # Resubmit
-        plan = resubmit_buy_plan(plan.id, "SO-003-R2", ctx["sales"], db_session)
+        plan = submit_buy_plan(plan.id, "SO-003-R2", ctx["sales"], db_session)
         assert plan.status == BuyPlanStatus.PENDING.value
 
         # Approve
@@ -377,7 +384,15 @@ class TestBuyPlanFullLifecycle:
 
         plan = submit_buy_plan(plan.id, "SO-006", ctx["sales"], db_session)
         plan = approve_buy_plan(plan.id, "approve", ctx["manager"], db_session)
-        line = confirm_po(plan.id, line.id, "PO-BAD", datetime(2026, 4, 1, tzinfo=UTC), ctx["buyer"], db_session)
+        line = confirm_po(
+            plan.id,
+            line.id,
+            "PO-BAD",
+            datetime(2026, 4, 1, tzinfo=UTC),
+            ctx["buyer"],
+            db_session,
+            payment_method="wire",
+        )
         assert line.status == BuyPlanLineStatus.PENDING_VERIFY.value
 
         # Reject PO
@@ -386,7 +401,15 @@ class TestBuyPlanFullLifecycle:
         assert line.po_number is None
 
         # Re-confirm with correct PO
-        line = confirm_po(plan.id, line.id, "PO-GOOD", datetime(2026, 4, 5, tzinfo=UTC), ctx["buyer"], db_session)
+        line = confirm_po(
+            plan.id,
+            line.id,
+            "PO-GOOD",
+            datetime(2026, 4, 5, tzinfo=UTC),
+            ctx["buyer"],
+            db_session,
+            payment_method="wire",
+        )
         assert line.status == BuyPlanLineStatus.PENDING_VERIFY.value
         assert line.po_number == "PO-GOOD"
 

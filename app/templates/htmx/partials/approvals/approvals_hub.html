@@ -21,9 +21,13 @@
   <div class="flex flex-wrap items-center gap-2 mb-4">
     {% for key, label in tabs %}
     {% set c = badges.get(key, 0) %}
-    <button hx-get="/v2/partials/approvals?tab={{ key }}"
-            hx-target="#main-content"
+    {# Tab switch is a BODY swap (Deal Sheet T4): only #ap-hub-body re-renders — the
+       shell survives, and hx-include posts the live #aw-filters form (q / scope /
+       show_closed) so the new tab keeps the current filters instead of resetting. #}
+    <button hx-get="/v2/partials/approvals/{{ key }}"
+            hx-target="#ap-hub-body"
             hx-swap="innerHTML"
+            hx-include="#aw-filters"
             hx-push-url="/v2/approvals?tab={{ key }}"
             @click="tab = '{{ key }}'"
             :class="tab === '{{ key }}'

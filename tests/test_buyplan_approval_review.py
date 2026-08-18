@@ -88,44 +88,50 @@ def _approve_route(plan_id: int) -> str:
 def test_review_screen_surfaces_decision_data(
     client: TestClient, db_session: Session, test_user, sales_user, test_requisition
 ):
-    """The detail/review view surfaces SO#, customer PO#, status, and line items."""
+    """The review surface (the Deal Sheet pane — the detail page retired into it, T3b)
+    surfaces plan identity, SO#, and customer PO#."""
     plan = _make_pending_plan(db_session, test_requisition.id, sales_user)
     db_session.commit()
 
-    resp = client.get(f"/v2/partials/buy-plans/{plan.id}")
+    resp = client.get(f"/v2/partials/approvals/plan/{plan.id}/pane")
     assert resp.status_code == 200
     body = resp.text
-    assert f"Buy Plan #{plan.id}" in body
+    assert f"Plan #{plan.id}" in body
     assert "SO-12345" in body  # sales order number surfaced
     assert "PO-99" in body  # customer PO surfaced
-    assert "Line Items" in body  # line items table present
 
 
 def test_review_hides_approve_controls_for_non_approver(
     client: TestClient, db_session: Session, test_user, sales_user, test_requisition
 ):
-    """A viewer WITHOUT the approval right sees no Approve/Reject banner controls."""
+    """A viewer WITHOUT the approval right sees no decide bar."""
     plan = _make_pending_plan(db_session, test_requisition.id, sales_user)
     db_session.commit()  # default client user = test_user (buyer, no approval right)
 
-    body = client.get(f"/v2/partials/buy-plans/{plan.id}").text
-    assert "This plan needs your approval" not in body
+    body = client.get(f"/v2/partials/approvals/plan/{plan.id}/pane").text
+    assert "Awaiting your approval" not in body
     assert _approve_route(plan.id) not in body
 
 
 def test_review_shows_approve_controls_for_approver(
     client: TestClient, db_session: Session, test_user, sales_user, test_requisition
 ):
-    """A viewer holding the approval right sees the approval banner + Approve/Reject."""
+    """A viewer holding a PENDING recipient slot on the plan's open engine request sees
+    the inline decide bar (approve / send back / reject — no modals on the Deal
+    Sheet)."""
+    from tests.test_approvals_hub_tabs import _pending_buy_plan_request
+
     plan = _make_pending_plan(db_session, test_requisition.id, sales_user)
     _grant(db_session, test_user)  # the client's user gains the right
+    _pending_buy_plan_request(db_session, plan, test_user)  # …and the open engine slot
     db_session.commit()
 
-    body = client.get(f"/v2/partials/buy-plans/{plan.id}").text
-    assert "This plan needs your approval" in body
+    body = client.get(f"/v2/partials/approvals/plan/{plan.id}/pane").text
+    assert "Awaiting your approval" in body
     assert _approve_route(plan.id) in body
-    assert "Approve Buy Plan" in body  # approve modal heading present
-    assert "Reject Buy Plan" in body  # reject modal heading present
+    assert "Approve &amp; notify" in body
+    assert "Send back" in body
+    assert "Reject" in body
 
 
 # ── 2. Gate: 403 for non-approvers ────────────────────────────────────
@@ -274,138 +280,120 @@ def test_reject_with_reason_sends_back_to_draft_and_audits(
 def test_pending_badge_renders_on_review(
     client: TestClient, db_session: Session, test_user, sales_user, test_requisition
 ):
-    """The review screen renders the status badge for the pending-approval state."""
+    """The review surface (the pane) renders the status badge for pending-approval."""
     plan = _make_pending_plan(db_session, test_requisition.id, sales_user)
     db_session.commit()
 
-    body = client.get(f"/v2/partials/buy-plans/{plan.id}").text
+    body = client.get(f"/v2/partials/approvals/plan/{plan.id}/pane").text
     # status_badge renders the value capitalised inside a .badge span.
     assert "Pending" in body
     assert "badge" in body
 
 
-def test_detail_issue_modal_present_for_awaiting_line(
-    client: TestClient, db_session: Session, test_user, sales_user, test_requisition
-):
-    """An ACTIVE plan with the buyer's AWAITING_PO line renders the Flag-Issue modal (a
-    re-homed origination affordance) and the line Issue button wires modalLineId so the
-    modal posts to that line's issue route via htmx.ajax (Phase F-1 gap-fill)."""
-    q = _make_quote(db_session, test_requisition.id)
+# ── Issue relay on the PO pane (re-homed from the retired detail modal, T3b) ──
+#
+# The five detail-page action modals died with detail.html — their flows are inline on
+# the Deal Sheet now (submit/decide bars pinned in test_approvals_workspace_pane.py).
+# Flag-issue / resolve-issue moved to the PO-line pane; these tests pin that relay.
+
+
+def _active_plan_with_line(db: Session, req_id: int, submitter, buyer, **line_kw):
+    q = _make_quote(db, req_id)
     plan = BuyPlan(
         quote_id=q.id,
-        requisition_id=test_requisition.id,
+        requisition_id=req_id,
         status=BuyPlanStatus.ACTIVE.value,
         so_status=SOVerificationStatus.APPROVED.value,
-        submitted_by_id=sales_user.id,
+        submitted_by_id=submitter.id,
     )
-    db_session.add(plan)
-    db_session.flush()
-    line = BuyPlanLine(
+    db.add(plan)
+    db.flush()
+    defaults = dict(
         buy_plan_id=plan.id,
         quantity=10,
         unit_cost=100.00,
         status=BuyPlanLineStatus.AWAITING_PO.value,
-        buyer_id=test_user.id,
+        buyer_id=buyer.id,
     )
-    db_session.add(line)
-    db_session.flush()
-    db_session.commit()
-
-    body = client.get(f"/v2/partials/buy-plans/{plan.id}").text
-    # Outer modal state carries modalLineId; the line Issue button wires it to this line.
-    assert "modalLineId" in body
-    assert f"modalLineId = {line.id}" in body
-    assert "modalType = 'issue'" in body
-    # The modal posts to the per-line issue route via htmx.ajax (not a stale :hx-post bind).
-    assert "Flag Issue" in body
-    assert f"/v2/partials/buy-plans/{plan.id}/lines/' + modalLineId + '/issue" in body
-    # The dead $dispatch('open-modal') affordance is gone.
-    assert "open-modal" not in body
-
-
-# ── BP-1: modal confirm buttons fire via htmx.ajax (not dead static hx-post) ──
-#
-# The five buy-plan action modals (submit / approve / reject / halt / cancel) each render
-# their confirm button INSIDE an Alpine `<template x-if="modalType === '...'">`. htmx never
-# processes template-fragment content (and Alpine's x-if clone is never handed to
-# htmx.process), so a static `hx-post` on those buttons fires ZERO requests — a DRAFT could
-# never be Submitted and a pending plan never Approved/Rejected. The fix issues the request
-# imperatively via `htmx.ajax(...)` in @click (evaluated at click time), mirroring the
-# proven-live Issue modal. These tests pin that the imperative pattern renders with the
-# EXACT endpoint + posted fields for each modal, and that the dead static form is gone.
-
-
-def _promote(db: Session, user: User, role: str) -> None:
-    user.role = role
-    db.add(user)
+    defaults.update(line_kw)
+    line = BuyPlanLine(**defaults)
+    db.add(line)
     db.flush()
+    db.commit()
+    return plan, line
 
 
-def test_submit_modal_confirm_uses_htmx_ajax(
+def test_po_pane_offers_flag_issue_to_assigned_buyer(
     client: TestClient, db_session: Session, test_user, sales_user, test_requisition
 ):
-    """Submit modal (always rendered): imperative POST to /submit carrying all three
-    fields + the required #main-content indicator; no dead static hx-post."""
-    plan = _make_pending_plan(db_session, test_requisition.id, sales_user, status=BuyPlanStatus.DRAFT.value)
-    db_session.commit()
+    """The assigned buyer's AWAITING_PO pane carries the inline flag-issue form posting
+    to the per-line issue route (the detail modal's replacement)."""
+    plan, line = _active_plan_with_line(db_session, test_requisition.id, sales_user, test_user)
 
-    body = client.get(f"/v2/partials/buy-plans/{plan.id}").text
-    assert f"htmx.ajax('POST', '/v2/partials/buy-plans/{plan.id}/submit'" in body
-    assert "sales_order_number: so" in body
-    assert "customer_po_number: cpo" in body
-    assert "salesperson_notes: notes" in body
-    assert "indicator: '#main-content'" in body
-    # The dead static form the fix replaced must be gone.
-    assert f'hx-post="/v2/partials/buy-plans/{plan.id}/submit"' not in body
+    body = client.get(f"/v2/partials/approvals/po/{line.id}/pane").text
+    assert "Flag an issue on this line" in body
+    assert f"/v2/partials/buy-plans/{plan.id}/lines/{line.id}/issue" in body
+    assert 'name="issue_type"' in body
+    assert "sold_out" in body  # LineIssueType options rendered
 
 
-def test_cancel_modal_confirm_uses_htmx_ajax(
+def test_flag_issue_post_flips_line_and_rerenders_pane(
     client: TestClient, db_session: Session, test_user, sales_user, test_requisition
 ):
-    """Cancel modal (rendered for non-terminal plans): imperative POST to /cancel with
-    the reason field; no dead static hx-post."""
-    plan = _make_pending_plan(db_session, test_requisition.id, sales_user, status=BuyPlanStatus.DRAFT.value)
-    db_session.commit()
+    """POSTing the flag form marks the line ISSUE and re-renders the PO pane with the
+    issue stamp (no resolve button for the buyer — supervisor authority)."""
+    plan, line = _active_plan_with_line(db_session, test_requisition.id, sales_user, test_user)
 
-    body = client.get(f"/v2/partials/buy-plans/{plan.id}").text
-    assert f"htmx.ajax('POST', '/v2/partials/buy-plans/{plan.id}/cancel'" in body
-    assert "values: {reason: reason}" in body
-    assert f'hx-post="/v2/partials/buy-plans/{plan.id}/cancel"' not in body
+    resp = client.post(
+        f"/v2/partials/buy-plans/{plan.id}/lines/{line.id}/issue",
+        data={"issue_type": "price_changed", "note": "vendor repriced", "origin": "approvals_workspace"},
+    )
+    assert resp.status_code == 200
+    db_session.expire_all()
+    fresh = db_session.get(BuyPlanLine, line.id)
+    assert fresh.status == BuyPlanLineStatus.ISSUE.value
+    assert fresh.issue_type == "price_changed"
+    assert "Issue flagged" in resp.text
+    assert "price changed: vendor repriced" in resp.text
+    assert "Resolve — back to awaiting PO" not in resp.text  # buyer can't self-resolve
 
 
-def test_approve_reject_modals_confirm_use_htmx_ajax(
-    client: TestClient, db_session: Session, test_user, sales_user, test_requisition
+def test_resolve_issue_manager_returns_line_to_awaiting_po(
+    db_session: Session, test_user, sales_user, manager_user, test_requisition
 ):
-    """Approve + Reject modals (gated to approvers): both fire imperative POSTs to
-    /approve with the correct action discriminator; Reject is the ONLY reject path in
-    the app, so a dead button here would strand every pending plan.
+    """A manager sees the Resolve button on an ISSUE line and the POST returns the line
+    to awaiting_po (PO fields cleared service-side)."""
+    from app.dependencies import require_user
+    from app.main import app
 
-    No static hx-post remains.
-    """
-    plan = _make_pending_plan(db_session, test_requisition.id, sales_user)
-    _grant(db_session, test_user)
-    db_session.commit()
+    plan, line = _active_plan_with_line(
+        db_session,
+        test_requisition.id,
+        sales_user,
+        test_user,
+        status=BuyPlanLineStatus.ISSUE.value,
+        issue_type="sold_out",
+    )
 
-    body = client.get(f"/v2/partials/buy-plans/{plan.id}").text
-    assert f"htmx.ajax('POST', '/v2/partials/buy-plans/{plan.id}/approve'" in body
-    assert "action: 'approve', notes: notes" in body
-    assert "action: 'reject', notes: notes" in body
-    assert "indicator: '#main-content'" in body
-    # No static hx-post to the approve endpoint anywhere (only the imperative call string).
-    assert f'hx-post="/v2/partials/buy-plans/{plan.id}/approve"' not in body
+    from app.database import get_db
 
+    app.dependency_overrides[get_db] = lambda: db_session
+    app.dependency_overrides[require_user] = lambda: manager_user
+    try:
+        c = TestClient(app)
+        body = c.get(f"/v2/partials/approvals/po/{line.id}/pane").text
+        assert "Resolve — back to awaiting PO" in body
 
-def test_halt_modal_confirm_uses_htmx_ajax(
-    client: TestClient, db_session: Session, test_user, sales_user, test_requisition
-):
-    """Halt modal (gated to supervisor/manager/admin on an in-flight plan): imperative
-    POST to /halt with the reason field; no dead static hx-post."""
-    plan = _make_pending_plan(db_session, test_requisition.id, sales_user)
-    _promote(db_session, test_user, "manager")  # can_halt = pending + manager
-    db_session.commit()
+        resp = c.post(
+            f"/v2/partials/buy-plans/{plan.id}/lines/{line.id}/resolve-issue",
+            data={"origin": "approvals_workspace"},
+        )
+        assert resp.status_code == 200
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(require_user, None)
 
-    body = client.get(f"/v2/partials/buy-plans/{plan.id}").text
-    assert "Halt Buy Plan" in body  # modal actually rendered
-    assert f"htmx.ajax('POST', '/v2/partials/buy-plans/{plan.id}/halt'" in body
-    assert "values: {reason: reason}" in body
-    assert f'hx-post="/v2/partials/buy-plans/{plan.id}/halt"' not in body
+    db_session.expire_all()
+    fresh = db_session.get(BuyPlanLine, line.id)
+    assert fresh.status == BuyPlanLineStatus.AWAITING_PO.value
+    assert fresh.issue_type is None

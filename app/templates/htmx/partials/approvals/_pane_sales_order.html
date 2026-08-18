@@ -1,122 +1,26 @@
 {#
-  approvals/_pane_sales_order.html — the SO/BP detail pane (both lenses, one anatomy).
-  Spec §8, top to bottom: header (customer · SO# copy chip · order-type badge · status)
-  → APPROVAL BLOCK ("Awaiting your approval" + Approve/Reject when pending & decidable;
-  the "Approved by X · date" stamp after) → Quality — sales section (collapsible once
-  reviewed) → lines → PO kanban (Phase 3 placeholder) → notes (Phase 2 placeholder).
-  Approve is reachable from BOTH the Sales Orders and Buy Plans tabs — same object,
-  same single approval. Decide posts the EXISTING approve route with
-  origin=approvals_workspace so the handler re-renders THIS pane (+ awListRefresh).
+  approvals/_pane_sales_order.html — the SO/BP detail pane: the Deal Sheet (both
+  lenses, one anatomy). A thin composition, top to bottom: _sheet_header.html (stage
+  track + editable SO#/CPO cells + money + readiness) → _sheet_actions.html (the
+  stage-adaptive bar: draft submit / inline decide / stamps) → Quality — sales section
+  (collapsible once reviewed, inline edit) → _sheet_lines.html (the offer picker) →
+  PO kanban → plan controls → notes thread. Approve is reachable from BOTH the Sales
+  Orders and Buy Plans tabs — same object, same single approval; every action posts
+  with origin=approvals_workspace so its handler re-renders THIS pane (+ awListRefresh).
   Receives: bp (BuyPlan), lines, lens, qp (QualityPlan|None), can_decide (bool),
             is_sourcing (bool), order_type_label, po_labels (PO_DECISION_LABELS),
-            can_edit_qp_sales (bool), qp_stale_token (str), change_edits,
+            qp_stale_token (str), change_edits, the _sheet_ctx keys (can_edit_plan,
+            is_plan_owner, plan_stale_token, picker_*, readiness_missing),
             thread_* (notes block), can_lifecycle (bool), no_approver_reason.
-  Called by: htmx/approvals_hub.py render_plan_pane (pane GET + approve re-render).
-  Depends on: HTMX, Alpine.js, Tailwind; shared copy_chip + age_chip macros.
+  Called by: htmx/approvals_hub.py render_plan_pane (pane GET + action re-renders).
+  Depends on: HTMX, Alpine.js, Tailwind.
 #}
-{% from "htmx/partials/shared/_macros.html" import copy_chip, age_chip, status_badge %}
 
 <div class="p-4 space-y-4" id="aw-pane-body">
 
-  {# ── Header ─────────────────────────────────────────────────────── #}
-  <div class="flex items-start justify-between gap-3">
-    <div class="min-w-0">
-      <div class="flex items-center gap-2 flex-wrap">
-        <h2 class="text-base font-semibold text-gray-900 truncate">
-          {{ (bp.requisition.customer_name if bp.requisition else none) or 'Plan #' ~ bp.id }}
-        </h2>
-        {% if order_type_label %}
-        <span class="inline-flex items-center px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide rounded bg-brand-50 text-brand-600 border border-brand-200">{{ order_type_label }}</span>
-        {% endif %}
-        {{ status_badge(bp.status) }}
-      </div>
-      <div class="flex items-center gap-2 mt-1 flex-wrap">
-        <span class="text-tertiary">Plan #{{ bp.id }}</span>
-        {% if bp.sales_order_number %}{{ copy_chip(bp.sales_order_number, label='SO ' ~ bp.sales_order_number) }}{% endif %}
-        {% if bp.customer_po_number %}{{ copy_chip(bp.customer_po_number, label='Cust PO ' ~ bp.customer_po_number) }}{% endif %}
-        {{ age_chip(bp.submitted_at or bp.created_at) }}
-      </div>
-    </div>
-    <div class="text-right flex-shrink-0">
-      {% if bp.total_cost is not none %}
-      <div class="text-[11px] uppercase tracking-wide text-gray-400">Cost</div>
-      <div class="text-sm font-semibold tabular-nums text-gray-900">${{ '{:,.2f}'.format(bp.total_cost | float) }}</div>
-      {% endif %}
-      {% if bp.total_revenue is not none %}
-      <div class="text-tertiary tabular-nums">Rev ${{ '{:,.2f}'.format(bp.total_revenue | float) }}{% if bp.total_margin_pct is not none %} · {{ '{:.0f}'.format(bp.total_margin_pct | float) }}%{% endif %}</div>
-      {% endif %}
-    </div>
-  </div>
-
-  {# ── Approval block — approve is a TWO-PART action (spec §7): decide AND choose
-       the handoff. Notify & proceed → the existing approve path (buyers get cut-PO
-       tasks; the submitter gets the change summary). Send back for sign-off → the
-       existing reject→draft transition with the summary attached (note optional;
-       blank auto-fills server-side). Reject stays a separate hard no (note required).
-       The change summary (the audit log since submission) is embedded below. ── #}
-  {% if bp.status == 'pending' and can_decide %}
-  <div class="rounded-lg border-2 border-accent-300 bg-accent-50 p-3" x-data="{ panel: '' }">
-    <div class="flex items-center justify-between gap-3 flex-wrap">
-      <div class="text-sm font-semibold text-accent-700">Awaiting your approval</div>
-      <div class="flex items-center gap-1.5">
-        <form hx-post="/v2/partials/buy-plans/{{ bp.id }}/approve" hx-target="#aw-pane" hx-swap="innerHTML">
-          <input type="hidden" name="origin" value="approvals_workspace">
-          <input type="hidden" name="lens" value="{{ lens }}">
-          <input type="hidden" name="handoff" value="proceed">
-          <button type="submit" data-loading-disable class="btn-primary btn-sm">Approve &amp; notify</button>
-        </form>
-        <button type="button" @click="panel = panel === 'send_back' ? '' : 'send_back'"
-                class="btn-secondary btn-sm">Send back for sign-off</button>
-        <button type="button" @click="panel = panel === 'reject' ? '' : 'reject'"
-                class="btn-danger btn-sm">Reject</button>
-      </div>
-    </div>
-    <form x-show="panel === 'send_back'" x-cloak x-collapse
-          hx-post="/v2/partials/buy-plans/{{ bp.id }}/approve" hx-target="#aw-pane" hx-swap="innerHTML"
-          class="mt-2 space-y-1.5">
-      <input type="hidden" name="origin" value="approvals_workspace">
-      <input type="hidden" name="lens" value="{{ lens }}">
-      <input type="hidden" name="handoff" value="send_back">
-      <textarea name="notes" rows="2" placeholder="Optional note to the salesperson — the change summary rides along."
-                class="input input-sm w-full"></textarea>
-      <button type="submit" data-loading-disable class="btn-secondary btn-sm">Send back with summary</button>
-    </form>
-    <form x-show="panel === 'reject'" x-cloak x-collapse
-          hx-post="/v2/partials/buy-plans/{{ bp.id }}/approve" hx-target="#aw-pane" hx-swap="innerHTML"
-          class="mt-2 space-y-1.5">
-      <input type="hidden" name="origin" value="approvals_workspace">
-      <input type="hidden" name="lens" value="{{ lens }}">
-      <input type="hidden" name="action" value="reject">
-      <textarea name="notes" rows="2" required placeholder="Note to the fixer — why is this going back?"
-                class="input input-sm w-full"></textarea>
-      <button type="submit" data-loading-disable class="btn-danger btn-sm">Confirm reject</button>
-    </form>
-    {% include "htmx/partials/approvals/_change_summary.html" %}
-  </div>
-  {% elif bp.status == 'pending' %}
-  <div class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-    Awaiting manager approval.
-    {% include "htmx/partials/approvals/_change_summary.html" %}
-  </div>
-  {% elif bp.approved_at and bp.status in ('active', 'inbound', 'completed') %}
-  <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
-    Approved by {{ (bp.approved_by.name if bp.approved_by else none) or '—' }} · {{ bp.approved_at | fmtdate('%b %d, %Y') }}
-  </div>
-  {% elif bp.status == 'draft' %}
-  <div class="rounded-lg border border-line-base bg-gray-50 p-3 text-sm text-gray-600 flex items-center justify-between gap-3 flex-wrap">
-    <span>Draft — not yet submitted for approval.{% if bp.approval_notes %} <span class="italic">Last decision note: “{{ bp.approval_notes }}”</span>{% endif %}</span>
-    <a hx-get="/v2/partials/buy-plans/{{ bp.id }}" hx-target="#main-content" hx-push-url="/v2/buy-plans/{{ bp.id }}"
-       class="text-xs font-medium text-accent-600 cursor-pointer whitespace-nowrap">Open full plan &rarr;</a>
-  </div>
-  {% elif bp.status == 'cancelled' %}
-  <div class="rounded-lg border border-line-base bg-gray-50 p-3 text-sm text-gray-500">
-    Cancelled{% if bp.cancellation_reason %} — {{ bp.cancellation_reason }}{% endif %}
-  </div>
-  {% elif bp.status == 'halted' %}
-  <div class="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
-    Halted{% if bp.so_rejection_note %} — {{ bp.so_rejection_note }}{% endif %}
-  </div>
-  {% endif %}
+  {# ── Deal Sheet: header (stage track + editable cells) + stage-adaptive actions #}
+  {% include "htmx/partials/approvals/_sheet_header.html" %}
+  {% include "htmx/partials/approvals/_sheet_actions.html" %}
 
   {# ── Quality — sales section (spec §4: the QP SALES answers live on the SO; always
        present, collapsible once reviewed). Inline editing (2.1): the display grid is
@@ -144,12 +48,17 @@
             class="w-full flex items-center justify-between px-3 py-2 text-left">
       <span class="text-sm font-semibold text-gray-800">Quality — sales section</span>
       <span class="flex items-center gap-2">
+        {# Quality Plan front door (re-homed from the retired detail page): get-or-create
+           this plan's QP and open the full native view (purchasing + serial/FRU too). #}
+        <span hx-get="/v2/qp/for-buy-plan/{{ bp.id }}" hx-target="#main-content" hx-push-url="true"
+              @click.stop data-loading-disable role="link"
+              class="text-xs font-medium text-accent-600 cursor-pointer">Open full Quality Plan</span>
         {% if qp and qp.sales_section_reviewed_at %}<span class="text-[11px] text-emerald-600 font-medium">Reviewed</span>{% endif %}
         <svg class="w-4 h-4 text-gray-400 transition-transform" :class="qpOpen && 'rotate-180'" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
       </span>
     </button>
     <div x-show="qpOpen" x-collapse class="border-t border-line-subtle px-3 py-2">
-      {% if can_edit_qp_sales %}
+      {% if can_edit_plan %}
       <div class="flex justify-end mb-1" x-show="!qpEdit">
         <button type="button" @click="qpEdit = true; qpOpen = true"
                 class="text-xs font-medium text-accent-600 cursor-pointer">Edit</button>
@@ -183,7 +92,7 @@
         </div>
       </form>
       {% endif %}
-      <div {% if can_edit_qp_sales %}x-show="!qpEdit"{% endif %}>
+      <div {% if can_edit_plan %}x-show="!qpEdit"{% endif %}>
       {% if qp %}
       {% macro yn(v) %}{% if v is true %}Yes{% elif v is false %}No{% else %}—{% endif %}{% endmacro %}
       <dl class="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-2 text-xs">
@@ -218,43 +127,8 @@
     </div>
   </div>
 
-  {# ── Lines ──────────────────────────────────────────────────────── #}
   {% if is_sourcing %}
-  <div class="rounded-lg border border-line-base bg-white overflow-hidden">
-    <div class="px-3 py-2 text-sm font-semibold text-gray-800 border-b border-line-subtle">
-      Lines <span class="font-normal text-gray-400">({{ lines | length }})</span>
-    </div>
-    {% if lines %}
-    <div class="overflow-x-auto">
-      <table class="min-w-full text-xs">
-        <thead>
-          <tr class="text-left text-[11px] font-semibold text-gray-400 uppercase tracking-wider border-b border-line-subtle">
-            <th class="px-3 py-1.5">Part</th>
-            <th class="px-3 py-1.5">Vendor</th>
-            <th class="px-3 py-1.5 text-right">Qty × Cost</th>
-            <th class="px-3 py-1.5 text-right">Sell</th>
-            <th class="px-3 py-1.5">PO#</th>
-            <th class="px-3 py-1.5">Status</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-line-subtle">
-          {% for line in lines %}
-          <tr>
-            <td class="px-3 py-1.5 font-mono text-gray-900">{{ (line.requirement.primary_mpn if line.requirement else none) or (line.offer.mpn if line.offer else none) or '—' }}</td>
-            <td class="px-3 py-1.5 text-gray-700">{{ line.offer.vendor_name if line.offer else '—' }}</td>
-            <td class="px-3 py-1.5 text-right tabular-nums">{{ line.quantity }} × ${{ '{:,.4f}'.format(line.unit_cost | float) if line.unit_cost is not none else '—' }}</td>
-            <td class="px-3 py-1.5 text-right tabular-nums">{% if line.unit_sell is not none %}${{ '{:,.4f}'.format(line.unit_sell | float) }}{% else %}—{% endif %}</td>
-            <td class="px-3 py-1.5">{% if line.po_number %}{{ copy_chip(line.po_number) }}{% else %}<span class="text-gray-300">—</span>{% endif %}</td>
-            <td class="px-3 py-1.5 text-gray-700">{{ po_labels.get(line.status, line.status) }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% else %}
-    <div class="px-3 py-4 text-xs text-gray-400">No lines yet.</div>
-    {% endif %}
-  </div>
+  {% include "htmx/partials/approvals/_sheet_lines.html" %}
 
   {# ── PO kanban (3.3, spec §6) — sourcing orders only; the centerpiece once the
        plan is active/inbound (render_plan_pane builds `kanban` exactly then). #}
@@ -284,12 +158,22 @@
      enforces the creator/manager gate (403 otherwise), mirroring halt/resume. #}
   {% set _completable_lite = bp.status == 'active' and bp.order_type in ('testing_service', 'comps') and not bp.lines %}
   {% if _haltable or _resumable or _cancellable or _resettable or _completable_lite %}
-  <div class="rounded-lg border border-line-base bg-white p-3" x-data="{ panel: '' }">
+  <div class="rounded-lg border border-line-base bg-white p-3" x-data="{ reason: '' }">
     <div class="flex items-center justify-between gap-3 flex-wrap">
       <span class="text-sm font-semibold text-gray-800">Plan controls</span>
       <span class="flex items-center gap-1.5 flex-wrap">
+        {% if _haltable or _cancellable %}
+        <input type="text" x-model="reason" placeholder="Reason — required to halt or cancel"
+               class="input input-sm w-56">
+        {% endif %}
         {% if _haltable %}
-        <button type="button" @click="panel = panel === 'halt' ? '' : 'halt'" class="btn-secondary btn-sm">Halt</button>
+        <form hx-post="/v2/partials/buy-plans/{{ bp.id }}/halt" hx-target="#aw-pane" hx-swap="innerHTML" class="inline">
+          <input type="hidden" name="origin" value="approvals_workspace">
+          <input type="hidden" name="lens" value="{{ lens }}">
+          <input type="hidden" name="reason" :value="reason">
+          <button type="submit" data-loading-disable class="btn-secondary btn-sm"
+                  :disabled="!reason.trim()" :title="reason.trim() ? '' : 'Type the reason first'">Halt</button>
+        </form>
         {% endif %}
         {% if _resumable %}
         <form hx-post="/v2/partials/buy-plans/{{ bp.id }}/resume" hx-target="#aw-pane" hx-swap="innerHTML" class="inline">
@@ -315,32 +199,16 @@
         </form>
         {% endif %}
         {% if _cancellable %}
-        <button type="button" @click="panel = panel === 'cancel' ? '' : 'cancel'" class="btn-danger btn-sm">Cancel plan</button>
+        <form hx-post="/v2/partials/buy-plans/{{ bp.id }}/cancel" hx-target="#aw-pane" hx-swap="innerHTML" class="inline">
+          <input type="hidden" name="origin" value="approvals_workspace">
+          <input type="hidden" name="lens" value="{{ lens }}">
+          <input type="hidden" name="reason" :value="reason">
+          <button type="submit" data-loading-disable class="btn-danger btn-sm"
+                  :disabled="!reason.trim()" :title="reason.trim() ? '' : 'Type the reason first'">Cancel plan</button>
+        </form>
         {% endif %}
       </span>
     </div>
-    {% if _haltable %}
-    <form x-show="panel === 'halt'" x-cloak x-collapse
-          hx-post="/v2/partials/buy-plans/{{ bp.id }}/halt" hx-target="#aw-pane" hx-swap="innerHTML"
-          class="mt-2 space-y-1.5">
-      <input type="hidden" name="origin" value="approvals_workspace">
-      <input type="hidden" name="lens" value="{{ lens }}">
-      <textarea name="reason" rows="2" required placeholder="Why is this deal being halted?"
-                class="input input-sm w-full"></textarea>
-      <button type="submit" data-loading-disable class="btn-secondary btn-sm">Confirm halt</button>
-    </form>
-    {% endif %}
-    {% if _cancellable %}
-    <form x-show="panel === 'cancel'" x-cloak x-collapse
-          hx-post="/v2/partials/buy-plans/{{ bp.id }}/cancel" hx-target="#aw-pane" hx-swap="innerHTML"
-          class="mt-2 space-y-1.5">
-      <input type="hidden" name="origin" value="approvals_workspace">
-      <input type="hidden" name="lens" value="{{ lens }}">
-      <textarea name="reason" rows="2" required placeholder="Why is this deal being cancelled?"
-                class="input input-sm w-full"></textarea>
-      <button type="submit" data-loading-disable class="btn-danger btn-sm">Confirm cancel</button>
-    </form>
-    {% endif %}
   </div>
   {% endif %}
   {% endif %}

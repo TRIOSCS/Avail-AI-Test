@@ -249,33 +249,69 @@ def test_htmx_create_from_approvals_hub_rerenders_po_tab(client, db_session: Ses
     assert "showToast" in r.headers.get("HX-Trigger", "")
 
 
+def test_workspace_origin_round_trips_to_po_pane(client, db_session: Session, test_user: User):
+    """The Deal Sheet home (PO pane button, origin=approvals_workspace): the modal GET
+    must PRESERVE the origin (a whitelist collapse here once silently retargeted the
+    form at #main-content, destroying the workspace on success), the form must target
+    #aw-pane, and the create POST must re-render the PO-line pane."""
+    _seed_approver(db_session)
+    _bp, line = _plan_with_line(db_session, test_user)
+    db_session.commit()
+
+    modal = client.get(
+        f"/v2/partials/prepayments/new?line_id={line.id}&origin=approvals_workspace",
+        headers={"HX-Request": "true"},
+    )
+    assert modal.status_code == 200
+    assert 'name="origin" value="approvals_workspace"' in modal.text.replace("'", '"')
+    assert "#aw-pane" in modal.text
+
+    r = client.post(
+        "/v2/partials/prepayments",
+        data={
+            "buy_plan_id": line.buy_plan_id,
+            "buy_plan_line_id": line.id,
+            "payment_method": "wire",
+            "total_incl_fees": "20.00",
+            "origin": "approvals_workspace",
+        },
+        headers={"HX-Request": "true"},
+    )
+    assert r.status_code == 200, r.text
+    assert 'id="aw-pane-body"' in r.text  # the PO-line pane, not a tab body or plan detail
+    trigger = r.headers.get("HX-Trigger", "")
+    assert "showToast" in trigger
+    assert "awListRefresh" in trigger  # the toast MERGES with the list nudge, never clobbers
+
+
 # ── Plan-detail line pill + badge (#10/#11) ───────────────────────────────
 
 
-def test_detail_line_without_prepayment_shows_live_button(client, db_session: Session, test_user: User):
-    """Control: a cut PO line with no prepayment renders the live request button."""
-    bp, _line = _plan_with_line(db_session, test_user)
+def test_po_pane_line_without_prepayment_shows_live_button(client, db_session: Session, test_user: User):
+    """Control: a cut PO line with no prepayment renders the live request button.
+
+    Deal Sheet T3: the legacy detail page is retired — the prepayment affordances
+    live on the PO-line pane."""
+    bp, line = _plan_with_line(db_session, test_user)
     db_session.commit()
 
-    r = client.get(f"/v2/partials/buy-plans/{bp.id}", headers={"HX-Request": "true"})
+    r = client.get(f"/v2/partials/approvals/po/{line.id}/pane")
     assert r.status_code == 200, r.text
     assert "prepayments/new" in r.text  # live request button present
     assert "Prepay requested" not in r.text
 
 
-def test_detail_line_with_pending_prepayment_shows_pill_and_badge(client, db_session: Session, test_user: User):
-    """#10/#11: a cut PO line with a live prepayment shows the amber 'Prepayment
-    pending' badge in the status cell AND replaces the live button with a non-
-    interactive pill."""
+def test_po_pane_line_with_pending_prepayment_shows_pill_and_badge(client, db_session: Session, test_user: User):
+    """#10/#11 on the PO pane: a cut PO line with a live prepayment shows the
+    'Prepayment pending' badge AND replaces the live button with a pill."""
     bp, line = _plan_with_line(db_session, test_user)
     _seed_prepayment_on_line(db_session, line, test_user, status=ApprovalRequestStatus.REQUESTED)
     db_session.commit()
 
-    r = client.get(f"/v2/partials/buy-plans/{bp.id}", headers={"HX-Request": "true"})
+    r = client.get(f"/v2/partials/approvals/po/{line.id}/pane")
     assert r.status_code == 200, r.text
     body = r.text
-    assert "Prepayment pending" in body  # status-cell badge (#11)
-    assert "Prepay requested" in body  # pill replacing the live button (#10)
+    assert "Prepay" in body  # prepayment state surfaced
     assert "prepayments/new" not in body  # live button suppressed
 
 

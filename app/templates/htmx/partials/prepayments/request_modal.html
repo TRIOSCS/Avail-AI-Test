@@ -29,7 +29,7 @@
      #2: x-data tracks the PO total (po) vs the entered amount (amt); :data-deviates flags a
      >5% swing that the hx-on::confirm hook turns into a warn-only client confirm. #}
   <form hx-post='/v2/partials/prepayments'
-        hx-target='{% if origin == "approvals_hub" %}#ap-hub-body{% else %}#main-content{% endif %}'
+        hx-target='{% if origin == "approvals_hub" %}#ap-hub-body{% elif origin == "approvals_workspace" %}#aw-pane{% else %}#main-content{% endif %}'
         hx-swap='innerHTML'
         hx-push-url='false'
         x-data='{ po: {{ "%.2f"|format(amount) }}, amt: {{ "%.2f"|format(amount) }} }'

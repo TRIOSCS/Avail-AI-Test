@@ -479,9 +479,9 @@ class TestBuyPlanVerifyPoDirect:
             patch("app.services.buyplan_workflow.verify_po"),
             patch("app.services.buyplan_workflow.check_completion", return_value=None),
             patch("app.services.buyplan_notifications.run_notify_bg", new_callable=AsyncMock),
-            patch("app.routers.htmx.buy_plans.buy_plan_detail_partial", new_callable=AsyncMock) as mock_detail,
+            patch("app.routers.htmx.buy_plans._line_action_pane_response") as mock_pane,
         ):
-            mock_detail.return_value = HTMLResponse("bp detail")
+            mock_pane.return_value = HTMLResponse("po pane")
             result = await buy_plan_verify_po_partial(
                 request=mock_req, plan_id=bp.id, line_id=1, user=test_user, db=db_session
             )
@@ -504,9 +504,9 @@ class TestBuyPlanFlagIssueDirect:
         )
         with (
             patch("app.services.buyplan_workflow.flag_line_issue"),
-            patch("app.routers.htmx.buy_plans.buy_plan_detail_partial", new_callable=AsyncMock) as mock_detail,
+            patch("app.routers.htmx.buy_plans._line_action_pane_response") as mock_pane,
         ):
-            mock_detail.return_value = HTMLResponse("bp detail")
+            mock_pane.return_value = HTMLResponse("po pane")
             result = await buy_plan_flag_issue_partial(
                 request=mock_req, plan_id=bp.id, line_id=1, user=test_user, db=db_session
             )
@@ -527,8 +527,8 @@ class TestBuyPlanCancelDirect:
             path=f"/v2/partials/buy-plans/{bp.id}/cancel",
             fields={"reason": "test cancel"},
         )
-        with patch("app.routers.htmx.buy_plans.buy_plan_detail_partial", new_callable=AsyncMock) as mock_detail:
-            mock_detail.return_value = HTMLResponse("bp detail")
+        with patch("app.routers.htmx.buy_plans._workspace_pane_response") as mock_pane:
+            mock_pane.return_value = HTMLResponse("workspace pane")
             with patch("app.services.buyplan_notifications.run_notify_bg", new_callable=AsyncMock) as mock_notify:
                 result = await buy_plan_cancel_partial(request=mock_req, plan_id=bp.id, user=test_user, db=db_session)
         assert result.status_code == 200

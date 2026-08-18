@@ -48,7 +48,6 @@ from app.services.buyplan_workflow import (
     approve_buy_plan,
     cancel_buy_plan,
     halt_plan,
-    resubmit_buy_plan,
     submit_buy_plan,
 )
 
@@ -240,7 +239,7 @@ def test_resubmit_leaves_exactly_one_open_request(db_session: Session) -> None:
     assert plan.status == BuyPlanStatus.DRAFT.value
 
     # Salesperson resubmits.
-    resubmit_buy_plan(plan.id, "SO-1005R", approver, db_session)
+    submit_buy_plan(plan.id, "SO-1005R", approver, db_session)
     assert plan.status == BuyPlanStatus.PENDING.value
 
     open_now = _open_requests(db_session, plan.id)
@@ -263,7 +262,7 @@ def test_resubmit_after_unresolved_submit_cancels_stale(db_session: Session) -> 
     plan.status = BuyPlanStatus.DRAFT.value
     db_session.flush()
 
-    resubmit_buy_plan(plan.id, "SO-1006R", approver, db_session)
+    submit_buy_plan(plan.id, "SO-1006R", approver, db_session)
 
     open_now = _open_requests(db_session, plan.id)
     assert len(open_now) == 1

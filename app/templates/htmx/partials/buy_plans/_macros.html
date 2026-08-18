@@ -96,9 +96,10 @@ Usage:
    can_request_prepayment(user, line) AND line.id not in prepay_state — the macro renders
    the button unconditionally (same convention as resource_form, which is gated at its call
    site by can_resource). ``origin``/``hub_scope`` thread the caller's surface into the modal
-   GET (mirroring resource_form) so the create route re-renders the RIGHT surface: origin=''
-   → plan detail into #main-content; origin='approvals_hub' → the PO Approval tab body into
-   #ap-hub-body (preserving hub_scope). Args: line — the cut BuyPlanLine (needs .id);
+   GET (mirroring resource_form) so the create route re-renders the RIGHT surface:
+   origin='approvals_workspace' → the PO-line pane into #aw-pane (the button's Deal-Sheet
+   home); origin='approvals_hub' → the PO Approval tab body into #ap-hub-body (preserving
+   hub_scope); origin='' → the plan pane. Args: line — the cut BuyPlanLine (needs .id);
    plan — its BuyPlan (kept for a stable (line, plan) signature and parity with
    resource_form). #}
 {% macro request_prepayment_button(line, plan, origin='', hub_scope='') -%}

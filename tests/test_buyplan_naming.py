@@ -5,7 +5,6 @@ Covers:
 - BP/SO/PO suffix is appended verbatim and per-kind
 - Missing SO# / customer / owner each collapse to an em dash (never ragged)
 - Unknown kind raises ValueError (loud wiring-mistake signal)
-- summarize_top_flag returns the worst-severity flag's verbatim reason (Part 4)
 
 Depends on: app/services/buyplan_naming.
 """
@@ -19,7 +18,6 @@ from app.services.buyplan_naming import (
     CARD_KIND_PO,
     CARD_KIND_SALES_ORDER,
     build_card_title,
-    summarize_top_flag,
 )
 
 # ── build_card_title: suffix + owner per kind ─────────────────────────
@@ -94,39 +92,3 @@ def test_unknown_kind_raises():
     title."""
     with pytest.raises(ValueError, match="Unknown card kind"):
         build_card_title(sales_order_number="X", customer_name="Y", owner_name="Z", kind="XX")
-
-
-# ── summarize_top_flag: the actual issue at first glance (Part 4) ──────
-
-
-def test_top_flag_none_when_empty():
-    assert summarize_top_flag(None) is None
-    assert summarize_top_flag([]) is None
-
-
-def test_top_flag_returns_verbatim_reason():
-    """The reason string is the verbatim message the flag system recorded."""
-    flags = [{"type": "low_margin", "severity": "warning", "message": "Margin 8.50% below 15% threshold"}]
-    top = summarize_top_flag(flags)
-    assert top == {"severity": "warning", "message": "Margin 8.50% below 15% threshold"}
-
-
-def test_top_flag_picks_worst_severity():
-    """Critical beats warning beats info, regardless of list order."""
-    flags = [
-        {"severity": "info", "message": "cheaper offer exists"},
-        {"severity": "warning", "message": "stale offer"},
-        {"severity": "critical", "message": "No buyer assigned for line (reason: unknown)"},
-    ]
-    top = summarize_top_flag(flags)
-    assert top["severity"] == "critical"
-    assert top["message"] == "No buyer assigned for line (reason: unknown)"
-
-
-def test_top_flag_ties_keep_first():
-    """Among equal-severity flags, the first one wins (stable)."""
-    flags = [
-        {"severity": "warning", "message": "first warning"},
-        {"severity": "warning", "message": "second warning"},
-    ]
-    assert summarize_top_flag(flags)["message"] == "first warning"

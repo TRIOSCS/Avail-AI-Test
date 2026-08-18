@@ -229,7 +229,7 @@ class TestBackorderResourceRoute:
         req = _FakeRequest({"reason_code": "defective", "scope": "line"})
         with (
             patch("app.services.buyplan_notifications.run_notify_bg", mock_bg),
-            patch.object(htmx_buy_plans, "buy_plan_detail_partial", new_callable=AsyncMock, return_value="ok"),
+            patch.object(htmx_buy_plans, "_line_action_pane_response", return_value="ok"),
         ):
             result = await htmx_buy_plans.buy_plan_resource_line_partial(
                 req, plan.id, line.id, user=test_user, db=db_session
@@ -313,18 +313,18 @@ class TestBackorderResourceRoute:
 def test_completed_detail_renders_resource_affordance(
     client, db_session: Session, test_user, test_quote, test_requisition, test_vendor_card
 ):
-    """The real detail template renders the fall-down affordance on a COMPLETED plan's
-    cut line (catches Jinja errors + confirms the form posts to /resource — the late-
-    fall-down / receiving-reject entry point now that INBOUND is retired)."""
+    """The PO pane (the detail page's successor, Deal Sheet T3b) renders the fall-down
+    affordance on a COMPLETED plan's received line (catches Jinja errors + confirms the
+    form posts to /resource — the late-fall-down / receiving-reject entry point now that
+    INBOUND is retired)."""
     plan = _make_plan(db_session, test_quote, test_requisition)
     requirement = test_requisition.requirements[0]
     offer = _make_offer(db_session, requirement, test_vendor_card)
-    _make_received_line(db_session, plan, requirement, offer, test_user)
+    line = _make_received_line(db_session, plan, requirement, offer, test_user)
     db_session.commit()
 
-    resp = client.get(f"/v2/partials/buy-plans/{plan.id}")
+    resp = client.get(f"/v2/partials/approvals/po/{line.id}/pane")
 
     assert resp.status_code == 200
-    assert f"/v2/partials/buy-plans/{plan.id}/lines/" in resp.text
-    assert "/resource" in resp.text
+    assert f"/v2/partials/buy-plans/{plan.id}/lines/{line.id}/resource" in resp.text
     assert "Re-source" in resp.text

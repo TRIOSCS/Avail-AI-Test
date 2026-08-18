@@ -35,16 +35,20 @@ def confirm_po(
     """Buyer confirms PO was cut for a line in Acctivate.
 
     Line status: awaiting_po → pending_verify. ``payment_method`` (Approvals Workspace)
-    records the terms on the Acctivate PO — one of ``PO_LINE_PAYMENT_METHODS`` (wire /
-    PayPal / credit card / ACH / COD); None leaves the column untouched (legacy
-    callers), any other value is a ValueError.
+    records the terms on the Acctivate PO — REQUIRED, one of
+    ``PO_LINE_PAYMENT_METHODS`` (wire / PayPal / credit card / ACH / COD); missing,
+    blank, or any other value is a ValueError.
     """
     from ...constants import PO_LINE_PAYMENT_METHODS
 
-    if payment_method is not None:
-        valid = {m.value for m in PO_LINE_PAYMENT_METHODS}
-        if payment_method not in valid:
-            raise ValueError(f"Invalid payment method: {payment_method!r}. Valid: {sorted(valid)}")
+    # Deal Sheet T3: the payment method is REQUIRED — the payload-incomplete legacy
+    # detail-page "Enter PO" widget died with detail.html, and the contract can never
+    # fork between forms again (accounting needs the method for the prepayment/wire path).
+    if payment_method is None or not str(payment_method).strip():
+        raise ValueError("Pick the payment method — it is required to confirm a PO.")
+    valid = {m.value for m in PO_LINE_PAYMENT_METHODS}
+    if payment_method not in valid:
+        raise ValueError(f"Invalid payment method: {payment_method!r}. Valid: {sorted(valid)}")
 
     plan = db.get(BuyPlan, plan_id)
     if not plan:

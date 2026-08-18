@@ -74,10 +74,11 @@
     {{ 'Closed' if show_closed else 'Live' }}
   </button>
   {% if tab in ('sales-orders', 'buy-plans') %}
-  {# New sales order — the origination picker (spec §8: create with order type). Loads
-     the self-hosted picker surface into #main-content (no URL push: a reload lands
-     back on the workspace, matching the pre-retirement behavior). #}
-  <a hx-get="/v2/partials/buy-plans/sales-orders/new" hx-target="#main-content" hx-push-url="false"
+  {# New sales order — origination runs IN the pane (Deal Sheet T3): the list stays
+     alive, picking a requisition creates the draft with recommended offers pre-picked,
+     and the pane becomes its sheet. #}
+  <a hx-get="/v2/partials/buy-plans/sales-orders/new?embed=aw" hx-target="#aw-pane"
+     hx-swap="innerHTML" hx-indicator="#aw-pane-ind"
      class="btn-primary btn-sm flex-shrink-0 cursor-pointer whitespace-nowrap" title="Start a new sales order">
     New sales order
   </a>
@@ -134,7 +135,9 @@
 <div class="flex-1 min-h-0 md:overflow-y-auto">
   {% if needs_rows %}
   <div class="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-accent-600">Needs your approval</div>
-  <div class="divide-y divide-line-subtle border-b border-line-base">
+  {# data-aw-needs: the auto-advance hook — after a decide, the split selects the
+     next row from THIS group (Superhuman-style queue-to-zero). #}
+  <div class="divide-y divide-line-subtle border-b border-line-base" data-aw-needs>
     {% for row in needs_rows %}{{ list_row(row) }}{% endfor %}
   </div>
   {% endif %}

@@ -612,7 +612,6 @@ def test_modal_uses_canonical_close_class():
 # than an ad-hoc `max-w-*xl mx-auto` cap (which leaves empty gutters on wide monitors).
 _PAGE_FLUID_SHELLS = (
     "app/templates/htmx/partials/admin/spec_codes_pending.html",
-    "app/templates/htmx/partials/buy_plans/detail.html",
     # The SO origination surface self-hosts in #main-content post-hub-retirement.
     "app/templates/htmx/partials/approvals/_sales_order_new.html",
     "app/templates/htmx/partials/dashboard.html",

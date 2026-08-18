@@ -220,7 +220,7 @@ class TestBuyPlanConfirmPoIDOR:
         db_session.commit()
         resp = client.post(
             f"/v2/partials/buy-plans/{plan.id}/lines/{line.id}/confirm-po",
-            data={"po_number": "PO-OWNER"},
+            data={"po_number": "PO-OWNER", "payment_method": "wire"},
         )
         assert resp.status_code == 200
 
@@ -236,7 +236,7 @@ class TestBuyPlanConfirmPoIDOR:
         try:
             resp = client.post(
                 f"/v2/partials/buy-plans/{plan.id}/lines/{line.id}/confirm-po",
-                data={"po_number": "PO-ADMIN"},
+                data={"po_number": "PO-ADMIN", "payment_method": "wire"},
             )
         finally:
             app.dependency_overrides.pop(require_user, None)

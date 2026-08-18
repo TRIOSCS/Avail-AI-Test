@@ -83,7 +83,9 @@ def test_pane_awaiting_your_approval_block_when_decidable(hub_client: TestClient
     assert "Awaiting your approval" in body
     assert f"/v2/partials/buy-plans/{bp.id}/approve" in body  # decides via the EXISTING route
     assert 'value="approvals_workspace"' in body
-    assert "Confirm reject" in body  # reject prompts for a note to the fixer
+    # Deal Sheet: decisions are one click with ONE inline note input (no collapse).
+    assert "required to reject" in body  # the shared note input's placeholder
+    assert 'value="reject"' in body
 
 
 def test_pane_pending_but_not_decidable_shows_waiting(hub_client: TestClient, db_session: Session, test_user: User):
@@ -181,7 +183,10 @@ def test_approve_from_pane_rerenders_pane_and_refreshes_list(
         )
     assert r.status_code == 200
     assert "Approved by Test Buyer" in r.text  # the refreshed PANE, not a tab body
-    assert r.headers.get("HX-Trigger") == "awListRefresh"  # the left list repaints
+    # A DECISION repaints the list AND auto-advances the queue (Deal Sheet T4).
+    trigger = r.headers.get("HX-Trigger", "")
+    assert "awListRefresh" in trigger
+    assert "aw-advance" in trigger
     db_session.expire(bp)
     assert bp.status == BuyPlanStatus.ACTIVE.value
 
@@ -203,7 +208,8 @@ def test_reject_from_pane_returns_draft_pane(hub_client: TestClient, db_session:
             },
         )
     assert r.status_code == 200
-    assert "Draft — not yet submitted" in r.text  # reject → back to draft, pane re-rendered
+    # Deal Sheet: an editable draft renders the submit strip, not a passive banner.
+    assert "Submit for approval" in r.text  # reject → back to draft, pane re-rendered
     assert "wrong sell price" in r.text  # the note to the fixer surfaces on the pane
     db_session.expire(bp)
     assert bp.status == BuyPlanStatus.DRAFT.value
@@ -302,7 +308,7 @@ def test_reset_from_pane_returns_draft(hub_client: TestClient, db_session: Sessi
         data={"origin": "approvals_workspace", "lens": "buy-plans"},
     )
     assert r.status_code == 200
-    assert "Draft — not yet submitted" in r.text
+    assert "Submit for approval" in r.text
     db_session.expire(bp)
     assert bp.status == BuyPlanStatus.DRAFT.value
 
@@ -334,3 +340,133 @@ def test_stalled_pane_shows_warning(hub_client: TestClient, db_session: Session,
 
     body = hub_client.get(f"/v2/partials/approvals/plan/{bp.id}/pane").text
     assert "Stalled — no active user holds the" in body
+
+
+# ── Deal Sheet (T2): stage track, submit strip, decide bar, picker, withdraw ──
+
+
+def test_sheet_draft_editor_submit_strip_and_stage_track(hub_client, db_session, test_user):
+    """An editable draft renders the stage track, the inline submit strip (disabled
+    until an SO# is on the record), and the readiness chip."""
+    req, q, rq = _req_quote(db_session, test_user)
+    bp = _plan(db_session, req, q, status=BuyPlanStatus.DRAFT.value)
+    db_session.commit()
+
+    body = hub_client.get(f"/v2/partials/approvals/plan/{bp.id}/pane").text
+    assert 'id="sheet-header"' in body
+    assert "Build — yours to finish" in body  # stage track label (waiting on the viewer)
+    assert "Submit for approval" in body
+    assert "disabled" in body  # no SO# yet → submit disabled
+    assert "SO#" in body  # readiness chip names the gap
+
+    bp.sales_order_number = "SO-1"
+    db_session.commit()
+    body = hub_client.get(f"/v2/partials/approvals/plan/{bp.id}/pane").text
+    assert "Ready to submit" not in body or "disabled" not in body.split("Submit for approval")[0][-200:]
+
+
+def test_sheet_pending_decider_inline_note_and_delta_chip(hub_client, db_session, test_user):
+    """The manager's pending view: one inline note input, Reject disabled until typed
+    (client-side), and the change-delta chip when edits landed since submission."""
+    from app.services.field_audit import FieldEdit, log_field_edits
+
+    req, q, rq = _req_quote(db_session, test_user)
+    bp = _plan(db_session, req, q, status=BuyPlanStatus.PENDING.value, submitted_at=datetime.now(UTC))
+    _pending_buy_plan_request(db_session, bp, test_user)
+    db_session.commit()
+    log_field_edits(
+        db_session,
+        user=test_user,
+        buy_plan_id=bp.id,
+        edits=[FieldEdit(field="quantity", old="100", new="150")],
+    )
+    db_session.commit()
+
+    body = hub_client.get(f"/v2/partials/approvals/plan/{bp.id}/pane").text
+    assert "required to reject" in body  # the ONE shared inline note input
+    assert "x-collapse" not in body.split("Quality")[0]  # no two-click panels in the decide bar
+    assert "Approve with changes" in body  # delta flips the button copy
+    assert "1 change" in body
+
+
+def test_sheet_picker_groups_render_for_editor(hub_client, db_session, test_user):
+    """An editable plan renders the offer picker with its seeded groups."""
+    req, q, rq = _req_quote(db_session, test_user)
+    bp = _plan(db_session, req, q, status=BuyPlanStatus.DRAFT.value)
+    from tests.test_approvals_hub_tabs import _line as _mk_line
+
+    _mk_line(db_session, bp, rq, test_user, status="awaiting_po")
+    db_session.commit()
+
+    body = hub_client.get(f"/v2/partials/approvals/plan/{bp.id}/pane").text
+    assert "offerPicker(" in body
+    assert "Save lines" in body
+    assert "no longer active" in body  # the picked line's non-requisition offer renders as the truth option
+
+
+def test_picker_known_line_ids_exclude_unrendered_lines(hub_client, db_session, test_user):
+    """A line the picker can NOT render (its offer was deleted → offer_id NULL) must be
+    UNKNOWN to the bulk save — known_line_ids drives removal-by-omission, so including
+    an invisible line would let an unrelated save silently delete it."""
+    req, q, rq = _req_quote(db_session, test_user)
+    bp = _plan(db_session, req, q, status=BuyPlanStatus.DRAFT.value)
+    from tests.test_approvals_hub_tabs import _line as _mk_line
+
+    rendered = _mk_line(db_session, bp, rq, test_user, status="awaiting_po")
+    orphan = _mk_line(db_session, bp, rq, test_user, status="awaiting_po", offer_id=None)
+    db_session.commit()
+
+    body = hub_client.get(f"/v2/partials/approvals/plan/{bp.id}/pane").text
+    # The known_line_ids literal is the flat array between the groups arg and the opts
+    # object in the offerPicker(...) call.
+    import re
+
+    m = re.search(r"\], (\[[^\]]*\]), \{", body.split("offerPicker(", 1)[1])
+    assert m, "known_line_ids literal not found in the picker call"
+    known = m.group(1)
+    assert str(rendered.id) in known
+    assert str(orphan.id) not in known
+
+
+def test_withdraw_returns_pending_plan_to_draft(hub_client, db_session, test_user):
+    """The submitting owner pulls a PENDING plan back to DRAFT; the open engine request
+    is cancelled (no orphaned REQUESTED row)."""
+    from app.models.approvals import ApprovalRequest
+
+    req, q, rq = _req_quote(db_session, test_user)
+    bp = _plan(db_session, req, q, status=BuyPlanStatus.PENDING.value)
+    ar = _pending_buy_plan_request(db_session, bp, test_user)
+    db_session.commit()
+
+    r = hub_client.post(
+        f"/v2/partials/buy-plans/{bp.id}/withdraw",
+        data={"origin": "approvals_workspace", "lens": "sales-orders"},
+    )
+    assert r.status_code == 200
+    db_session.expire_all()
+    assert db_session.get(type(bp), bp.id).status == BuyPlanStatus.DRAFT.value
+    assert db_session.get(ApprovalRequest, ar.id).status != "requested"
+    assert "Submit for approval" in r.text  # pane re-rendered as an editable draft
+
+
+def test_bulk_save_with_workspace_origin_returns_pane(hub_client, db_session, test_user):
+    """The picker's bulk save re-renders the PANE (not the legacy detail page)."""
+    import json as _json
+
+    req, q, rq = _req_quote(db_session, test_user)
+    bp = _plan(db_session, req, q, status=BuyPlanStatus.DRAFT.value)
+    from tests.test_approvals_hub_tabs import _line as _mk_line
+
+    line = _mk_line(db_session, bp, rq, test_user, status="awaiting_po")
+    db_session.commit()
+
+    payload = {"lines": [{"line_id": line.id, "quantity": 120}], "known_line_ids": [line.id]}
+    r = hub_client.post(
+        f"/v2/partials/buy-plans/{bp.id}/lines/bulk",
+        data={"payload": _json.dumps(payload), "origin": "approvals_workspace", "lens": "sales-orders"},
+    )
+    assert r.status_code == 200
+    assert 'id="aw-pane-body"' in r.text
+    assert r.headers.get("HX-Trigger") == "awListRefresh"
+    db_session.expire_all()
+    assert db_session.get(type(line), line.id).quantity == 120

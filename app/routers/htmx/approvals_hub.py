@@ -249,6 +249,8 @@ async def approvals_hub_tab(
     tab: str,
     scope: str = "all",
     select: int | None = None,
+    q: str = "",
+    show_closed: str = "",
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -261,11 +263,18 @@ async def approvals_hub_tab(
     """
     if _resolve_tab(tab) is None:
         raise HTTPException(404, "Unknown approvals tab")
-    return render_tab_body(request, user, db, tab, scope, select=select)
+    return render_tab_body(request, user, db, tab, scope, select=select, q=q, show_closed=show_closed)
 
 
 def render_tab_body(
-    request: Request, user: User, db: Session, tab: str, scope: str = "all", select: int | None = None
+    request: Request,
+    user: User,
+    db: Session,
+    tab: str,
+    scope: str = "all",
+    select: int | None = None,
+    q: str = "",
+    show_closed: str = "",
 ) -> HTMLResponse:
     """Build + render one workspace tab body (shared by the tab GET route and the decide
     handlers' origin=approvals_hub / legacy re-render branches).
@@ -273,14 +282,26 @@ def render_tab_body(
     The body is the split view: the left list lazy-loads ``/{tab}/list`` (so a decide
     re-render always repaints a FRESH list), the right pane fills on row selection.
     ``select`` rides the list's lazy URL for deep-link preselection (decide re-renders
-    never pass it — a decision must not steal the selection back).
+    never pass it — a decision must not steal the selection back). ``q``/``show_closed``
+    (Deal Sheet T4) bake into the list's lazy URL so a TAB SWITCH carries the current
+    search/closed filters instead of snapping back to defaults — the pills post the
+    live #aw-filters form along with the tab GET.
     """
     resolved = _resolve_tab(tab)
     if resolved is None:
         raise HTTPException(404, "Unknown approvals tab")
     scope = "mine" if scope == "mine" else "all"
     ctx = _base_ctx(request, user, "buy-plans")
-    ctx.update({"tab": resolved, "tab_label": _TAB_LABELS[resolved], "scope": scope, "select": select})
+    ctx.update(
+        {
+            "tab": resolved,
+            "tab_label": _TAB_LABELS[resolved],
+            "scope": scope,
+            "select": select,
+            "q": (q or "").strip(),
+            "show_closed": "1" if str(show_closed) in ("1", "true", "on") else "",
+        }
+    )
     return template_response("htmx/partials/approvals/_workspace_split.html", ctx)
 
 
@@ -324,7 +345,6 @@ def render_plan_pane(
     from ...services.buyplan_workflow import plan_needs_approver_reason
     from ...services.field_audit import edits_since
     from ...services.kanban_lanes import build_kanban
-    from ...services.qp_workspace import can_edit_qp_sales
     from ...services.stale_guard import stale_token
 
     lens = lens if lens in ("sales-orders", "buy-plans") else "sales-orders"
@@ -336,6 +356,7 @@ def render_plan_pane(
             joinedload(BuyPlan.lines).joinedload(BuyPlanLine.offer),
             joinedload(BuyPlan.lines).joinedload(BuyPlanLine.requirement),
             joinedload(BuyPlan.requisition),
+            joinedload(BuyPlan.quote),
             joinedload(BuyPlan.approved_by),
             joinedload(BuyPlan.submitted_by),
         ],
@@ -367,7 +388,6 @@ def render_plan_pane(
             "po_labels": PO_DECISION_LABELS,
             # QP-sales inline editing (2.1): the pane hides the editor with the SAME
             # predicate the POST enforces (draft → owner/manager; pending → manager only).
-            "can_edit_qp_sales": can_edit_qp_sales(user, bp),
             "qp_stale_token": stale_token(qp) if qp is not None else "",
             # Two-part approve (2.2): the audit-log change summary since submission,
             # embedded in the approval block ("was X → now Y"; empty = nothing changed).
@@ -383,9 +403,115 @@ def render_plan_pane(
             "can_lifecycle": is_manager_or_admin(user),
             # Why the plan is silently stalled for lack of a configured approver.
             "no_approver_reason": plan_needs_approver_reason(bp, db),
+            # ── Deal Sheet (T2) ──
+            **_sheet_ctx(db, user, bp, is_sourcing=is_sourcing),
         }
     )
     return template_response("htmx/partials/approvals/_pane_sales_order.html", ctx)
+
+
+def _sheet_ctx(db: Session, user: User, bp: BuyPlan, *, is_sourcing: bool) -> dict:
+    """Deal Sheet context: edit gates, offer-picker groups, readiness, stale token.
+
+    The picker groups EVERY requirement on the plan's requisition with its ACTIVE
+    offers; picked lines pre-check their offer with qty/sell. A picked line whose
+    offer is no longer ACTIVE still renders (truth over tidiness — same rule the
+    legacy editor had). Seeds load only when the viewer can actually edit.
+    """
+    from ...constants import OfferStatus
+    from ...models import Offer, Requirement
+    from ...services.buyplan_workflow import _owns_plan, can_edit_plan
+    from ...services.stale_guard import stale_token
+
+    lines = bp.lines or []
+    can_edit = can_edit_plan(user, bp)
+    is_owner = _owns_plan(user, bp)
+
+    picker_groups: list[dict] = []
+    rendered_line_ids: set[int] = set()
+    if can_edit and is_sourcing and bp.requisition_id:
+        requirements = db.scalars(
+            select(Requirement).where(Requirement.requisition_id == bp.requisition_id).order_by(Requirement.id)
+        ).all()
+        active_offers = db.scalars(
+            select(Offer)
+            .where(Offer.requisition_id == bp.requisition_id, Offer.status == OfferStatus.ACTIVE.value)
+            .order_by(Offer.unit_price)
+        ).all()
+        offers_by_req: dict[int, list[Offer]] = {}
+        for off in active_offers:
+            if off.requirement_id is not None:
+                offers_by_req.setdefault(off.requirement_id, []).append(off)
+        lines_by_offer = {ln.offer_id: ln for ln in lines if ln.offer_id}
+        for rq in requirements:
+            group_lines = [ln for ln in lines if ln.requirement_id == rq.id]
+            offers = list(offers_by_req.get(rq.id, []))
+            # Truth option: a picked line whose offer left ACTIVE still renders.
+            seen_ids = {o.id for o in offers}
+            stale_offers = [ln.offer for ln in group_lines if ln.offer and ln.offer.id not in seen_ids]
+            costs = [float(o.unit_price) for o in offers if o.unit_price is not None]
+            best_cost = min(costs) if costs else None
+            rows = []
+            for off in offers + stale_offers:
+                ln = lines_by_offer.get(off.id)
+                if ln is not None:
+                    rendered_line_ids.add(ln.id)
+                rows.append(
+                    {
+                        "offer_id": off.id,
+                        "vendor": off.vendor_name or "—",
+                        "cost": float(off.unit_price) if off.unit_price is not None else None,
+                        "condition": off.condition or "",
+                        "avail": off.qty_available,
+                        "active": off.status == OfferStatus.ACTIVE.value,
+                        "line_id": ln.id if ln else None,
+                        "qty": ln.quantity if ln else None,
+                        "locked": bool(ln.has_cut_po) if ln else False,
+                        "best": best_cost is not None
+                        and off.unit_price is not None
+                        and float(off.unit_price) == best_cost,
+                    }
+                )
+            sell = next((float(ln.unit_sell) for ln in group_lines if ln.unit_sell is not None), None)
+            if sell is None and rq.target_price is not None:
+                sell = float(rq.target_price)
+            picker_groups.append(
+                {
+                    "requirement_id": rq.id,
+                    "mpn": rq.primary_mpn or "—",
+                    "need": rq.target_qty,
+                    "sell": sell,
+                    "offers": rows,
+                }
+            )
+
+    # Readiness (draft only): informative checklist — only the SO# item gates Submit.
+    # Only the MISSING items ship to the template (the chip gates on draft status).
+    checklist = []
+    if bp.status == BuyPlanStatus.DRAFT.value:
+        checklist = [
+            {"key": "so", "label": "SO#", "ok": bool(bp.sales_order_number), "gates": True},
+            {"key": "lines", "label": "a vendor picked", "ok": bool(lines) or not is_sourcing, "gates": False},
+            {
+                "key": "sell",
+                "label": "sell price on every line",
+                "ok": all(ln.unit_sell is not None for ln in lines) if lines else True,
+                "gates": False,
+            },
+        ]
+
+    return {
+        "can_edit_plan": can_edit,
+        "is_plan_owner": is_owner,
+        "plan_stale_token": stale_token(bp),
+        "picker_groups": picker_groups,
+        # ONLY lines the picker actually rendered: known_line_ids drives removal-by-
+        # omission in the bulk save, so a line the picker could NOT show (orphaned
+        # offer/requirement after a delete, or two lines sharing one offer) must be
+        # UNKNOWN to it — unknown lines are left untouched, never silently removed.
+        "picker_known_line_ids": sorted(rendered_line_ids),
+        "readiness_missing": [r for r in checklist if not r["ok"]],
+    }
 
 
 @router.get("/v2/partials/approvals/plan/{plan_id:int}/pane", response_class=HTMLResponse)
@@ -401,6 +527,13 @@ async def approvals_plan_pane(
     404s for a missing plan or a restricted non-owner (get_buyplan_for_user).
     """
     return render_plan_pane(request, user, db, plan_id, lens)
+
+
+@router.get("/v2/partials/approvals/pane/blank", response_class=HTMLResponse)
+async def approvals_pane_blank(request: Request, user: User = Depends(require_user)):
+    """The pane's empty state — origination's Cancel restores it without touching the
+    list (Deal Sheet T3)."""
+    return template_response("htmx/partials/approvals/_pane_blank.html", {"request": request})
 
 
 @router.post("/v2/partials/approvals/plan/{plan_id:int}/qp-sales", response_class=HTMLResponse)
@@ -444,9 +577,56 @@ async def approvals_plan_qp_sales(
     log_field_edits(db, user=user, buy_plan_id=bp.id, edits=edits)
     db.commit()
 
-    resp = render_plan_pane(request, user, db, plan_id, lens=str(form.get("lens", "sales-orders")))
-    resp.headers["HX-Trigger"] = "awListRefresh"
-    return resp
+    from .buy_plans import _workspace_pane_response
+
+    return _workspace_pane_response(request, user, db, plan_id, form)
+
+
+@router.post("/v2/partials/approvals/plan/{plan_id:int}/header", response_class=HTMLResponse)
+async def approvals_plan_header(
+    request: Request,
+    plan_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Save Deal-Sheet header fields (SO# / customer PO# / salesperson notes).
+
+    THE header writer: the sheet's cells post ONE field at a time; sparse
+    key-presence semantics in ``set_plan_header_fields`` mean an absent field is
+    never touched and a provided blank is an explicit clear. Gate =
+    ``can_edit_plan`` (owner draft/pending; manager through active; terminal
+    locked → 403). Stale-guarded on the plan's ``updated_at`` token; one
+    field-audit row per save. Re-renders the pane + refreshes the work list.
+    """
+    from ...dependencies import get_buyplan_for_user
+    from ...services.buyplan_workflow import set_plan_header_fields
+    from ...services.stale_guard import StaleEditError, ensure_not_stale, stale_conflict_response
+
+    plan = get_buyplan_for_user(db, user, plan_id, options=[joinedload(BuyPlan.requisition)])
+    form = await request.form()
+    try:
+        ensure_not_stale(plan, form.get("expected_updated_at"))
+    except StaleEditError:
+        return stale_conflict_response()
+
+    updates = {
+        field: str(form[field])
+        for field in ("sales_order_number", "customer_po_number", "salesperson_notes")
+        if field in form
+    }
+    if not updates:
+        raise HTTPException(400, "No header field provided.")
+    try:
+        set_plan_header_fields(plan_id, user, db, **updates)
+        db.commit()
+    except PermissionError as e:
+        raise HTTPException(403, str(e)) from e
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+    from .buy_plans import _workspace_pane_response
+
+    return _workspace_pane_response(request, user, db, plan_id, form)
 
 
 # ── Purchase-order line detail pane ─────────────────────────────────────
@@ -462,9 +642,9 @@ def render_po_pane(request: Request, user: User, db: Session, line_id: int) -> H
     display-only sent-mail detection. Approved/re-sourcing/issue states render their
     stamps.
     """
-    from ...constants import PO_LINE_PAYMENT_METHODS
+    from ...constants import PO_LINE_PAYMENT_METHODS, LineIssueType
     from ...dependencies import get_buyplan_for_user, is_manager_or_admin
-    from ...services.buyplan_workflow import can_edit_buy_plan_lines
+    from ...services.buyplan_workflow import _can_halt, can_edit_plan
     from ...services.field_audit import manager_edited_line_ids
     from ...services.qp_workspace import qp_for_line
     from ...services.stale_guard import stale_token
@@ -496,6 +676,8 @@ def render_po_pane(request: Request, user: User, db: Session, line_id: int) -> H
     limit = getattr(user, "purchase_order_approval_limit", None)
     amount = float(line.unit_cost or 0) * (line.quantity or 0)
 
+    from ...dependencies import can_request_prepayment
+    from ...services.prepayment_service import prepayment_state_for_lines
     from .buy_plans import _can_resource  # lazy: buy_plans lazily imports this module back
 
     ctx = _base_ctx(request, user, "buy-plans")
@@ -522,15 +704,39 @@ def render_po_pane(request: Request, user: User, db: Session, line_id: int) -> H
             # Stale-edit guard (2.1): the confirm-PO / line-edit forms round-trip the
             # LINE's token (narrowest edited object).
             "line_stale_token": stale_token(line),
+            # Prepayment affordances (Deal Sheet T3): the request button + state pill
+            # moved here when the legacy detail page retired — call-site gated exactly
+            # like the old detail lines were.
+            "can_request_prepay": can_request_prepayment(user, line),
+            "prepay_state": prepayment_state_for_lines(db, [line.id]).get(line.id),
+            # Issue relay (Deal Sheet T3b): flag/resolve moved here from the retired
+            # detail page. Resolve mirrors the service's supervisor/ops gate (_can_halt);
+            # the ops-group query only runs when the answer can change the render (an
+            # issue to resolve, or a non-assigned viewer's flag affordance).
+            "issue_types": [(t.value, t.value.replace("_", " ").title()) for t in LineIssueType],
+            "can_resolve_issue": ((bool(line.issue_type) or line.buyer_id != user.id) and _can_halt(user, db)),
             # Manager edit-anything at verify (2.3): the pane shows the edit form with
             # the SAME predicate the /lines/{id}/edit service gate enforces (manager on
             # an editable plan, line at pending_verify), plus the edited-by marker.
             "can_manager_edit": (
                 is_manager_or_admin(user)
-                and can_edit_buy_plan_lines(user, plan)
+                and can_edit_plan(user, plan)
                 and line.status == BuyPlanLineStatus.PENDING_VERIFY.value
             ),
             "manager_edited": line.id in manager_edited_line_ids(db, plan),
+            # Copy-for-ERP (Deal Sheet T4): the PO stays manual in the ERP by design —
+            # the re-typing doesn't. One click puts the line's entry fields on the
+            # clipboard (tab-separated: vendor, MPN, qty, unit cost).
+            "erp_copy": "\t".join(
+                [
+                    (line.offer.vendor_name if line.offer else "") or "",
+                    (line.requirement.primary_mpn if line.requirement else None)
+                    or (line.offer.mpn if line.offer else None)
+                    or "",
+                    str(line.quantity or 0),
+                    f"{float(line.unit_cost):.4f}" if line.unit_cost is not None else "",
+                ]
+            ),
             # Notes + attachments (2.4): the line's own thread.
             **_notes_ctx(db, user, plan_id=plan.id, line_id=line.id),
         }

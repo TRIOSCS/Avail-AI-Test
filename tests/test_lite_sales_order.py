@@ -127,10 +127,10 @@ def test_picker_non_sourcing_lists_offerless_requisitions(
     req = _open_req(db_session, test_user)  # no offers at all
 
     sourcing_txt = lite_client.get("/v2/partials/buy-plans/sales-orders/new").text
-    assert f"REQ #{req.id}" not in sourcing_txt  # sourcing path requires offers
+    assert req.name not in sourcing_txt  # sourcing path requires offers
 
     lite_txt = lite_client.get("/v2/partials/buy-plans/sales-orders/new?order_type=stock_sale").text
-    assert f"REQ #{req.id}" in lite_txt  # lite path lists it
+    assert req.name in lite_txt  # lite path lists it
     assert "Lite path" in lite_txt
 
 
@@ -141,21 +141,19 @@ def test_picker_has_order_type_select(lite_client: TestClient):
         assert f'value="{val}"' in txt
 
 
-def test_lite_builder_mode_is_create_only(lite_client: TestClient, db_session: Session, test_user: User):
-    req = _open_req(db_session, test_user)
-    txt = lite_client.get(
-        f"/v2/partials/buy-plans/sales-orders/new?requisition_id={req.id}&order_type=testing_service"
-    ).text
-    assert "no buy-plan lines" in txt
-    assert "Create Sales Order" in txt
-    assert "Sell price" not in txt  # no offer table on the lite path
+def test_lite_pick_creates_directly(lite_client: TestClient, db_session: Session, test_user: User):
+    """Deal Sheet T3: the lite path has no builder step either — picking creates."""
+    _open_req(db_session, test_user)
+    txt = lite_client.get("/v2/partials/buy-plans/sales-orders/new?order_type=testing_service").text
+    assert "no buy-plan lines" in txt  # the lite hint on the picker
+    assert "Start" in txt
 
 
 def test_create_route_lite_branch(lite_client: TestClient, db_session: Session, test_user: User):
     req = _open_req(db_session, test_user)
     r = lite_client.post(
         "/v2/partials/buy-plans/sales-orders/create",
-        data={"requisition_id": req.id, "order_type": "stock_sale"},
+        data={"requisition_id": req.id, "order_type": "stock_sale", "embed": "aw"},
     )
     assert r.status_code == 200
 

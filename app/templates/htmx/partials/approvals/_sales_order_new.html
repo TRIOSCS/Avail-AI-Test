@@ -1,49 +1,35 @@
 {#
-  approvals/_sales_order_new.html — New Sales Order origination surface.
-  Two modes driven by `selected_req`, forked by ORDER TYPE (spec §3):
-    1. Requisition picker (selected_req is none): an order-type select + open
-       requisitions. Sourcing types (New / Revision) list only requisitions with at
-       least one selectable offer; non-sourcing types (Stock Sale / Testing Service /
-       Comps) list every open requisition — the lite path needs no offers.
-    2. Builder (selected_req set): sourcing → per-requirement offer chooser + sell
-       price; non-sourcing → a create-only confirm (zero lines, no kanban).
-  Both POST to the create route, which originates a DRAFT plan and swaps its detail
-  into #main-content.
-  The surface is SELF-HOSTED: it renders its own #so-origination container and every
-  internal navigation (order-type change, requisition pick, Back) outerHTML-swaps that
-  container, so the picker works wherever it lands (the workspace lists load it into
-  #main-content). Cancel returns to the Approvals Workspace shell.
-  Receives: selected_req (Requisition|None); order_type (normalized value); sourcing
-            (bool); order_type_choices (list[(value, label)]);
-            picker_rows (list of {id,name,customer,offer_count}) in picker mode;
-            lines (get_builder_data shape; empty for non-sourcing) in builder mode.
+  approvals/_sales_order_new.html — New Sales Order origination (Deal Sheet T3).
+  ONE step: pick the order type, then pick a requisition — picking a row CREATES the
+  draft immediately with the RECOMMENDED offers pre-picked (the builder's score/auto-
+  split path runs with no explicit selections), and the pane becomes the draft's Deal
+  Sheet where everything else (offer tweaks, SO#, notes, Submit) happens in place.
+  Runs embedded in #aw-pane (embed=aw — the workspace list stays alive; Cancel →
+  blank pane) or standalone in #main-content (legacy entries — Cancel → workspace).
+  Self-hosted: internal nav (order-type change) outerHTML-swaps #so-origination.
+  Receives: order_type (normalized), sourcing (bool), order_type_choices,
+            picker_rows (list of {id,name,customer,offer_count}), embed ('aw'|'').
   Called by: buy_plans.py sales_order_new (GET /v2/partials/buy-plans/sales-orders/new).
-  Depends on: HTMX, Tailwind CSS with brand palette.
+  Depends on: HTMX, Tailwind.
 #}
-{% if selected_req is none %}
-{# ── Mode 1: requisition picker ── #}
-<div id="so-origination" class="page-fluid">
-  <div class="flex items-center justify-between mb-4">
-    <h2 class="h2">New Sales Order</h2>
-    {# Cancel leaves origination entirely — back to the Approvals Workspace shell. #}
-    <button hx-get="/v2/partials/approvals"
-            hx-target="#main-content"
-            hx-swap="innerHTML"
-            hx-push-url="/v2/approvals"
-            class="btn btn-secondary btn-sm">
-      Cancel
-    </button>
+<div id="so-origination" class="{{ 'p-4' if embed == 'aw' else 'page-fluid' }}">
+  <div class="flex items-center justify-between mb-3">
+    <h2 class="{{ 'text-base font-semibold text-gray-900' if embed == 'aw' else 'h2' }}">New Sales Order</h2>
+    {% if embed == 'aw' %}
+    <button hx-get="/v2/partials/approvals/pane/blank" hx-target="#aw-pane" hx-swap="innerHTML"
+            class="btn btn-secondary btn-sm">Cancel</button>
+    {% else %}
+    <button hx-get="/v2/partials/approvals" hx-target="#main-content" hx-swap="innerHTML"
+            hx-push-url="/v2/approvals" class="btn btn-secondary btn-sm">Cancel</button>
+    {% endif %}
   </div>
 
-  {# Order type drives the path: changing it reloads THIS picker (explicit target —
-     never inherit). Non-sourcing types take the lite no-offers path. #}
-  <div class="flex items-center gap-2 mb-4">
+  <div class="flex items-center gap-2 mb-3">
     <label for="so-order-type" class="text-sm font-medium text-gray-700">Order type</label>
     <select id="so-order-type" name="order_type" class="input input-sm w-44"
             hx-get="/v2/partials/buy-plans/sales-orders/new"
-            hx-target="#so-origination"
-            hx-swap="outerHTML"
-            hx-trigger="change">
+            hx-vals='{"embed": "{{ embed }}"}'
+            hx-target="#so-origination" hx-swap="outerHTML" hx-trigger="change">
       {% for val, label in order_type_choices %}
       <option value="{{ val }}" {% if val == order_type %}selected{% endif %}>{{ label }}</option>
       {% endfor %}
@@ -53,155 +39,36 @@
     {% endif %}
   </div>
 
-  <p class="text-sm text-gray-600 mb-4">
+  <p class="text-sm text-gray-600 mb-3">
     {% if sourcing %}
-    Pick a requisition with offers to build the sales order directly from its RFQ offers.
+    Pick a requisition — the sales order opens as a draft sheet with the recommended
+    offers already picked; adjust vendors and quantities right on it.
     {% else %}
     Pick the requisition this {{ order_type.replace('_', ' ') }} order belongs to.
     {% endif %}
   </p>
+
   {% if picker_rows %}
-  <div class="divide-y divide-line-base rounded-lg border border-line-base bg-white">
+  <div class="rounded-lg border border-line-base bg-white divide-y divide-line-subtle overflow-hidden">
     {% for row in picker_rows %}
-    <button hx-get="/v2/partials/buy-plans/sales-orders/new?requisition_id={{ row.id }}&order_type={{ order_type }}"
-            hx-target="#so-origination"
-            hx-swap="outerHTML"
-            class="w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors flex items-center justify-between gap-3">
-      <span class="min-w-0">
-        <span class="text-sm font-semibold text-gray-900 truncate">{{ row.name or 'REQ #' ~ row.id }}</span>
-        <span class="block text-xs text-gray-500">REQ #{{ row.id }}{% if row.customer %} · {{ row.customer }}{% endif %}</span>
+    <form hx-post="/v2/partials/buy-plans/sales-orders/create"
+          hx-target="{{ '#aw-pane' if embed == 'aw' else '#main-content' }}" hx-swap="innerHTML"
+          hx-indicator="{{ '#aw-pane-ind' if embed == 'aw' else 'this' }}"
+          class="flex items-center gap-3 px-3 py-2 hover:bg-brand-50 transition-colors">
+      <input type="hidden" name="requisition_id" value="{{ row.id }}">
+      <input type="hidden" name="order_type" value="{{ order_type }}">
+      <input type="hidden" name="embed" value="{{ embed }}">
+      <span class="min-w-0 flex-1">
+        <span class="block text-sm font-medium text-gray-900 truncate">{{ row.name }}</span>
+        <span class="block text-xs text-gray-500 truncate">{{ row.customer or '—' }}{% if sourcing %} · {{ row.offer_count }} active offer{{ 's' if row.offer_count != 1 }}{% endif %}</span>
       </span>
-      {% if sourcing %}
-      <span class="chip bg-brand-50 text-brand-700 border-brand-200 flex-shrink-0">
-        {{ row.offer_count }} offer{{ 's' if row.offer_count != 1 }}
-      </span>
-      {% endif %}
-    </button>
+      <button type="submit" data-loading-disable class="btn-primary btn-sm flex-shrink-0">Start &rarr;</button>
+    </form>
     {% endfor %}
   </div>
   {% else %}
-  <div class="rounded-lg border border-line-base bg-gray-50 px-4 py-8 text-center text-sm text-gray-600">
-    {% if sourcing %}
-    No open requisitions with offers are available to build a sales order.
-    {% else %}
-    No open requisitions are available.
-    {% endif %}
+  <div class="rounded-lg border border-line-base bg-gray-50 px-3 py-6 text-sm text-gray-500 text-center">
+    {% if sourcing %}No open requisitions with active offers — run a search or log offers first.{% else %}No open requisitions.{% endif %}
   </div>
   {% endif %}
 </div>
-{% else %}
-{# ── Mode 2: builder for the chosen requisition ── #}
-<div id="so-origination" class="page-fluid">
-  <div class="flex items-center justify-between mb-4">
-    <div class="min-w-0">
-      <h2 class="h2 truncate">
-        New Sales Order — {{ selected_req.name or 'REQ #' ~ selected_req.id }}
-      </h2>
-      <p class="text-xs text-gray-600">REQ #{{ selected_req.id }} · {{ order_type.replace('_', ' ') | title }}</p>
-    </div>
-    <button hx-get="/v2/partials/buy-plans/sales-orders/new?order_type={{ order_type }}"
-            hx-target="#so-origination"
-            hx-swap="outerHTML"
-            class="btn btn-secondary btn-sm">
-      Back
-    </button>
-  </div>
-
-  {% if not sourcing %}
-  {# ── Lite path: zero lines, create-only confirm ── #}
-  <form hx-post="/v2/partials/buy-plans/sales-orders/create"
-        hx-target="#main-content"
-        hx-swap="innerHTML">
-    <input type="hidden" name="requisition_id" value="{{ selected_req.id }}">
-    <input type="hidden" name="order_type" value="{{ order_type }}">
-    <div class="rounded-lg border border-line-base bg-white px-4 py-4 text-sm text-gray-700">
-      This creates a <span class="font-semibold">{{ order_type.replace('_', ' ') }}</span> sales order with
-      <span class="font-semibold">no buy-plan lines</span> — it is submitted, approved, and tracked
-      like any order, with no PO kanban.
-    </div>
-    <div class="mt-4 flex items-center justify-end gap-2">
-      <button hx-get="/v2/partials/buy-plans/sales-orders/new?order_type={{ order_type }}"
-              hx-target="#so-origination"
-              hx-swap="outerHTML"
-              type="button"
-              class="btn btn-secondary btn-sm">
-        Cancel
-      </button>
-      <button type="submit" data-loading-disable class="btn btn-primary btn-sm">
-        Create Sales Order
-      </button>
-    </div>
-  </form>
-  {% else %}
-  {% set selectable = lines|selectattr('offers')|list %}
-  {% if selectable %}
-  <form hx-post="/v2/partials/buy-plans/sales-orders/create"
-        hx-target="#main-content"
-        hx-swap="innerHTML">
-    <input type="hidden" name="requisition_id" value="{{ selected_req.id }}">
-    <input type="hidden" name="order_type" value="{{ order_type }}">
-    <div class="overflow-x-auto rounded-lg border border-line-base bg-white">
-      <table class="min-w-full text-sm">
-        <thead>
-          <tr class="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider border-b border-line-base">
-            <th class="px-4 py-2">Part</th>
-            <th class="px-4 py-2">Qty</th>
-            <th class="px-4 py-2">Offer (cost)</th>
-            <th class="px-4 py-2">Sell price</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-line-base">
-          {% for line in lines %}
-          <tr>
-            <td class="px-4 py-2">
-              <span class="font-mono text-gray-900">{{ line.mpn or '—' }}</span>
-              {% if line.manufacturer %}<span class="block text-xs text-gray-500">{{ line.manufacturer }}</span>{% endif %}
-            </td>
-            <td class="px-4 py-2 text-gray-700">{{ line.target_qty }}</td>
-            {% if line.offers %}
-            <td class="px-4 py-2">
-              <select name="offer_{{ line.requirement_id }}"
-                      class="input input-sm w-full max-w-xs">
-                {% for o in line.offers %}
-                <option value="{{ o.id }}" {% if o.id == line.selected_offer_id %}selected{% endif %}>
-                  {{ o.vendor_name }} — ${{ '{:,.4f}'.format(o.unit_price) }}
-                </option>
-                {% endfor %}
-              </select>
-            </td>
-            <td class="px-4 py-2">
-              <input type="number" step="any" min="0"
-                     name="sell_{{ line.requirement_id }}"
-                     value="{{ line.sell_price if line.sell_price is not none else '' }}"
-                     placeholder="Sell"
-                     class="input input-sm w-28">
-            </td>
-            {% else %}
-            <td class="px-4 py-2 text-xs text-gray-400" colspan="2">No active offers — not included</td>
-            {% endif %}
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    <div class="mt-4 flex items-center justify-end gap-2">
-      <button hx-get="/v2/partials/buy-plans/sales-orders/new?order_type={{ order_type }}"
-              hx-target="#so-origination"
-              hx-swap="outerHTML"
-              type="button"
-              class="btn btn-secondary btn-sm">
-        Cancel
-      </button>
-      <button type="submit" data-loading-disable class="btn btn-primary btn-sm">
-        Build Sales Order
-      </button>
-    </div>
-  </form>
-  {% else %}
-  <div class="rounded-lg border border-line-base bg-gray-50 px-4 py-8 text-center text-sm text-gray-600">
-    This requisition has no active offers to build a sales order from.
-  </div>
-  {% endif %}
-  {% endif %}
-</div>
-{% endif %}

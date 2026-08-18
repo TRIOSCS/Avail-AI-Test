@@ -187,10 +187,11 @@ def test_for_buy_plan_ownership_404_for_restricted_non_owner(
 
 
 def test_buy_plan_detail_renders_quality_plan_button(client, db_session: Session, test_user, test_customer_site):
-    """The buy-plan detail renders the 'Quality Plan' button wired to for-buy-plan."""
+    """The plan's workspace pane (the detail page's successor, Deal Sheet T3b) renders
+    the Quality-Plan front door wired to for-buy-plan."""
     bp = _seed_buy_plan(db_session, test_user.id, test_customer_site.id)
 
-    resp = client.get(f"/v2/partials/buy-plans/{bp.id}")
+    resp = client.get(f"/v2/partials/approvals/plan/{bp.id}/pane")
     assert resp.status_code == 200
     body = resp.text
     assert "Quality Plan" in body
