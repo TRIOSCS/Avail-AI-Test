@@ -8,8 +8,7 @@ issue, cancel, reset). The retired /v2/buy-plans hub's partial URLs 308 onto the
 workspace equivalents (spec §11.1; docs/APPROVALS_PARITY_CHECKLIST.md).
 
 Called by: app/main.py (router mount).
-Depends on: app.models, app.dependencies, app.database, app.services.approvals,
-    ._shared (imports _is_ops_member shared with a staying quotes route).
+Depends on: app.models, app.dependencies, app.database, app.services.approvals, ._shared.
 """
 
 import json
@@ -46,17 +45,9 @@ from ...models import (
 )
 from ...services.stale_guard import StaleEditError, ensure_not_stale, stale_conflict_response
 from ...template_env import template_response
-from ._shared import _base_ctx, _is_ops_member
+from ._shared import _base_ctx
 
 router = APIRouter(tags=["htmx-views"])
-
-
-def _can_supervise(user: User, db: Session) -> bool:
-    """True when the user may see cross-user (scope=all) deal data.
-
-    Managers/admins and ops verification-group members qualify.
-    """
-    return user.role in (UserRole.MANAGER, UserRole.ADMIN) or _is_ops_member(user, db)
 
 
 _PO_CUTTER_ROLES = (UserRole.BUYER, UserRole.MANAGER, UserRole.ADMIN)
@@ -129,9 +120,9 @@ SEND_BACK_DEFAULT_NOTE = "Sent back for sign-off — see change summary"
 
 
 def _workspace_pane_response(request: Request, user: User, db: Session, plan_id: int, form) -> HTMLResponse:
-    """The shared origin=approvals_workspace re-render for plan lifecycle POSTs (halt /
-    resume / cancel / reset — 2.5): the plan's SO/BP pane in place + an awListRefresh
-    nudge so the left work list repaints its status."""
+    """The default PLAN-scoped re-render for lifecycle POSTs (submit / approve / halt /
+    resume / cancel / reset / withdraw / bulk lines): the plan's SO/BP pane in place +
+    an awListRefresh nudge so the left work list repaints its status."""
     from .approvals_hub import render_plan_pane
 
     resp = render_plan_pane(request, user, db, plan_id, lens=str(form.get("lens", "sales-orders")))
@@ -142,9 +133,9 @@ def _workspace_pane_response(request: Request, user: User, db: Session, plan_id:
 def _line_action_pane_response(
     request: Request, user: User, db: Session, plan_id: int, line_id: int, form
 ) -> HTMLResponse:
-    """The per-LINE action re-render (receive / flag-issue / resolve-issue): with a
-    ``lens`` the SO/BP plan pane (the action came from the plan pane's kanban), without
-    one the PO-line pane (the PO tab).
+    """The per-LINE action re-render (confirm-po / claim / verify-po / resource /
+    receive / flag-issue / resolve-issue): with a ``lens`` the SO/BP plan pane (the
+    action came from the plan pane's kanban), without one the PO-line pane (the PO tab).
 
     Both nudge the work list.
     """
@@ -187,7 +178,6 @@ def _normalize_order_type(raw: str | None) -> str:
 @router.get("/v2/partials/buy-plans/sales-orders/new", response_class=HTMLResponse)
 async def sales_order_new(
     request: Request,
-    requisition_id: int | None = None,
     order_type: str = "",
     embed: str = "",
     user: User = Depends(require_user),
@@ -256,21 +246,22 @@ async def sales_order_new(
     counts: dict[int, int] = {}
     if reqs:
         counts = dict(
-            db.query(Requirement.requisition_id, func.count(Offer.id))
-            .join(Offer, Offer.requirement_id == Requirement.id)
-            .filter(
-                Requirement.requisition_id.in_([r.id for r in reqs]),
-                Offer.status == OfferStatus.ACTIVE,
-            )
-            .group_by(Requirement.requisition_id)
-            .all()
+            db.execute(
+                select(Requirement.requisition_id, func.count(Offer.id))
+                .join(Offer, Offer.requirement_id == Requirement.id)
+                .where(
+                    Requirement.requisition_id.in_([r.id for r in reqs]),
+                    Offer.status == OfferStatus.ACTIVE,
+                )
+                .group_by(Requirement.requisition_id)
+            ).all()
         )
 
     picker_rows = [
         {"id": r.id, "name": r.name, "customer": r.customer_name or "", "offer_count": counts.get(r.id, 0)}
         for r in reqs
     ]
-    ctx.update({"selected_req": None, "picker_rows": picker_rows})
+    ctx.update({"picker_rows": picker_rows})
     return template_response("htmx/partials/approvals/_sales_order_new.html", ctx)
 
 
@@ -280,17 +271,17 @@ async def sales_order_create(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Originate a DRAFT buy plan (Sales Order), then render its detail.
+    """Originate a DRAFT buy plan (Sales Order), then render its Deal Sheet pane.
 
-    Parses ``requisition_id`` + ``order_type`` + per-requirement ``offer_<rid>`` /
-    ``sell_<rid>`` form fields, enforces requisition access
+    Reads ``requisition_id`` + ``order_type`` and enforces requisition access
     (``require_requisition_access`` — 404 for a restricted role that does not own it).
-    SOURCING order types (New / Revision) build from the chosen offers
-    (``create_sales_order_from_offers``); NON-SOURCING types (Stock Sale / Testing
-    Service / Comps) take the LITE path (``create_lite_sales_order`` — zero lines, no
-    kanban). On the builder's duplicate-open-SO ValueError it renders the existing open
-    Sales Order's detail with a toast (never a 500); any other ValueError (e.g. no
-    requirements) is a 400.
+    SOURCING order types (New / Revision) build with the RECOMMENDED offers auto-picked
+    (``create_sales_order_from_offers`` with no explicit selections — the one-step
+    picker sends none; adjustments happen on the sheet); NON-SOURCING types (Stock Sale
+    / Testing Service / Comps) take the LITE path (``create_lite_sales_order`` — zero
+    lines, no kanban). On the builder's duplicate-open-SO ValueError it renders the
+    existing open Sales Order's sheet with a toast (never a 500); any other ValueError
+    (e.g. no requirements) is a 400.
     """
     from ...constants import SOURCING_ORDER_TYPES
     from ...dependencies import require_requisition_access
@@ -313,61 +304,54 @@ async def sales_order_create(
 
     order_type = _normalize_order_type(form.get("order_type"))
 
-    selections: dict[int, int] = {}
-    sell_prices: dict[int, float] = {}
-    for key, value in form.multi_items():
-        if key.startswith("offer_"):
-            try:
-                selections[int(key[len("offer_") :])] = int(value)
-            except (TypeError, ValueError):
-                continue
-        elif key.startswith("sell_"):
-            if value in (None, ""):
-                continue
-            try:
-                sell_prices[int(key[len("sell_") :])] = float(value)
-            except (TypeError, ValueError):
-                continue
-
     try:
         if order_type in {t.value for t in SOURCING_ORDER_TYPES}:
-            plan = create_sales_order_from_offers(req_id, selections, sell_prices, db, user, order_type=order_type)
+            plan = create_sales_order_from_offers(req_id, {}, {}, db, user, order_type=order_type)
         else:
             plan = create_lite_sales_order(req_id, order_type, db, user)
     except DuplicateSalesOrderError as exc:
         # An open Sales Order already exists for this requisition — open it instead of
         # 500ing. The exception carries the existing plan id, so no re-query is needed.
         existing_id = exc.existing_plan_id
-        resp = await _sales_order_created_response(request, user, db, existing_id, form)
-        toast = {
-            "showToast": {
-                "message": f"There is already an open buy plan for this requisition (plan #{existing_id}).",
-                "type": "warning",
-            }
-        }
-        if form.get("embed") == "aw":
-            toast["awListRefresh"] = True
-            toast["aw-mark"] = {"key": f"plan-{existing_id}"}
-        resp.headers["HX-Trigger"] = json.dumps(toast)
-        return resp
+        return await _sales_order_created_response(
+            request,
+            user,
+            db,
+            existing_id,
+            form,
+            toast={
+                "showToast": {
+                    "message": f"There is already an open buy plan for this requisition (plan #{existing_id}).",
+                    "type": "warning",
+                }
+            },
+        )
     except ValueError as e:
         # Any other origination failure (e.g. requisition has no requirements). Return a
         # curated client message rather than echoing the raw builder error.
         raise HTTPException(400, "Could not build a buy plan from the selected offers.") from e
 
-    resp = await _sales_order_created_response(request, user, db, plan.id, form)
-    if form.get("embed") == "aw":
-        resp.headers["HX-Trigger"] = json.dumps({"awListRefresh": True, "aw-mark": {"key": f"plan-{plan.id}"}})
-    return resp
+    return await _sales_order_created_response(request, user, db, plan.id, form)
 
 
-async def _sales_order_created_response(request: Request, user: User, db: Session, plan_id: int, form):
+async def _sales_order_created_response(request: Request, user: User, db: Session, plan_id: int, form, *, toast=None):
     """Post-origination render: the workspace pane — the pane becomes the new draft's
-    Deal Sheet, with the workspace deep link pushed (the legacy detail page is gone)."""
+    Deal Sheet, with the workspace deep link pushed (the legacy detail page is gone).
+
+    Owns the whole HX-Trigger contract for BOTH create outcomes: an optional *toast*
+    dict (the duplicate-open-SO warning) merges with the ``embed=aw`` list nudge
+    (awListRefresh + aw-mark highlight) so the two call sites can't drift.
+    """
     from .approvals_hub import render_plan_pane
 
     resp = render_plan_pane(request, user, db, plan_id, lens="sales-orders")
     resp.headers["HX-Push-Url"] = f"/v2/approvals?tab=sales-orders&select={plan_id}"
+    trigger = dict(toast or {})
+    if form.get("embed") == "aw":
+        trigger["awListRefresh"] = True
+        trigger["aw-mark"] = {"key": f"plan-{plan_id}"}
+    if trigger:
+        resp.headers["HX-Trigger"] = json.dumps(trigger)
     return resp
 
 
@@ -585,7 +569,9 @@ async def buy_plan_withdraw_partial(
     """
     from ...services.buyplan_workflow import withdraw_buy_plan
 
-    get_buyplan_for_user(db, user, plan_id)
+    # Eager-load requisition: the service's db.get returns THIS identity-map entry (its
+    # own loader options are ignored), and the owner check walks plan.requisition.
+    get_buyplan_for_user(db, user, plan_id, options=[joinedload(BuyPlan.requisition)])
     form = await request.form()
     try:
         withdraw_buy_plan(plan_id, user, db)
@@ -716,15 +702,6 @@ async def buy_plan_approve_partial(
             write_in_app(db, fixer_id, f"buy_plan_{decision_tag}", title, notes)
         db.commit()
 
-    if origin == "approvals_workspace":
-        # Workspace pane decide: re-render THIS plan's pane in place and nudge the
-        # left work list to repaint (awListRefresh — the split shell's list container
-        # listens for it), so the decided row leaves the Needs-your-approval group.
-        from .approvals_hub import render_plan_pane
-
-        resp = render_plan_pane(request, user, db, plan_id, lens=form.get("lens", "sales-orders"))
-        resp.headers["HX-Trigger"] = "awListRefresh"
-        return resp
     if origin == "approvals_hub":
         from .approvals_hub import render_tab_body
 
@@ -750,7 +727,6 @@ async def buy_plan_halt_partial(
     from ...services.buyplan_workflow import halt_plan
 
     form = await request.form()
-    origin = form.get("origin", "")
 
     # A halt is an off-ramp on a money-governing deal — the reason is required so the case
     # report + salesperson notification always say WHY (stored on so_rejection_note; no column).
@@ -766,9 +742,6 @@ async def buy_plan_halt_partial(
         raise HTTPException(403, str(e)) from e
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
-
-    if origin == "approvals_workspace":
-        return _workspace_pane_response(request, user, db, plan_id, form)
 
     return _workspace_pane_response(request, user, db, plan_id, form)
 
@@ -803,7 +776,6 @@ async def buy_plan_confirm_po_partial(
     po_number = form.get("po_number", "").strip()
     ship_date_str = form.get("estimated_ship_date", "")
     payment_method = (form.get("payment_method") or "").strip() or None
-    origin = form.get("origin", "")
 
     if not po_number:
         raise HTTPException(400, "PO number is required")
@@ -871,14 +843,7 @@ async def buy_plan_confirm_po_partial(
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
 
-    if origin == "approvals_workspace":
-        from .approvals_hub import render_po_pane
-
-        resp = render_po_pane(request, user, db, line_id)
-        resp.headers["HX-Trigger"] = "awListRefresh"
-        return resp
-
-    return _workspace_pane_response(request, user, db, plan_id, form)
+    return _line_action_pane_response(request, user, db, plan_id, line_id, form)
 
 
 async def _resource_lines_and_alert(
@@ -968,18 +933,12 @@ async def buy_plan_resource_line_partial(
 
     await _resource_lines_and_alert(plan_id, line_id, reason_code, reason_note, also_line_ids, user, db)
 
-    if origin == "approvals_workspace":
-        from .approvals_hub import render_po_pane
-
-        resp = render_po_pane(request, user, db, line_id)
-        resp.headers["HX-Trigger"] = "awListRefresh"
-        return resp
     if origin == "approvals_hub":
         from .approvals_hub import render_tab_body
 
         return render_tab_body(request, user, db, "po-approval", hub_scope)
 
-    return _workspace_pane_response(request, user, db, plan_id, form)
+    return _line_action_pane_response(request, user, db, plan_id, line_id, form)
 
 
 @router.post("/v2/partials/buy-plans/{plan_id}/lines/{line_id}/claim", response_class=HTMLResponse)
@@ -1001,7 +960,6 @@ async def buy_plan_claim_line_partial(
     _require_po_cutter(user)
 
     form = await request.form()
-    origin = form.get("origin", "")
 
     try:
         claim_line(plan_id, line_id, user, db)
@@ -1010,14 +968,7 @@ async def buy_plan_claim_line_partial(
         logger.info("Claim lost/invalid for plan {} line {} by {}: {}", plan_id, line_id, user.id, e)
         raise HTTPException(409, str(e)) from e
 
-    if origin == "approvals_workspace":
-        from .approvals_hub import render_po_pane
-
-        resp = render_po_pane(request, user, db, line_id)
-        resp.headers["HX-Trigger"] = "awListRefresh"
-        return resp
-
-    return _workspace_pane_response(request, user, db, plan_id, form)
+    return _line_action_pane_response(request, user, db, plan_id, line_id, form)
 
 
 @router.post("/v2/partials/buy-plans/{plan_id}/lines/{line_id}/verify-po", response_class=HTMLResponse)
@@ -1079,18 +1030,12 @@ async def buy_plan_verify_po_partial(
             )
         db.commit()
 
-    if origin == "approvals_workspace":
-        from .approvals_hub import render_po_pane
-
-        resp = render_po_pane(request, user, db, line_id)
-        resp.headers["HX-Trigger"] = "awListRefresh"
-        return resp
     if origin == "approvals_hub":
         from .approvals_hub import render_tab_body
 
         return render_tab_body(request, user, db, "po-approval", hub_scope)
 
-    return _workspace_pane_response(request, user, db, plan_id, form)
+    return _line_action_pane_response(request, user, db, plan_id, line_id, form)
 
 
 @router.post("/v2/partials/buy-plans/{plan_id}/lines/{line_id}/receive", response_class=HTMLResponse)

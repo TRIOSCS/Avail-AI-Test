@@ -109,46 +109,46 @@ def test_approvals_buy_plan_list_has_new_sales_order_link(client: TestClient):
 
 
 def test_gate_pre_approval_owner_and_manager_can_edit(db_session, sales_user, manager_user, admin_user):
-    from app.services.buyplan_workflow import can_edit_buy_plan_lines
+    from app.services.buyplan_workflow import can_edit_plan
 
     req = _req(db_session, sales_user)
     for status in (BuyPlanStatus.DRAFT.value, BuyPlanStatus.PENDING.value):
         plan = _plan(db_session, req, status=status)
-        assert can_edit_buy_plan_lines(sales_user, plan) is True  # owner
-        assert can_edit_buy_plan_lines(manager_user, plan) is True
-        assert can_edit_buy_plan_lines(admin_user, plan) is True
+        assert can_edit_plan(sales_user, plan) is True  # owner
+        assert can_edit_plan(manager_user, plan) is True
+        assert can_edit_plan(admin_user, plan) is True
 
 
 def test_gate_pre_approval_non_owner_non_manager_cannot_edit(db_session, sales_user, test_user):
-    from app.services.buyplan_workflow import can_edit_buy_plan_lines
+    from app.services.buyplan_workflow import can_edit_plan
 
     req = _req(db_session, sales_user)  # owned by sales_user
     plan = _plan(db_session, req, status=BuyPlanStatus.DRAFT.value)
     # test_user is a buyer who does NOT own this plan → not sales-or-manager.
-    assert can_edit_buy_plan_lines(test_user, plan) is False
+    assert can_edit_plan(test_user, plan) is False
 
 
 @pytest.mark.parametrize(
     "status", [BuyPlanStatus.ACTIVE.value, BuyPlanStatus.INBOUND.value, BuyPlanStatus.HALTED.value]
 )
 def test_gate_post_approval_is_manager_only(db_session, sales_user, manager_user, status):
-    from app.services.buyplan_workflow import can_edit_buy_plan_lines
+    from app.services.buyplan_workflow import can_edit_plan
 
     req = _req(db_session, sales_user)
     plan = _plan(db_session, req, status=status)
-    assert can_edit_buy_plan_lines(sales_user, plan) is False  # owner but post-approval
-    assert can_edit_buy_plan_lines(manager_user, plan) is True
+    assert can_edit_plan(sales_user, plan) is False  # owner but post-approval
+    assert can_edit_plan(manager_user, plan) is True
 
 
 @pytest.mark.parametrize("status", [BuyPlanStatus.COMPLETED.value, BuyPlanStatus.CANCELLED.value])
 def test_gate_terminal_locked_for_everyone(db_session, sales_user, manager_user, admin_user, status):
-    from app.services.buyplan_workflow import can_edit_buy_plan_lines
+    from app.services.buyplan_workflow import can_edit_plan
 
     req = _req(db_session, sales_user)
     plan = _plan(db_session, req, status=status)
-    assert can_edit_buy_plan_lines(sales_user, plan) is False
-    assert can_edit_buy_plan_lines(manager_user, plan) is False
-    assert can_edit_buy_plan_lines(admin_user, plan) is False
+    assert can_edit_plan(sales_user, plan) is False
+    assert can_edit_plan(manager_user, plan) is False
+    assert can_edit_plan(admin_user, plan) is False
 
 
 # ══ I — line edits recompute the header ══════════════════════════════

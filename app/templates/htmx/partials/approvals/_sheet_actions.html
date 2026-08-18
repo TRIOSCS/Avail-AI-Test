@@ -61,36 +61,26 @@
       {% endif %}
     </div>
   </div>
-  <div class="flex items-center gap-1.5 flex-wrap">
-    <input type="text" x-model="note" placeholder="Note — optional to send back, required to reject"
+  {# ONE form, three named submit buttons — the clicked button's name/value rides the
+     POST (the HTML submitter rule), so the three decisions can't drift apart. #}
+  <form hx-post="/v2/partials/buy-plans/{{ bp.id }}/approve" hx-target="#aw-pane" hx-swap="innerHTML"
+        class="flex items-center gap-1.5 flex-wrap">
+    <input type="hidden" name="origin" value="approvals_workspace">
+    <input type="hidden" name="lens" value="{{ lens }}">
+    {# Enter is swallowed — an implicit submit would fire the FIRST button (Approve);
+       a money decision is always an explicit click. #}
+    <input type="text" name="notes" x-model="note" @keydown.enter.prevent
+           placeholder="Note — optional to send back, required to reject"
            class="input input-sm flex-1 min-w-[180px]">
-    <form hx-post="/v2/partials/buy-plans/{{ bp.id }}/approve" hx-target="#aw-pane" hx-swap="innerHTML" class="inline">
-      <input type="hidden" name="origin" value="approvals_workspace">
-      <input type="hidden" name="lens" value="{{ lens }}">
-      <input type="hidden" name="handoff" value="proceed">
-      <input type="hidden" name="notes" :value="note">
-      <button type="submit" data-loading-disable class="btn-primary btn-sm">
-        {{ 'Approve with changes' if change_edits else 'Approve & notify' }}
-      </button>
-    </form>
-    <form hx-post="/v2/partials/buy-plans/{{ bp.id }}/approve" hx-target="#aw-pane" hx-swap="innerHTML" class="inline">
-      <input type="hidden" name="origin" value="approvals_workspace">
-      <input type="hidden" name="lens" value="{{ lens }}">
-      <input type="hidden" name="handoff" value="send_back">
-      <input type="hidden" name="notes" :value="note">
-      <button type="submit" data-loading-disable class="btn-secondary btn-sm">Send back</button>
-    </form>
-    <form hx-post="/v2/partials/buy-plans/{{ bp.id }}/approve" hx-target="#aw-pane" hx-swap="innerHTML" class="inline">
-      <input type="hidden" name="origin" value="approvals_workspace">
-      <input type="hidden" name="lens" value="{{ lens }}">
-      <input type="hidden" name="action" value="reject">
-      <input type="hidden" name="notes" :value="note">
-      <button type="submit" data-loading-disable class="btn-danger btn-sm"
-              :disabled="!note.trim()" :title="note.trim() ? '' : 'Type the note first — a reject always carries the reason'">
-        Reject
-      </button>
-    </form>
-  </div>
+    <button type="submit" name="handoff" value="proceed" data-loading-disable class="btn-primary btn-sm">
+      {{ 'Approve with changes' if change_edits else 'Approve & notify' }}
+    </button>
+    <button type="submit" name="handoff" value="send_back" data-loading-disable class="btn-secondary btn-sm">Send back</button>
+    <button type="submit" name="action" value="reject" data-loading-disable class="btn-danger btn-sm"
+            :disabled="!note.trim()" :title="note.trim() ? '' : 'Type the note first — a reject always carries the reason'">
+      Reject
+    </button>
+  </form>
   {% include "htmx/partials/approvals/_change_summary.html" %}
 </div>
 
@@ -112,10 +102,8 @@
 <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
   Approved by {{ (bp.approved_by.name if bp.approved_by else none) or '—' }} · {{ bp.approved_at | fmtdate('%b %d, %Y') }}
   {% if lines and bp.status in ('active', 'inbound') %}
-  {% set _counts = {} %}
-  {% for line in lines %}{% if _counts.update({line.status: (_counts.get(line.status, 0) + 1)}) %}{% endif %}{% endfor %}
   <span class="ml-2 text-xs text-emerald-700">
-    {% for status, n in _counts.items() %}{{ n }} {{ po_labels.get(status, status) | lower }}{{ ' · ' if not loop.last }}{% endfor %}
+    {% for status, group in lines | groupby('status') %}{{ group | length }} {{ po_labels.get(status, status) | lower }}{{ ' · ' if not loop.last }}{% endfor %}
   </span>
   {% endif %}
 </div>

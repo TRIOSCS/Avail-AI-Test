@@ -3335,7 +3335,7 @@ Alpine.data('offerPicker', (bpId, seedGroups, knownLineIds, opts) => ({
   groups: [],
   orig: '',
   saving: false,
-  opts: Object.assign({ lens: 'sales-orders', staleToken: '', editable: true }, opts || {}),
+  opts: Object.assign({ lens: 'sales-orders', staleToken: '' }, opts || {}),
 
   init() {
     this.groups = (seedGroups || []).map((g) => ({
@@ -3354,7 +3354,7 @@ Alpine.data('offerPicker', (bpId, seedGroups, knownLineIds, opts) => ({
   get dirty() { return this._snapshot() !== this.orig; },
 
   toggle(o, g) {
-    if (o.locked || !this.opts.editable) return;
+    if (o.locked) return;
     o.checked = !o.checked;
     if (o.checked && !o.qty) {
       const remaining = (g.need || 0) - this.filled(g);

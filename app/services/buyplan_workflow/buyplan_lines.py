@@ -374,13 +374,9 @@ def can_edit_plan(user: User, plan: BuyPlan) -> bool:
     return _is_manager_or_admin(user) or _owns_plan(user, plan)
 
 
-# Historical name — line mutators and templates predate the Deal Sheet promotion.
-can_edit_buy_plan_lines = can_edit_plan
-
-
 def _ensure_can_edit_lines(user: User, plan: BuyPlan) -> None:
     """Raise PermissionError (→ 403) unless *user* may edit *plan*'s lines now."""
-    if not can_edit_buy_plan_lines(user, plan):
+    if not can_edit_plan(user, plan):
         raise PermissionError("You cannot edit this buy plan's lines in its current status.")
 
 
@@ -693,7 +689,7 @@ def edit_buy_plan_line(
 ) -> BuyPlan:
     """Edit a line's qty / sell price / vendor(offer) and recompute the header rollups.
 
-    Gated by :func:`can_edit_buy_plan_lines`; the per-field rules delegate to
+    Gated by :func:`can_edit_plan`; the per-field rules delegate to
     :func:`_apply_line_edit` (shared with the bulk "save all" edit path), which upgrades
     this function to the SAME no-op-before-guard semantics as bulk: resending a line's
     CURRENT qty/offer is always a no-op that never trips the cut-PO guard (previously
@@ -789,7 +785,7 @@ def bulk_edit_buy_plan_lines(
     Every offer any entry references is preloaded in ONE batch query up front (a real
     editor save can touch a dozen+ lines/vendors) instead of a ``db.get()`` per entry.
 
-    Gated by :func:`can_edit_buy_plan_lines`. Auto-completes at service depth via
+    Gated by :func:`can_edit_plan`. Auto-completes at service depth via
     :func:`check_completion` after recalc/flush (mirrors ``verify_po`` in
     ``buyplan_po.py``) — removing the last open line can leave every remaining line
     terminal, so this prevents an ACTIVE plan getting stranded short of COMPLETED. The
@@ -951,10 +947,6 @@ def bulk_edit_buy_plan_lines(
 # set_plan_header_fields reuses the module's _UNSET sentinel (defined above for the
 # line editors) — a second `object()` here would REBIND the global and break every
 # function that captured the original as a parameter default.
-
-# The three plan-header fields the Deal Sheet edits in place. Money/lines have their
-# own writers; order_type is structural (sourcing-vs-lite) and never header-editable.
-_HEADER_FIELDS = ("sales_order_number", "customer_po_number", "salesperson_notes")
 
 
 def set_plan_header_fields(

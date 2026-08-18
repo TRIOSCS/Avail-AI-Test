@@ -3,7 +3,7 @@
   identity row with click-to-edit cells (SO# / Customer PO#) + money + readiness chip.
   The ATOMIC swap target for every header-field save: POST .../plan/{id}/header
   re-renders the whole pane (header included), keeping money/readiness/chips honest.
-  Receives: bp, lens, can_edit_plan, plan_stale_token, order_type_label, readiness,
+  Receives: bp, lens, can_edit_plan, plan_stale_token, order_type_label,
             readiness_missing, can_decide, is_plan_owner.
   Called by: _pane_sales_order.html (Deal Sheet composition).
   Depends on: HTMX, Alpine, Tailwind; shared copy_chip + age_chip + status_badge macros.
@@ -117,7 +117,7 @@
   </div>
 
   {# Row 3 — readiness chip (draft only) #}
-  {% if readiness %}
+  {% if bp.status == 'draft' %}
   {% if not readiness_missing %}
   <span class="inline-flex items-center gap-1.5 rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
     ✓ Ready to submit

@@ -80,26 +80,3 @@ def build_card_title(
 #: AI-flag severities worst → least, so the flagged-issue indicator leads with the most
 #: urgent reason. Unknown/absent severities sort last (treated as least urgent).
 _SEVERITY_RANK: dict[str, int] = {"critical": 0, "warning": 1, "info": 2}
-
-
-def summarize_top_flag(ai_flags: list[dict] | None) -> dict | None:
-    """Return the single most-urgent AI flag so an indicator can state what's wrong.
-
-    The flagged-issue indicator on a buy plan must say the *actual* problem at first
-    glance, not just a count. ``ai_flags`` is the ``BuyPlan.ai_flags`` JSON list of
-    ``{type, severity, line_id, message}`` dicts produced by
-    ``buyplan_builder.generate_ai_flags`` (e.g. ``"Margin 8.50% below 15% threshold"``,
-    ``"No buyer assigned for line (reason: unknown)"``).
-
-    Returns the worst flag (critical → warning → info; original order breaks ties)
-    as ``{"severity", "message"}``, or ``None`` when there are no flags. The
-    ``message`` is the verbatim reason text the flag system recorded.
-    """
-    if not ai_flags:
-        return None
-    # min() with a stable key keeps the first flag of the worst severity (ties unchanged).
-    worst = min(ai_flags, key=lambda f: _SEVERITY_RANK.get((f or {}).get("severity"), 99))
-    return {
-        "severity": worst.get("severity"),
-        "message": worst.get("message") or "",
-    }

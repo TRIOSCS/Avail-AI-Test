@@ -479,9 +479,9 @@ class TestBuyPlanVerifyPoDirect:
             patch("app.services.buyplan_workflow.verify_po"),
             patch("app.services.buyplan_workflow.check_completion", return_value=None),
             patch("app.services.buyplan_notifications.run_notify_bg", new_callable=AsyncMock),
-            patch("app.routers.htmx.buy_plans._workspace_pane_response") as mock_pane,
+            patch("app.routers.htmx.buy_plans._line_action_pane_response") as mock_pane,
         ):
-            mock_pane.return_value = HTMLResponse("workspace pane")
+            mock_pane.return_value = HTMLResponse("po pane")
             result = await buy_plan_verify_po_partial(
                 request=mock_req, plan_id=bp.id, line_id=1, user=test_user, db=db_session
             )

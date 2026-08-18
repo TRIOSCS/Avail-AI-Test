@@ -22,7 +22,7 @@
   {% if can_edit_plan and picker_groups %}
   {# ── The offer picker (live editor) ── #}
   {% set _collapse_unchecked = bp.status in ('active', 'inbound', 'halted') %}
-  <div x-data='offerPicker({{ bp.id }}, {{ picker_groups | tojson }}, {{ picker_known_line_ids | tojson }}, { lens: {{ lens | tojson }}, staleToken: {{ plan_stale_token | tojson }}, editable: true })'
+  <div x-data='offerPicker({{ bp.id }}, {{ picker_groups | tojson }}, {{ picker_known_line_ids | tojson }}, { lens: {{ lens | tojson }}, staleToken: {{ plan_stale_token | tojson }} })'
        class="divide-y divide-line-subtle">
     <template x-for="g in groups" :key="g.requirement_id">
       <div class="px-3 py-2" x-data="{ showAll: {{ 'false' if _collapse_unchecked else 'true' }} }">

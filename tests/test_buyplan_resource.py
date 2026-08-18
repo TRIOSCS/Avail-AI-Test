@@ -401,7 +401,7 @@ class TestResourceRoutes:
         req = _FakeRequest({"reason_code": "sold_elsewhere", "scope": "line"})
         with (
             patch("app.services.buyplan_notifications.run_notify_bg", mock_bg),
-            patch.object(htmx_buy_plans, "_workspace_pane_response", return_value="ok"),
+            patch.object(htmx_buy_plans, "_line_action_pane_response", return_value="ok"),
         ):
             result = await htmx_buy_plans.buy_plan_resource_line_partial(
                 req, plan.id, line.id, user=test_user, db=db_session

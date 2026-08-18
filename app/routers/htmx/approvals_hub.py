@@ -324,7 +324,6 @@ def render_plan_pane(
     from ...services.buyplan_workflow import plan_needs_approver_reason
     from ...services.field_audit import edits_since
     from ...services.kanban_lanes import build_kanban
-    from ...services.qp_workspace import can_edit_qp_sales
     from ...services.stale_guard import stale_token
 
     lens = lens if lens in ("sales-orders", "buy-plans") else "sales-orders"
@@ -336,6 +335,7 @@ def render_plan_pane(
             joinedload(BuyPlan.lines).joinedload(BuyPlanLine.offer),
             joinedload(BuyPlan.lines).joinedload(BuyPlanLine.requirement),
             joinedload(BuyPlan.requisition),
+            joinedload(BuyPlan.quote),
             joinedload(BuyPlan.approved_by),
             joinedload(BuyPlan.submitted_by),
         ],
@@ -367,7 +367,6 @@ def render_plan_pane(
             "po_labels": PO_DECISION_LABELS,
             # QP-sales inline editing (2.1): the pane hides the editor with the SAME
             # predicate the POST enforces (draft → owner/manager; pending → manager only).
-            "can_edit_qp_sales": can_edit_qp_sales(user, bp),
             "qp_stale_token": stale_token(qp) if qp is not None else "",
             # Two-part approve (2.2): the audit-log change summary since submission,
             # embedded in the approval block ("was X → now Y"; empty = nothing changed).
@@ -400,12 +399,12 @@ def _sheet_ctx(db: Session, user: User, bp: BuyPlan, *, is_sourcing: bool) -> di
     """
     from ...constants import OfferStatus
     from ...models import Offer, Requirement
-    from ...services.buyplan_workflow import can_edit_plan
+    from ...services.buyplan_workflow import _owns_plan, can_edit_plan
     from ...services.stale_guard import stale_token
 
     lines = bp.lines or []
     can_edit = can_edit_plan(user, bp)
-    is_owner = bool(bp.requisition and bp.requisition.created_by == user.id)
+    is_owner = _owns_plan(user, bp)
 
     picker_groups: list[dict] = []
     if can_edit and is_sourcing and bp.requisition_id:
@@ -463,9 +462,10 @@ def _sheet_ctx(db: Session, user: User, bp: BuyPlan, *, is_sourcing: bool) -> di
             )
 
     # Readiness (draft only): informative checklist — only the SO# item gates Submit.
-    readiness = []
+    # Only the MISSING items ship to the template (the chip gates on draft status).
+    checklist = []
     if bp.status == BuyPlanStatus.DRAFT.value:
-        readiness = [
+        checklist = [
             {"key": "so", "label": "SO#", "ok": bool(bp.sales_order_number), "gates": True},
             {"key": "lines", "label": "a vendor picked", "ok": bool(lines) or not is_sourcing, "gates": False},
             {
@@ -482,8 +482,7 @@ def _sheet_ctx(db: Session, user: User, bp: BuyPlan, *, is_sourcing: bool) -> di
         "plan_stale_token": stale_token(bp),
         "picker_groups": picker_groups,
         "picker_known_line_ids": [ln.id for ln in lines],
-        "readiness": readiness,
-        "readiness_missing": [r for r in readiness if not r["ok"]],
+        "readiness_missing": [r for r in checklist if not r["ok"]],
     }
 
 
@@ -550,9 +549,9 @@ async def approvals_plan_qp_sales(
     log_field_edits(db, user=user, buy_plan_id=bp.id, edits=edits)
     db.commit()
 
-    resp = render_plan_pane(request, user, db, plan_id, lens=str(form.get("lens", "sales-orders")))
-    resp.headers["HX-Trigger"] = "awListRefresh"
-    return resp
+    from .buy_plans import _workspace_pane_response
+
+    return _workspace_pane_response(request, user, db, plan_id, form)
 
 
 @router.post("/v2/partials/approvals/plan/{plan_id:int}/header", response_class=HTMLResponse)
@@ -597,9 +596,9 @@ async def approvals_plan_header(
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
 
-    resp = render_plan_pane(request, user, db, plan_id, lens=str(form.get("lens", "sales-orders")))
-    resp.headers["HX-Trigger"] = "awListRefresh"
-    return resp
+    from .buy_plans import _workspace_pane_response
+
+    return _workspace_pane_response(request, user, db, plan_id, form)
 
 
 # ── Purchase-order line detail pane ─────────────────────────────────────
@@ -617,7 +616,7 @@ def render_po_pane(request: Request, user: User, db: Session, line_id: int) -> H
     """
     from ...constants import PO_LINE_PAYMENT_METHODS, LineIssueType
     from ...dependencies import get_buyplan_for_user, is_manager_or_admin
-    from ...services.buyplan_workflow import _can_halt, can_edit_buy_plan_lines
+    from ...services.buyplan_workflow import _can_halt, can_edit_plan
     from ...services.field_audit import manager_edited_line_ids
     from ...services.qp_workspace import qp_for_line
     from ...services.stale_guard import stale_token
@@ -683,15 +682,17 @@ def render_po_pane(request: Request, user: User, db: Session, line_id: int) -> H
             "can_request_prepay": can_request_prepayment(user, line),
             "prepay_state": prepayment_state_for_lines(db, [line.id]).get(line.id),
             # Issue relay (Deal Sheet T3b): flag/resolve moved here from the retired
-            # detail page. Resolve mirrors the service's supervisor/ops gate (_can_halt).
+            # detail page. Resolve mirrors the service's supervisor/ops gate (_can_halt);
+            # the ops-group query only runs when the answer can change the render (an
+            # issue to resolve, or a non-assigned viewer's flag affordance).
             "issue_types": [(t.value, t.value.replace("_", " ").title()) for t in LineIssueType],
-            "can_resolve_issue": _can_halt(user, db),
+            "can_resolve_issue": ((bool(line.issue_type) or line.buyer_id != user.id) and _can_halt(user, db)),
             # Manager edit-anything at verify (2.3): the pane shows the edit form with
             # the SAME predicate the /lines/{id}/edit service gate enforces (manager on
             # an editable plan, line at pending_verify), plus the edited-by marker.
             "can_manager_edit": (
                 is_manager_or_admin(user)
-                and can_edit_buy_plan_lines(user, plan)
+                and can_edit_plan(user, plan)
                 and line.status == BuyPlanLineStatus.PENDING_VERIFY.value
             ),
             "manager_edited": line.id in manager_edited_line_ids(db, plan),

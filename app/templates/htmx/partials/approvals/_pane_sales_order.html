@@ -1,20 +1,20 @@
 {#
-  approvals/_pane_sales_order.html — the SO/BP detail pane (both lenses, one anatomy).
-  Spec §8, top to bottom: header (customer · SO# copy chip · order-type badge · status)
-  → APPROVAL BLOCK ("Awaiting your approval" + Approve/Reject when pending & decidable;
-  the "Approved by X · date" stamp after) → Quality — sales section (collapsible once
-  reviewed) → lines → PO kanban (Phase 3 placeholder) → notes (Phase 2 placeholder).
-  Approve is reachable from BOTH the Sales Orders and Buy Plans tabs — same object,
-  same single approval. Decide posts the EXISTING approve route with
-  origin=approvals_workspace so the handler re-renders THIS pane (+ awListRefresh).
+  approvals/_pane_sales_order.html — the SO/BP detail pane: the Deal Sheet (both
+  lenses, one anatomy). A thin composition, top to bottom: _sheet_header.html (stage
+  track + editable SO#/CPO cells + money + readiness) → _sheet_actions.html (the
+  stage-adaptive bar: draft submit / inline decide / stamps) → Quality — sales section
+  (collapsible once reviewed, inline edit) → _sheet_lines.html (the offer picker) →
+  PO kanban → plan controls → notes thread. Approve is reachable from BOTH the Sales
+  Orders and Buy Plans tabs — same object, same single approval; every action posts
+  with origin=approvals_workspace so its handler re-renders THIS pane (+ awListRefresh).
   Receives: bp (BuyPlan), lines, lens, qp (QualityPlan|None), can_decide (bool),
             is_sourcing (bool), order_type_label, po_labels (PO_DECISION_LABELS),
-            can_edit_qp_sales (bool), qp_stale_token (str), change_edits,
+            qp_stale_token (str), change_edits, the _sheet_ctx keys (can_edit_plan,
+            is_plan_owner, plan_stale_token, picker_*, readiness_missing),
             thread_* (notes block), can_lifecycle (bool), no_approver_reason.
-  Called by: htmx/approvals_hub.py render_plan_pane (pane GET + approve re-render).
-  Depends on: HTMX, Alpine.js, Tailwind; shared copy_chip + age_chip macros.
+  Called by: htmx/approvals_hub.py render_plan_pane (pane GET + action re-renders).
+  Depends on: HTMX, Alpine.js, Tailwind.
 #}
-{% from "htmx/partials/shared/_macros.html" import copy_chip, age_chip, status_badge %}
 
 <div class="p-4 space-y-4" id="aw-pane-body">
 
@@ -58,7 +58,7 @@
       </span>
     </button>
     <div x-show="qpOpen" x-collapse class="border-t border-line-subtle px-3 py-2">
-      {% if can_edit_qp_sales %}
+      {% if can_edit_plan %}
       <div class="flex justify-end mb-1" x-show="!qpEdit">
         <button type="button" @click="qpEdit = true; qpOpen = true"
                 class="text-xs font-medium text-accent-600 cursor-pointer">Edit</button>
@@ -92,7 +92,7 @@
         </div>
       </form>
       {% endif %}
-      <div {% if can_edit_qp_sales %}x-show="!qpEdit"{% endif %}>
+      <div {% if can_edit_plan %}x-show="!qpEdit"{% endif %}>
       {% if qp %}
       {% macro yn(v) %}{% if v is true %}Yes{% elif v is false %}No{% else %}—{% endif %}{% endmacro %}
       <dl class="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-2 text-xs">

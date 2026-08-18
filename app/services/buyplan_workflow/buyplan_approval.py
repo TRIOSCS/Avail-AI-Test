@@ -237,9 +237,9 @@ def withdraw_buy_plan(plan_id: int, user: User, db: Session) -> BuyPlan:
         raise ValueError(f"Buy plan {plan_id} not found")
     if plan.status != BuyPlanStatus.PENDING.value:
         raise ValueError(f"Can only withdraw a pending plan (current: {plan.status})")
-    is_manager = user.role in (UserRole.MANAGER, UserRole.ADMIN)
-    is_owner = bool(plan.requisition and plan.requisition.created_by == user.id)
-    if not (is_manager or is_owner):
+    # Manager check first — it needs no relationship load; the owner check may lazy-load
+    # requisition when the caller's fetch didn't eager-load it.
+    if not _is_manager_or_admin(user) and not (plan.requisition and plan.requisition.created_by == user.id):
         raise PermissionError("Only the plan owner or a manager can withdraw this plan.")
 
     _cancel_open_engine_requests_for_plan(plan, user, db)

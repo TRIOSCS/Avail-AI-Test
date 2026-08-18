@@ -159,7 +159,7 @@
 
   {% elif line.status == 'pending_verify' %}
   {% if prepay_state %}<div class="mb-2">{{ prepay_state_badge(prepay_state) }}</div>
-  {% elif can_request_prepay %}<div class="mb-2">{{ request_prepayment_button(line, plan, origin='approvals_hub') }}</div>{% endif %}
+  {% elif can_request_prepay %}<div class="mb-2">{{ request_prepayment_button(line, plan, origin='approvals_workspace') }}</div>{% endif %}
   {# ── Manager view: decide ────────────────────────────────────────── #}
   {% if can_verify %}
   <div class="rounded-lg border-2 border-accent-300 bg-accent-50 p-3" x-data="{ sendBackOpen: false }">
@@ -264,7 +264,7 @@
     <span>Approved{% if line.po_verified_by %} by {{ line.po_verified_by.name }}{% endif %}{% if line.po_verified_at %} · {{ line.po_verified_at | fmtdate('%b %d, %Y') }}{% endif %}</span>
     <span class="flex items-center gap-1.5">
       {% if prepay_state %}{{ prepay_state_badge(prepay_state) }}
-      {% elif can_request_prepay %}{{ request_prepayment_button(line, plan, origin='approvals_hub') }}{% endif %}
+      {% elif can_request_prepay %}{{ request_prepayment_button(line, plan, origin='approvals_workspace') }}{% endif %}
     </span>
   </div>
   {# Late fall-down (re-homed from the retired detail page): a vendor can renege AFTER

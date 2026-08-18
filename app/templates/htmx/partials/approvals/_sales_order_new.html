@@ -28,7 +28,7 @@
     <label for="so-order-type" class="text-sm font-medium text-gray-700">Order type</label>
     <select id="so-order-type" name="order_type" class="input input-sm w-44"
             hx-get="/v2/partials/buy-plans/sales-orders/new"
-            hx-include="this" hx-vals='{"embed": "{{ embed }}"}'
+            hx-vals='{"embed": "{{ embed }}"}'
             hx-target="#so-origination" hx-swap="outerHTML" hx-trigger="change">
       {% for val, label in order_type_choices %}
       <option value="{{ val }}" {% if val == order_type %}selected{% endif %}>{{ label }}</option>

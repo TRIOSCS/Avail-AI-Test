@@ -439,8 +439,8 @@ def test_confirm_po_bad_ship_date(client, buy_plan):
     with patch("app.services.buyplan_workflow.confirm_po") as mock_confirm:
         with patch("app.services.buyplan_notifications.run_notify_bg", new=AsyncMock()):
             with patch(
-                "app.routers.htmx.buy_plans.buy_plan_detail_partial",
-                new=AsyncMock(return_value=_ok_html()),
+                "app.routers.htmx.approvals_hub.render_po_pane",
+                return_value=_ok_html(),
             ):
                 resp = client.post(
                     f"/v2/partials/buy-plans/{buy_plan.id}/lines/1/confirm-po",
@@ -512,8 +512,8 @@ def test_verify_po_completion_triggers_notify(po_approver_client, buy_plan):
     with patch("app.services.buyplan_workflow.verify_po", return_value=completed_line):
         with patch("app.services.buyplan_notifications.run_notify_bg", new=AsyncMock()) as mock_notify:
             with patch(
-                "app.routers.htmx.buy_plans.buy_plan_detail_partial",
-                new=AsyncMock(return_value=_ok_html()),
+                "app.routers.htmx.approvals_hub.render_po_pane",
+                return_value=_ok_html(),
             ):
                 resp = po_approver_client.post(
                     f"/v2/partials/buy-plans/{buy_plan.id}/lines/1/verify-po",
@@ -531,7 +531,7 @@ def test_verify_po_stale_my_queue_origin_falls_through_to_detail(po_approver_cli
             with patch("app.services.buyplan_notifications.run_notify_bg", new=AsyncMock()):
                 pane_mock = MagicMock(return_value=_ok_html())
                 with patch(
-                    "app.routers.htmx.approvals_hub.render_plan_pane",
+                    "app.routers.htmx.approvals_hub.render_po_pane",
                     new=pane_mock,
                 ):
                     resp = po_approver_client.post(

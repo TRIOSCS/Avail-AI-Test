@@ -54,8 +54,19 @@ _TRUTHY = {"true", "on", "1", "yes"}
 
 
 def _prepayment_toast(response: HTMLResponse, message: str, kind: str = "success") -> None:
-    """Attach a showToast HX-Trigger so the Alpine $store.toast surfaces feedback."""
-    response.headers["HX-Trigger"] = json.dumps({"showToast": {"message": message, "type": kind}})
+    """Attach a showToast HX-Trigger so the Alpine $store.toast surfaces feedback.
+
+    MERGES with any HX-Trigger already on the response (bare event name or JSON dict)
+    instead of clobbering it — the create route sets awListRefresh before toasting.
+    """
+    trigger: dict = {"showToast": {"message": message, "type": kind}}
+    existing = response.headers.get("HX-Trigger")
+    if existing:
+        try:
+            trigger.update({k: v for k, v in json.loads(existing).items() if k != "showToast"})
+        except ValueError:
+            trigger[existing] = True
+    response.headers["HX-Trigger"] = json.dumps(trigger)
 
 
 def _cod_guard_response(message: str) -> HTMLResponse:
@@ -211,6 +222,12 @@ async def prepayment_request_create(
         from .htmx.approvals_hub import render_tab_body
 
         resp = render_tab_body(request, current_user, db, "po-approval", hub_scope)
+    elif origin == "approvals_workspace":
+        # The button's home since the Deal Sheet: the workspace PO-line pane (#aw-pane).
+        from .htmx.approvals_hub import render_po_pane
+
+        resp = render_po_pane(request, current_user, db, buy_plan_line_id)
+        resp.headers["HX-Trigger"] = "awListRefresh"
     else:
         # Deal Sheet T3: the legacy detail page is retired — the plan's pane is the
         # one render surface.
