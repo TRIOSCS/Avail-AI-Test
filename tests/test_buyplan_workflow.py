@@ -20,11 +20,10 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.constants import BuyPlanLineStatus, BuyPlanStatus, SOVerificationStatus
-from app.models import Offer, Quote, Requirement, Requisition, User
+from app.models import Offer, Quote, Requisition, User
 from app.models.buy_plan import BuyPlan, BuyPlanLine, VerificationGroupMember
 from app.services.buyplan_workflow import (
     RESUBMITTABLE_STATUSES,
-    _apply_line_overrides,
     _generate_buyer_tasks,
     _is_stock_sale,
     _recalculate_financials,
@@ -39,7 +38,6 @@ from app.services.buyplan_workflow import (
     plan_needs_approver_reason,
     reset_buy_plan_to_draft,
     resolve_line_issue,
-    resubmit_buy_plan,
     submit_buy_plan,
     verify_po,
     verify_po_sent,
@@ -195,24 +193,6 @@ class TestSubmitBuyPlan:
         with pytest.raises(ValueError, match="Can only submit draft"):
             submit_buy_plan(plan.id, "SO-X", test_user, db_session)
 
-    def test_submit_with_line_edits(
-        self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition, test_offer: Offer
-    ):
-        """Submit with line edits applies them."""
-        plan = _make_plan(db_session, test_user, test_quote, test_requisition, total_cost=50.00)
-        req = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
-        _make_line(db_session, plan, requirement_id=req.id)
-        db_session.refresh(plan)
-
-        edits = [{"requirement_id": req.id, "offer_id": test_offer.id, "quantity": 500}]
-
-        with patch("app.services.buyplan_workflow._generate_buyer_tasks"):
-            with patch("app.services.buyplan_workflow.buyplan_approval.assign_buyer", return_value=(test_user, "test")):
-                with patch("app.services.buyplan_workflow.buyplan_approval.score_offer", return_value=85.0):
-                    result = submit_buy_plan(plan.id, "SO-005", test_user, db_session, line_edits=edits)
-
-        assert result.status == BuyPlanStatus.PENDING.value
-
 
 # ── Approve Buy Plan ─────────────────────────────────────────────────
 
@@ -357,28 +337,6 @@ class TestApproveBuyPlan:
             .one()
         )
         assert row.user_id == manager_user.id
-
-    def test_approve_with_line_overrides(
-        self,
-        db_session: Session,
-        manager_user: User,
-        test_user: User,
-        test_quote: Quote,
-        test_requisition: Requisition,
-        test_offer: Offer,
-    ):
-        """An approver can approve with line overrides."""
-        _grant_approver(db_session, manager_user)
-        plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.PENDING.value)
-        line = _make_line(db_session, plan, unit_sell=3.00)
-        db_session.refresh(plan)
-
-        overrides = [{"line_id": line.id, "offer_id": test_offer.id, "quantity": 200, "manager_note": "Swap vendor"}]
-
-        with patch("app.services.buyplan_workflow.buyplan_approval._generate_buyer_tasks"):
-            result = approve_buy_plan(plan.id, "approve", manager_user, db_session, line_overrides=overrides)
-
-        assert result.status == BuyPlanStatus.ACTIVE.value
 
     def test_approve_not_found(self, db_session: Session, manager_user: User):
         _grant_approver(db_session, manager_user)
@@ -822,7 +780,8 @@ class TestCheckCompletion:
 
 
 class TestResetAndResubmit:
-    """Tests for reset_buy_plan_to_draft() and resubmit_buy_plan()."""
+    """Tests for reset_buy_plan_to_draft() + the submit path a reset plan re-enters (the
+    dedicated resubmit_buy_plan service was dead code — submit IS resubmit)."""
 
     def test_reset_halted_to_draft(
         self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
@@ -863,7 +822,7 @@ class TestResetAndResubmit:
         _make_line(db_session, plan)
         db_session.refresh(plan)
 
-        result = resubmit_buy_plan(plan.id, "SO-RESUB", test_user, db_session, customer_po_number="PO-R1")
+        result = submit_buy_plan(plan.id, "SO-RESUB", test_user, db_session, customer_po_number="PO-R1")
 
         assert result.status == BuyPlanStatus.PENDING.value
         assert result.auto_approved is not True
@@ -877,7 +836,7 @@ class TestResetAndResubmit:
         _make_line(db_session, plan)
         db_session.refresh(plan)
 
-        result = resubmit_buy_plan(plan.id, "SO-RESUB2", test_user, db_session)
+        result = submit_buy_plan(plan.id, "SO-RESUB2", test_user, db_session)
 
         assert result.status == BuyPlanStatus.PENDING.value
 
@@ -885,12 +844,12 @@ class TestResetAndResubmit:
         self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
     ):
         plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.ACTIVE.value)
-        with pytest.raises(ValueError, match="Can only resubmit draft"):
-            resubmit_buy_plan(plan.id, "SO-X", test_user, db_session)
+        with pytest.raises(ValueError, match="Can only submit draft"):
+            submit_buy_plan(plan.id, "SO-X", test_user, db_session)
 
     def test_resubmit_not_found(self, db_session: Session, test_user: User):
         with pytest.raises(ValueError, match="not found"):
-            resubmit_buy_plan(9999, "SO-X", test_user, db_session)
+            submit_buy_plan(9999, "SO-X", test_user, db_session)
 
     def test_resubmittable_statuses_constant(self):
         assert BuyPlanStatus.HALTED.value in RESUBMITTABLE_STATUSES
@@ -1011,30 +970,6 @@ class TestHelpers:
         ):
             # Should not raise
             _generate_buyer_tasks(plan, db_session)
-
-    def test_apply_line_overrides(
-        self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition, test_offer: Offer
-    ):
-        plan = _make_plan(db_session, test_user, test_quote, test_requisition)
-        line = _make_line(db_session, plan, unit_sell=3.00)
-        db_session.refresh(plan)
-
-        _apply_line_overrides(
-            plan, [{"line_id": line.id, "offer_id": test_offer.id, "quantity": 200, "manager_note": "Swap"}], db_session
-        )
-
-        assert line.offer_id == test_offer.id
-        assert line.quantity == 200
-        assert line.manager_note == "Swap"
-
-    def test_apply_line_overrides_missing_line(
-        self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
-    ):
-        """Override with nonexistent line_id is silently skipped."""
-        plan = _make_plan(db_session, test_user, test_quote, test_requisition)
-        db_session.refresh(plan)
-
-        _apply_line_overrides(plan, [{"line_id": 9999, "offer_id": 1}], db_session)
 
 
 # ── Favoritism Detection ─────────────────────────────────────────────

@@ -188,22 +188,18 @@ def apply_qp_purchasing(
 
 
 def can_edit_qp_sales(user: User, plan: BuyPlan) -> bool:
-    """Whether *user* may edit the plan's QP-sales answers NOW (spec §7 matrix).
+    """Whether *user* may edit the plan's QP-sales answers NOW.
 
-    draft → the owning salesperson OR a manager/admin; pending → MANAGER/ADMIN ONLY
-    (sales keeps notes while pending, not fields); everything else → locked (active+
-    header is locked; line changes go through the PO stage). Enforced server-side by the
-    qp-sales route — the pane hides the editor with the SAME predicate.
+    Deal Sheet promotion (2026-08-18, owner-approved): ONE role×status matrix for
+    lines, header fields, and QP-sales alike — delegates to
+    :func:`buyplan_workflow.can_edit_plan` (draft/pending → owner or manager;
+    active/inbound/halted → manager only; terminal locked). Deliberate shifts vs
+    the old §7 wording: the owning salesperson REGAINS QP-sales editing at
+    pending, and managers may amend QP-sales on an active plan (audited).
     """
-    from ..constants import BuyPlanStatus, UserRole
+    from .buyplan_workflow import can_edit_plan
 
-    is_manager = user.role in (UserRole.MANAGER, UserRole.ADMIN)
-    if plan.status == BuyPlanStatus.DRAFT.value:
-        req = plan.requisition
-        return is_manager or bool(req and req.created_by == user.id)
-    if plan.status == BuyPlanStatus.PENDING.value:
-        return is_manager
-    return False
+    return can_edit_plan(user, plan)
 
 
 def qp_sales_row(db: Session, plan: BuyPlan) -> QualityPlan | None:

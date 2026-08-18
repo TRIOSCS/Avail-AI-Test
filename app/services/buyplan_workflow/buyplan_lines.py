@@ -356,11 +356,14 @@ def _owns_plan(user: User, plan: BuyPlan) -> bool:
     return bool(req and req.created_by == user.id)
 
 
-def can_edit_buy_plan_lines(user: User, plan: BuyPlan) -> bool:
-    """Whether *user* may add/remove/edit *plan*'s lines given its lifecycle status.
+def can_edit_plan(user: User, plan: BuyPlan) -> bool:
+    """THE plan-edit predicate (Deal Sheet): one role×status matrix for lines, header
+    fields (SO#/customer PO#/notes), and the QP-sales section alike.
 
-    See the role×status matrix above. Enforced server-side (never UI-only) by
-    ``_ensure_can_edit_lines`` in every mutating endpoint.
+    draft/pending → the plan owner (sales/trader) or a manager; active/inbound/ halted →
+    manager/admin only; completed/cancelled → locked. Enforced server-side (never UI-
+    only) by every mutating endpoint; the pane shows/hides editors with the SAME
+    predicate.
     """
     status = plan.status
     if status in _LOCKED_EDIT_STATUSES:
@@ -369,6 +372,10 @@ def can_edit_buy_plan_lines(user: User, plan: BuyPlan) -> bool:
         return _is_manager_or_admin(user)
     # draft / pending — pre-approval: the plan owner (sales/trader) or a manager.
     return _is_manager_or_admin(user) or _owns_plan(user, plan)
+
+
+# Historical name — line mutators and templates predate the Deal Sheet promotion.
+can_edit_buy_plan_lines = can_edit_plan
 
 
 def _ensure_can_edit_lines(user: User, plan: BuyPlan) -> None:
@@ -1013,26 +1020,66 @@ def remove_buy_plan_line(plan_id: int, line_id: int, user: User, db: Session) ->
 # ── Editing: Sales Order number (epic J) ──────────────────────────────
 
 
-def set_sales_order_number(plan_id: int, sales_order_number: str | None, user: User, db: Session) -> BuyPlan:
-    """Set/clear the active Sales Order number on a non-terminal plan.
+# set_plan_header_fields reuses the module's _UNSET sentinel (defined above for the
+# line editors) — a second `object()` here would REBIND the global and break every
+# function that captured the original as a parameter default.
 
-    The salesperson (or a manager) enters the real order number once the deal is placed.
-    Only editable while the plan is non-terminal (completed/cancelled are locked). The
-    owner/manager gate is enforced by the router; caller commits.
+# The three plan-header fields the Deal Sheet edits in place. Money/lines have their
+# own writers; order_type is structural (sourcing-vs-lite) and never header-editable.
+_HEADER_FIELDS = ("sales_order_number", "customer_po_number", "salesperson_notes")
+
+
+def set_plan_header_fields(
+    plan_id: int,
+    user: User,
+    db: Session,
+    *,
+    sales_order_number=_UNSET,
+    customer_po_number=_UNSET,
+    salesperson_notes=_UNSET,
+) -> BuyPlan:
+    """THE writer for the plan-header fields (Deal Sheet cells + submit delegation).
+
+    Sparse key-presence semantics: only kwargs actually passed are touched — an
+    omitted field is never written (this is what structurally kills the old
+    "blank resubmit clears customer PO / notes" clobber). A PROVIDED blank/None
+    is an explicit clear. One field-audit row covers the whole save (empty diff
+    writes nothing). Gate: :func:`can_edit_plan` (PermissionError → 403).
+    Caller commits.
     """
     plan = db.get(BuyPlan, plan_id)
     if not plan:
         raise ValueError(f"Buy plan {plan_id} not found")
-    if plan.status in _LOCKED_EDIT_STATUSES:
-        raise ValueError(f"Cannot edit the Sales Order number on a {plan.status} plan.")
+    if not can_edit_plan(user, plan):
+        raise PermissionError("You cannot edit this plan's header fields in its current status.")
 
-    new_value = (sales_order_number or "").strip() or None
-    # Field-audit (2.1): diff BEFORE the assignment; a resend of the current SO#
-    # writes no row (log_field_edits no-ops on an empty diff).
-    edits = diff_fields(plan, {"sales_order_number": new_value})
-    plan.sales_order_number = new_value
+    provided = {
+        "sales_order_number": sales_order_number,
+        "customer_po_number": customer_po_number,
+        "salesperson_notes": salesperson_notes,
+    }
+    updates = {
+        field: ((str(value).strip() or None) if value is not None else None)
+        for field, value in provided.items()
+        if value is not _UNSET
+    }
+    if not updates:
+        return plan
+
+    # Field-audit (2.1): diff BEFORE assignment; a resend of current values writes
+    # no row (log_field_edits no-ops on an empty diff).
+    edits = diff_fields(plan, updates)
+    for field, value in updates.items():
+        setattr(plan, field, value)
     plan.updated_at = datetime.now(UTC)
     log_field_edits(db, user=user, buy_plan_id=plan.id, edits=edits)
     db.flush()
-    logger.info("Buy plan {} SO number set to {!r} by {}", plan_id, plan.sales_order_number, user.email)
+    logger.info("Buy plan {} header fields {} set by {}", plan_id, sorted(updates), user.email)
     return plan
+
+
+def set_sales_order_number(plan_id: int, sales_order_number: str | None, user: User, db: Session) -> BuyPlan:
+    """Set/clear the Sales Order number — thin delegate to
+    :func:`set_plan_header_fields` (kept for the legacy /so-number route until the Deal
+    Sheet retires it)."""
+    return set_plan_header_fields(plan_id, user, db, sales_order_number=sales_order_number)

@@ -593,14 +593,14 @@ async def buy_plan_submit_partial(
     get_buyplan_for_user(db, user, plan_id)
 
     form = await request.form()
-    so = form.get("sales_order_number", "").strip()
-    if not so:
-        raise HTTPException(400, "Sales Order # is required")
-
+    # Deal Sheet contract: the header fields live on the record; form values are
+    # conveniences forwarded only when non-blank (a blank never clears — the old
+    # unconditional pass-through clobbered customer PO / notes on resubmit). The
+    # service validates that an SO# exists on the record after delegation.
     try:
         plan = submit_buy_plan(
             plan_id,
-            so,
+            form.get("sales_order_number") or None,
             user,
             db,
             customer_po_number=form.get("customer_po_number") or None,
@@ -1343,6 +1343,8 @@ async def buy_plan_set_so_partial(
     try:
         set_sales_order_number(plan_id, form.get("sales_order_number"), user, db)
         db.commit()
+    except PermissionError as e:
+        raise HTTPException(403, str(e)) from e
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
 

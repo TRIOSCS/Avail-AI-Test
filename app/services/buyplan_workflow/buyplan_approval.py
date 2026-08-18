@@ -1,8 +1,8 @@
 """Buy Plan — Approval/rejection + plan lifecycle: submit, approve, halt, resume, reset,
-cancel, resubmit, and auto-completion.
+cancel, and auto-completion.
 
 Split from the former monolithic `buyplan_workflow.py` (P4.3) along the "approval/
-rejection lifecycle" + "plan lifecycle (reset/cancel/resubmit)" seams — kept as one
+rejection lifecycle" + "plan lifecycle (reset/cancel)" seams — kept as one
 module (matching `docs/CODE_AUDIT_AND_HARDENING_PLAN.md`'s `buyplan_approval` name)
 because every state transition here shares the same engine-request/prepayment
 teardown helpers (``_cancel_open_engine_requests_for_plan`` /
@@ -26,7 +26,6 @@ from ...config import settings
 from ...constants import UserRole
 from ...models import (
     Offer,
-    Requirement,
     User,
 )
 from ...models.buy_plan import (
@@ -37,7 +36,6 @@ from ...models.buy_plan import (
     SOVerificationStatus,
     VerificationGroupMember,
 )
-from ..buyplan_scoring import assign_buyer, score_offer
 from .buyplan_po import _line_amount
 from .buyplan_reports import generate_case_report
 from .money import CENT, pct, to_money
@@ -47,20 +45,29 @@ from .money import CENT, pct, to_money
 
 def submit_buy_plan(
     plan_id: int,
-    sales_order_number: str,
+    sales_order_number: str | None,
     user: User,
     db: Session,
     *,
     customer_po_number: str | None = None,
-    line_edits: list[dict] | None = None,
     salesperson_notes: str | None = None,
 ) -> BuyPlan:
-    """Submit a draft buy plan with SO# and optional line edits.
+    """Submit a draft buy plan for approval.
+
+    Deal Sheet contract (2026-08-18): submit is a thin ACTION — the header
+    fields live on the record (written by ``set_plan_header_fields`` as the
+    user types), and submit only validates + transitions. The three field
+    params are conveniences that DELEGATE to the header writer when non-blank;
+    a ``None``/blank param never touches the stored value (the old
+    unconditional assignment cleared customer PO / notes on every resubmit).
+    Requires ``plan.sales_order_number`` to be present after delegation.
 
     Flow: draft → pending, always. Every plan routes to the single manager
     approval regardless of value — no auto-approve (frozen scope; the old
     sub-$5K rule was removed, ``auto_approved`` column is vestigial).
     """
+    from .buyplan_lines import set_plan_header_fields
+
     # Row lock (QC 2026-08-13): a separate id-only SELECT ... FOR UPDATE serializes
     # concurrent submits so a double-submit can't both pass the DRAFT gate and open TWO
     # REQUESTED approval rows (the second orphan would then be undecidable). FOR UPDATE
@@ -74,19 +81,27 @@ def submit_buy_plan(
     if plan.status != BuyPlanStatus.DRAFT.value:
         raise ValueError(f"Can only submit draft plans (current: {plan.status})")
 
-    plan.sales_order_number = sales_order_number
-    plan.customer_po_number = customer_po_number
+    header_updates = {
+        field: value
+        for field, value in (
+            ("sales_order_number", sales_order_number),
+            ("customer_po_number", customer_po_number),
+            ("salesperson_notes", salesperson_notes),
+        )
+        if value is not None and str(value).strip()
+    }
+    if header_updates:
+        set_plan_header_fields(plan_id, user, db, **header_updates)
+    if not plan.sales_order_number:
+        raise ValueError("Add the Sales Order # first — it is required to submit.")
+
     plan.submitted_by_id = user.id
     plan.submitted_at = datetime.now(UTC)
-    plan.salesperson_notes = salesperson_notes
     # Clear any prior approval decision (a previously-rejected plan re-enters the queue
     # clean — no stale approved_at/approval_notes carrying the old rejection forward).
     plan.approved_by_id = None
     plan.approved_at = None
     plan.approval_notes = None
-
-    if line_edits:
-        _apply_line_edits(plan, line_edits, db)
 
     plan.is_stock_sale = _is_stock_sale(plan, db)
 
@@ -110,13 +125,13 @@ def approve_buy_plan(
     user: User,
     db: Session,
     *,
-    line_overrides: list[dict] | None = None,
     notes: str | None = None,
 ) -> BuyPlan:
     """Manager approves or rejects a pending buy plan.
 
-    Approve → active (lines go to buyers). Reject → draft (back to salesperson). Line
-    overrides let manager swap vendors on specific lines.
+    Approve → active (lines go to buyers). Reject → draft (back to salesperson). Manager
+    amendments happen on the Deal Sheet's live editors before deciding — there is no
+    approval-time line-override payload.
     """
     plan = db.get(BuyPlan, plan_id, options=[joinedload(BuyPlan.lines)])
     if not plan:
@@ -133,7 +148,7 @@ def approve_buy_plan(
         raise PermissionError("Buy-plan approval right required to approve/reject")
 
     if action == "approve":
-        _run_approve_side_effects(plan, user, db, line_overrides=line_overrides, notes=notes)
+        _run_approve_side_effects(plan, user, db, notes=notes)
     elif action == "reject":
         reason = (notes or "").strip()
         if not reason:
@@ -151,15 +166,13 @@ def _run_approve_side_effects(
     user: User,
     db: Session,
     *,
-    line_overrides: list[dict] | None = None,
     notes: str | None = None,
 ) -> None:
     """Apply the on-approve side effects to *plan* (status→ACTIVE + buyer tasks).
 
     The single arbitration point for a buy-plan approval's effects, called by BOTH the
     legacy ``approve_buy_plan`` path and the approvals-engine ``decide()`` dispatch so the
-    two paths can never drift. Optional manager ``line_overrides`` swap vendors/quantities
-    before the plan is activated. Stamps approver/decision metadata, generates the buyer
+    two paths can never drift. Stamps approver/decision metadata, generates the buyer
     'Cut PO' tasks, and writes the audit ActivityLog row. The caller owns the flush/commit.
 
     State guard FIRST: only a PENDING plan may be approved. This is the single point that
@@ -172,8 +185,6 @@ def _run_approve_side_effects(
     if plan.status != BuyPlanStatus.PENDING.value:
         raise ValueError(f"Can only approve a pending plan (current: {plan.status})")
     now = datetime.now(UTC)
-    if line_overrides:
-        _apply_line_overrides(plan, line_overrides, db)
     plan.status = BuyPlanStatus.ACTIVE.value
     # Phase D — one approval absorbs SO verification: the single manager approval IS the
     # SO sign-off, so stamp so_status=APPROVED here. ``check_completion``'s
@@ -689,54 +700,6 @@ def cancel_buy_plan(plan_id: int, user: User, db: Session, *, reason: str | None
     return plan
 
 
-def resubmit_buy_plan(
-    plan_id: int,
-    sales_order_number: str,
-    user: User,
-    db: Session,
-    *,
-    customer_po_number: str | None = None,
-    salesperson_notes: str | None = None,
-) -> BuyPlan:
-    """Resubmit a rejected buy plan. Resets SO verification and approval.
-
-    Used after manager rejection (plan back in draft).
-    """
-    plan = db.get(BuyPlan, plan_id, options=[joinedload(BuyPlan.lines)])
-    if not plan:
-        raise ValueError(f"Buy plan {plan_id} not found")
-    if plan.status != BuyPlanStatus.DRAFT.value:
-        raise ValueError(f"Can only resubmit draft plans (current: {plan.status})")
-
-    # Reset SO verification
-    plan.so_status = SOVerificationStatus.PENDING.value
-    plan.so_verified_by_id = None
-    plan.so_verified_at = None
-    plan.so_rejection_note = None
-
-    # Reset approval
-    plan.auto_approved = False
-    plan.approved_by_id = None
-    plan.approved_at = None
-    plan.approval_notes = None
-
-    # Update references
-    plan.sales_order_number = sales_order_number
-    plan.customer_po_number = customer_po_number
-    plan.submitted_by_id = user.id
-    plan.submitted_at = datetime.now(UTC)
-    plan.salesperson_notes = salesperson_notes
-
-    # Every plan goes to the one manager approval — no auto-approve (frozen scope).
-    plan.status = BuyPlanStatus.PENDING.value
-    # Re-open the engine gate. Cancels the stale request from the prior submission so
-    # exactly ONE REQUESTED request exists for this plan (RISK 2).
-    _open_engine_request_for_plan(plan, user, db)
-
-    db.flush()
-    return plan
-
-
 # ── Helpers: Buyer Task Generation ────────────────────────────────────
 
 
@@ -773,81 +736,6 @@ def _generate_buyer_tasks(plan: BuyPlan, db: Session) -> None:
 
 
 # ── Helpers: Line Edits ──────────────────────────────────────────────
-
-
-def _apply_line_edits(plan: BuyPlan, edits: list[dict], db: Session):
-    """Replace AI-generated lines with salesperson's vendor swaps/splits."""
-    edits_by_req: dict[int, list[dict]] = {}
-    for edit in edits:
-        edits_by_req.setdefault(edit["requirement_id"], []).append(edit)
-
-    affected = set(edits_by_req.keys())
-    to_remove = [ln for ln in plan.lines if ln.requirement_id in affected]
-    for line in to_remove:
-        plan.lines.remove(line)
-
-    for req_id, req_edits in edits_by_req.items():
-        requirement = db.get(Requirement, req_id)
-        for edit in req_edits:
-            offer = db.get(Offer, edit["offer_id"])
-            if not offer:
-                raise ValueError(f"Offer {edit['offer_id']} not found")
-
-            # Decimal end-to-end (QC money-math-float): unit_price/target_price are
-            # Numeric columns — a float round-trip here re-introduces cent drift.
-            unit_cost = offer.unit_price if offer.unit_price else None
-            unit_sell = requirement.target_price if requirement and requirement.target_price else None
-            margin_pct = None
-            if unit_sell and unit_cost and unit_sell > 0:
-                margin_pct = pct(unit_sell - unit_cost, unit_sell)
-
-            buyer, reason = assign_buyer(offer, offer.vendor_card, db)
-            ai_score = score_offer(offer, requirement, offer.vendor_card) if requirement else None
-
-            new_line = BuyPlanLine(
-                requirement_id=req_id,
-                offer_id=offer.id,
-                quantity=edit["quantity"],
-                unit_cost=unit_cost,
-                unit_sell=unit_sell,
-                margin_pct=margin_pct,
-                ai_score=ai_score,
-                buyer_id=buyer.id if buyer else None,
-                assignment_reason=reason,
-                status=BuyPlanLineStatus.AWAITING_PO.value,
-                sales_note=edit.get("sales_note"),
-            )
-            plan.lines.append(new_line)
-
-    _recalculate_financials(plan)
-
-
-def _apply_line_overrides(plan: BuyPlan, overrides: list[dict], db: Session):
-    """Apply manager's line-level overrides (vendor swap, quantity, notes)."""
-    for ovr in overrides:
-        line = next((ln for ln in plan.lines if ln.id == ovr["line_id"]), None)
-        if not line:
-            logger.warning("Override line_id {} not found in plan {}", ovr["line_id"], plan.id)
-            continue
-
-        if ovr.get("offer_id"):
-            offer = db.get(Offer, ovr["offer_id"])
-            if offer:
-                line.offer_id = offer.id
-                line.unit_cost = offer.unit_price if offer.unit_price else None
-                # to_money: unit_sell may still be an in-session float from a legacy
-                # writer — coerce exactly before Decimal arithmetic.
-                sell, cost = to_money(line.unit_sell), to_money(line.unit_cost)
-                if sell and cost and sell > 0:
-                    line.margin_pct = pct(sell - cost, sell)
-
-        if ovr.get("quantity"):
-            line.quantity = ovr["quantity"]
-
-        if ovr.get("manager_note"):
-            line.manager_note = ovr["manager_note"]
-
-    _recalculate_financials(plan)
 
 
 def _recalculate_financials(plan: BuyPlan):

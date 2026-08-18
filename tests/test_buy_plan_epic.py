@@ -301,9 +301,11 @@ def test_detail_renders_editable_line_ui_for_editor(client, db_session, manager_
 
 
 def test_set_so_number_persists(db_session, test_user, test_requisition):
+    # Deal Sheet matrix (2026-08-18): the owner's SO# edit window is draft/pending;
+    # active is manager-only. The canonical owner flow sets it at DRAFT.
     from app.services.buyplan_workflow import set_sales_order_number
 
-    plan = _plan(db_session, test_requisition, status=BuyPlanStatus.ACTIVE.value, sales_order_number=None)
+    plan = _plan(db_session, test_requisition, status=BuyPlanStatus.DRAFT.value, sales_order_number=None)
     set_sales_order_number(plan.id, "TS00190738", test_user, db_session)
     db_session.commit()
     db_session.refresh(plan)
@@ -315,22 +317,24 @@ def test_set_so_number_rejected_on_terminal(db_session, test_user, test_requisit
     from app.services.buyplan_workflow import set_sales_order_number
 
     plan = _plan(db_session, test_requisition, status=status)
-    with pytest.raises(ValueError, match="Sales Order"):
+    # Terminal statuses are gated by can_edit_plan → PermissionError (was a
+    # service ValueError before the Deal Sheet header-writer unification).
+    with pytest.raises(PermissionError, match="header fields"):
         set_sales_order_number(plan.id, "TS-1", test_user, db_session)
 
 
 def test_so_endpoint_owner_persists(client, db_session, test_user, test_requisition):
-    plan = _plan(db_session, test_requisition, status=BuyPlanStatus.ACTIVE.value, sales_order_number=None)
+    plan = _plan(db_session, test_requisition, status=BuyPlanStatus.DRAFT.value, sales_order_number=None)
     resp = client.post(f"/v2/partials/buy-plans/{plan.id}/so-number", data={"sales_order_number": "TS-999"})
     assert resp.status_code == 200
     db_session.expire_all()
     assert db_session.get(BuyPlan, plan.id).sales_order_number == "TS-999"
 
 
-def test_so_endpoint_terminal_400(client, db_session, test_requisition):
+def test_so_endpoint_terminal_403(client, db_session, test_requisition):
     plan = _plan(db_session, test_requisition, status=BuyPlanStatus.COMPLETED.value)
     resp = client.post(f"/v2/partials/buy-plans/{plan.id}/so-number", data={"sales_order_number": "TS-1"})
-    assert resp.status_code == 400
+    assert resp.status_code == 403  # can_edit_plan gate (was a 400 service error)
 
 
 def test_so_endpoint_non_owner_non_manager_403(client, db_session, sales_user, test_user):

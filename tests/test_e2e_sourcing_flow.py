@@ -33,7 +33,6 @@ from app.services.buyplan_workflow import (
     check_completion,
     confirm_po,
     flag_line_issue,
-    resubmit_buy_plan,
     submit_buy_plan,
     verify_po,
 )
@@ -329,7 +328,7 @@ class TestBuyPlanFullLifecycle:
         assert plan.status == BuyPlanStatus.DRAFT.value
 
         # Resubmit
-        plan = resubmit_buy_plan(plan.id, "SO-003-R2", ctx["sales"], db_session)
+        plan = submit_buy_plan(plan.id, "SO-003-R2", ctx["sales"], db_session)
         assert plan.status == BuyPlanStatus.PENDING.value
 
         # Approve

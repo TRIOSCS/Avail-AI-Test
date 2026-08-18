@@ -449,6 +449,53 @@ async def approvals_plan_qp_sales(
     return resp
 
 
+@router.post("/v2/partials/approvals/plan/{plan_id:int}/header", response_class=HTMLResponse)
+async def approvals_plan_header(
+    request: Request,
+    plan_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Save Deal-Sheet header fields (SO# / customer PO# / salesperson notes).
+
+    THE header writer: the sheet's cells post ONE field at a time; sparse
+    key-presence semantics in ``set_plan_header_fields`` mean an absent field is
+    never touched and a provided blank is an explicit clear. Gate =
+    ``can_edit_plan`` (owner draft/pending; manager through active; terminal
+    locked → 403). Stale-guarded on the plan's ``updated_at`` token; one
+    field-audit row per save. Re-renders the pane + refreshes the work list.
+    """
+    from ...dependencies import get_buyplan_for_user
+    from ...services.buyplan_workflow import set_plan_header_fields
+    from ...services.stale_guard import StaleEditError, ensure_not_stale, stale_conflict_response
+
+    plan = get_buyplan_for_user(db, user, plan_id, options=[joinedload(BuyPlan.requisition)])
+    form = await request.form()
+    try:
+        ensure_not_stale(plan, form.get("expected_updated_at"))
+    except StaleEditError:
+        return stale_conflict_response()
+
+    updates = {
+        field: str(form[field])
+        for field in ("sales_order_number", "customer_po_number", "salesperson_notes")
+        if field in form
+    }
+    if not updates:
+        raise HTTPException(400, "No header field provided.")
+    try:
+        set_plan_header_fields(plan_id, user, db, **updates)
+        db.commit()
+    except PermissionError as e:
+        raise HTTPException(403, str(e)) from e
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+    resp = render_plan_pane(request, user, db, plan_id, lens=str(form.get("lens", "sales-orders")))
+    resp.headers["HX-Trigger"] = "awListRefresh"
+    return resp
+
+
 # ── Purchase-order line detail pane ─────────────────────────────────────
 
 

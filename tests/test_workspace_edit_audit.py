@@ -7,7 +7,8 @@ For each edit route (/so-number, /lines/add, /lines/{id}/edit, /lines/{id}/remov
     field/old/new (bulk batches every touched line into that one row);
   - a stale expected_updated_at token → 409 (HX-Reswap: none) and NO write, NO row;
   - a no-change save writes NO row.
-Plus the qp-sales permission matrix (draft → owner/manager; pending → MANAGER only).
+Plus the unified can_edit_plan matrix (draft/pending → owner or manager;
+active → manager only; terminal locked) and the Deal Sheet /header + submit contracts.
 
 Called by: pytest
 Depends on: conftest (db_session, test_user), tests.test_approvals_hub_tabs builders,
@@ -34,7 +35,7 @@ from app.constants import (
 from app.database import get_db
 from app.dependencies import require_buyplan_approver, require_buyplan_po_approver, require_user
 from app.models import ActivityLog, Offer, User
-from app.models.buy_plan import BuyPlanLine
+from app.models.buy_plan import BuyPlan, BuyPlanLine
 from app.models.quality_plan import QualityPlan
 from app.models.vendors import VendorCard
 from tests.test_approvals_hub_tabs import _line, _plan, _req_quote
@@ -410,29 +411,36 @@ class TestQpSales:
         assert qp.sales_condition == "OLD"
         assert _field_edit_rows(db_session) == []
 
-    def test_pending_plan_manager_only(self, hub_client, db_session, test_user):
-        """Spec §7: pending → MANAGER ONLY — the owning (non-manager) buyer is
-        refused."""
+    def test_pending_plan_owner_and_manager_allowed(self, hub_client, db_session, test_user):
+        """Deal Sheet matrix (2026-08-18): pending → the OWNING salesperson OR a manager
+        may edit QP-sales (the old pending-manager-only rule was deliberately widened
+        when can_edit_qp_sales was unified onto can_edit_plan)."""
         req, q, _rq = _req_quote(db_session, test_user)
         bp = _plan(db_session, req, q, status=BuyPlanStatus.PENDING.value)
         db_session.commit()
 
         r = hub_client.post(f"/v2/partials/approvals/plan/{bp.id}/qp-sales", data={"qp_sales_condition": "X"})
-        assert r.status_code == 403
+        assert r.status_code == 200  # owner allowed at pending
+
+        test_user.role = UserRole.MANAGER.value
+        db_session.commit()
+        r = hub_client.post(f"/v2/partials/approvals/plan/{bp.id}/qp-sales", data={"qp_sales_condition": "Y"})
+        assert r.status_code == 200
+
+    def test_active_plan_manager_only(self, hub_client, db_session, test_user):
+        """Deal Sheet matrix: active → manager/admin only; the owning non-manager
+        is refused (audited edits stay open to managers through active)."""
+        req, q, _rq = _req_quote(db_session, test_user)
+        bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
+        db_session.commit()
+
+        r = hub_client.post(f"/v2/partials/approvals/plan/{bp.id}/qp-sales", data={"qp_sales_condition": "X"})
+        assert r.status_code == 403  # owner (non-manager) locked at active
 
         test_user.role = UserRole.MANAGER.value
         db_session.commit()
         r = hub_client.post(f"/v2/partials/approvals/plan/{bp.id}/qp-sales", data={"qp_sales_condition": "X"})
         assert r.status_code == 200
-
-    def test_active_plan_locked_for_everyone(self, hub_client, db_session, test_user):
-        req, q, _rq = _req_quote(db_session, test_user)
-        bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
-        test_user.role = UserRole.MANAGER.value
-        db_session.commit()
-
-        r = hub_client.post(f"/v2/partials/approvals/plan/{bp.id}/qp-sales", data={"qp_sales_condition": "X"})
-        assert r.status_code == 403
 
     def test_pane_shows_editor_only_when_editable(self, hub_client, db_session, test_user):
         _req, _rq, bp, _line_ = _draft_plan_with_line(db_session, test_user)
@@ -444,3 +452,116 @@ class TestQpSales:
         db_session.commit()
         body = hub_client.get(f"/v2/partials/approvals/plan/{bp.id}/pane").text
         assert f"/v2/partials/approvals/plan/{bp.id}/qp-sales" not in body  # locked → no form
+
+
+# ── /plan/{id}/header — the Deal Sheet header writer ─────────────────────
+
+
+class TestHeaderEndpoint:
+    """POST /v2/partials/approvals/plan/{id}/header — sparse, stale-guarded, audited,
+    gated by can_edit_plan (Deal Sheet T1 contract)."""
+
+    def test_single_field_save_persists_and_audits_once(self, hub_client, db_session, test_user):
+        _req, _rq, bp, _line_ = _draft_plan_with_line(db_session, test_user)
+
+        r = hub_client.post(f"/v2/partials/approvals/plan/{bp.id}/header", data={"sales_order_number": "SO-500"})
+        assert r.status_code == 200
+        db_session.expire_all()
+        bp2 = db_session.get(BuyPlan, bp.id)
+        assert bp2.sales_order_number == "SO-500"
+        rows = _field_edit_rows(db_session)
+        assert len(rows) == 1
+        assert rows[0].details["edits"] == [{"field": "sales_order_number", "old": "", "new": "SO-500"}]
+
+    def test_sparse_semantics_absent_fields_untouched(self, hub_client, db_session, test_user):
+        _req, _rq, bp, _line_ = _draft_plan_with_line(db_session, test_user)
+        bp.customer_po_number = "CPO-1"
+        bp.salesperson_notes = "keep me"
+        db_session.commit()
+
+        r = hub_client.post(f"/v2/partials/approvals/plan/{bp.id}/header", data={"sales_order_number": "SO-501"})
+        assert r.status_code == 200
+        db_session.expire_all()
+        bp2 = db_session.get(BuyPlan, bp.id)
+        assert bp2.customer_po_number == "CPO-1"  # absent field never touched
+        assert bp2.salesperson_notes == "keep me"
+
+    def test_provided_blank_is_explicit_clear(self, hub_client, db_session, test_user):
+        _req, _rq, bp, _line_ = _draft_plan_with_line(db_session, test_user)
+        bp.customer_po_number = "CPO-2"
+        db_session.commit()
+
+        r = hub_client.post(f"/v2/partials/approvals/plan/{bp.id}/header", data={"customer_po_number": ""})
+        assert r.status_code == 200
+        db_session.expire_all()
+        assert db_session.get(BuyPlan, bp.id).customer_po_number is None
+
+    def test_stale_token_conflict_409_no_write(self, hub_client, db_session, test_user):
+        _req, _rq, bp, _line_ = _draft_plan_with_line(db_session, test_user)
+
+        r = hub_client.post(
+            f"/v2/partials/approvals/plan/{bp.id}/header",
+            data={"sales_order_number": "SO-503", "expected_updated_at": "2000-01-01T00:00:00+00:00"},
+        )
+        assert r.status_code == 409
+        db_session.expire_all()
+        assert db_session.get(BuyPlan, bp.id).sales_order_number is None
+
+    def test_active_plan_owner_403_manager_200(self, hub_client, db_session, test_user):
+        req, q, _rq = _req_quote(db_session, test_user)
+        bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
+        db_session.commit()
+
+        r = hub_client.post(f"/v2/partials/approvals/plan/{bp.id}/header", data={"sales_order_number": "SO-504"})
+        assert r.status_code == 403  # owner (non-manager) locked at active
+
+        test_user.role = UserRole.MANAGER.value
+        db_session.commit()
+        r = hub_client.post(f"/v2/partials/approvals/plan/{bp.id}/header", data={"sales_order_number": "SO-504"})
+        assert r.status_code == 200
+
+    def test_no_field_provided_400(self, hub_client, db_session, test_user):
+        _req, _rq, bp, _line_ = _draft_plan_with_line(db_session, test_user)
+        r = hub_client.post(f"/v2/partials/approvals/plan/{bp.id}/header", data={"lens": "sales-orders"})
+        assert r.status_code == 400
+
+
+class TestSubmitContract:
+    """Deal Sheet submit: thin action validating the RECORD; blank never clobbers."""
+
+    def test_submit_reads_so_from_record(self, hub_client, db_session, test_user):
+        _req, _rq, bp, _line_ = _draft_plan_with_line(db_session, test_user)
+        bp.sales_order_number = "SO-REC-1"
+        db_session.commit()
+
+        # No form fields at all — the record already carries the SO#.
+        r = hub_client.post(f"/v2/partials/buy-plans/{bp.id}/submit", data={})
+        assert r.status_code == 200
+        db_session.expire_all()
+        assert db_session.get(BuyPlan, bp.id).status == BuyPlanStatus.PENDING.value
+
+    def test_submit_without_so_anywhere_400(self, hub_client, db_session, test_user):
+        _req, _rq, bp, _line_ = _draft_plan_with_line(db_session, test_user)
+        r = hub_client.post(f"/v2/partials/buy-plans/{bp.id}/submit", data={})
+        assert r.status_code == 400
+        assert "Sales Order #" in r.text
+
+    def test_blank_resubmit_never_clobbers(self, hub_client, db_session, test_user):
+        """Regression: the old submit assigned customer_po/notes unconditionally,
+        clearing them on any resubmit that left the modal fields blank."""
+        _req, _rq, bp, _line_ = _draft_plan_with_line(db_session, test_user)
+        bp.sales_order_number = "SO-REC-2"
+        bp.customer_po_number = "CPO-KEEP"
+        bp.salesperson_notes = "notes-keep"
+        db_session.commit()
+
+        r = hub_client.post(
+            f"/v2/partials/buy-plans/{bp.id}/submit",
+            data={"sales_order_number": "", "customer_po_number": "", "salesperson_notes": ""},
+        )
+        assert r.status_code == 200
+        db_session.expire_all()
+        bp2 = db_session.get(BuyPlan, bp.id)
+        assert bp2.customer_po_number == "CPO-KEEP"
+        assert bp2.salesperson_notes == "notes-keep"
+        assert bp2.sales_order_number == "SO-REC-2"
