@@ -1,0 +1,126 @@
+{#
+  approvals/_sheet_lines.html — the Deal Sheet's ONE lines component: the offer
+  picker. Offers grouped by part; check = buy from this vendor, qty input to the
+  right, sell per part group, live fill + margin. Sales at compose/draft and the
+  manager at pending get the SAME live view; at active/inbound unchecked
+  alternatives collapse behind "show other offers" and PO-cut rows lock
+  vendor/qty (sell stays live). Dirty edits surface a Save/Discard bar posting
+  ONE atomic /lines/bulk payload. Read-only viewers get the dense picked-lines
+  table only.
+  Receives: bp, lines, lens, can_edit_plan, picker_groups, picker_known_line_ids,
+            plan_stale_token, po_labels.
+  Called by: _pane_sales_order.html. Depends on: Alpine (offerPicker in
+            htmx_app.js), HTMX, Tailwind; shared copy_chip macro.
+#}
+{% from "htmx/partials/shared/_macros.html" import copy_chip %}
+
+<div class="rounded-lg border border-line-base bg-white overflow-hidden" id="sheet-lines">
+  <div class="px-3 py-2 text-sm font-semibold text-gray-800 border-b border-line-subtle flex items-center justify-between">
+    <span>Lines <span class="font-normal text-gray-400">({{ lines | length }})</span></span>
+  </div>
+
+  {% if can_edit_plan and picker_groups %}
+  {# ── The offer picker (live editor) ── #}
+  {% set _collapse_unchecked = bp.status in ('active', 'inbound', 'halted') %}
+  <div x-data='offerPicker({{ bp.id }}, {{ picker_groups | tojson }}, {{ picker_known_line_ids | tojson }}, { lens: {{ lens | tojson }}, staleToken: {{ plan_stale_token | tojson }}, editable: true })'
+       class="divide-y divide-line-subtle">
+    <template x-for="g in groups" :key="g.requirement_id">
+      <div class="px-3 py-2" x-data="{ showAll: {{ 'false' if _collapse_unchecked else 'true' }} }">
+        {# Part group header: MPN · need · sell input · fill indicator #}
+        <div class="flex items-center gap-2 flex-wrap text-xs">
+          <span class="font-mono font-semibold text-gray-900" x-text="g.mpn"></span>
+          <span class="text-gray-400" x-show="g.need">need <span class="tabular-nums" x-text="(g.need || 0).toLocaleString()"></span></span>
+          <label class="inline-flex items-center gap-1 text-gray-500">
+            sell $<input type="text" inputmode="decimal" x-model="g.sell"
+                         class="input input-sm !py-0.5 w-20 text-right tabular-nums">
+          </label>
+          <span class="text-gray-400" x-show="groupMargin(g) !== null">
+            margin <span class="tabular-nums font-medium"
+                         :class="groupMargin(g) < 10 ? 'text-amber-600' : 'text-gray-700'"
+                         x-text="groupMargin(g) + '%'"></span>
+          </span>
+          <span class="ml-auto tabular-nums text-[11px]"
+                :class="g.need && filled(g) >= g.need ? 'text-emerald-600' : 'text-gray-400'"
+                x-show="g.need">filled <span x-text="filled(g).toLocaleString()"></span>/<span x-text="(g.need || 0).toLocaleString()"></span></span>
+        </div>
+        {# Offer rows: checkbox · vendor · cost · condition · avail · qty input #}
+        <div class="mt-1.5 space-y-1">
+          <template x-for="o in g.offers" :key="o.offer_id">
+            <div class="flex items-center gap-2 text-xs" x-show="showAll || o.checked">
+              <input type="checkbox" :checked="o.checked" :disabled="o.locked"
+                     @click.prevent="toggle(o, g)"
+                     class="rounded border-gray-300" style="accent-color:var(--accent)">
+              <button type="button" class="min-w-0 truncate text-left"
+                      :class="o.checked ? 'text-gray-900 font-medium' : 'text-gray-500'"
+                      @click="toggle(o, g)">
+                <span x-text="o.vendor"></span>
+                <span x-show="!o.active" class="text-amber-600"> (no longer active)</span>
+              </button>
+              <span x-show="o.best" class="inline-flex items-center rounded border border-emerald-200 bg-emerald-50 px-1 text-[10px] font-medium text-emerald-700">best cost</span>
+              <span class="tabular-nums text-gray-700" x-text="o.cost !== null ? '$' + o.cost.toFixed(4) : '—'"></span>
+              <span class="text-gray-400" x-text="o.condition"></span>
+              <span class="text-gray-400 tabular-nums" x-show="o.avail">avail <span x-text="(o.avail || 0).toLocaleString()"></span></span>
+              <span x-show="o.locked" class="inline-flex items-center rounded border border-amber-200 bg-amber-50 px-1 text-[10px] font-medium text-amber-700" title="A PO is cut on this line — vendor/qty locked; sell stays editable">PO cut</span>
+              <span class="ml-auto flex items-center gap-1">
+                qty &rarr;
+                <input type="text" inputmode="numeric" x-model="o.qty"
+                       :disabled="!o.checked || o.locked"
+                       class="input input-sm !py-0.5 w-20 text-right tabular-nums disabled:bg-gray-50 disabled:text-gray-300">
+              </span>
+            </div>
+          </template>
+          <button type="button" x-show="!showAll" @click="showAll = true"
+                  class="text-[11px] font-medium text-accent-600">show other offers &darr;</button>
+        </div>
+      </div>
+    </template>
+
+    {# Save bar — appears only when dirty #}
+    <div x-show="dirty" x-cloak x-transition
+         class="px-3 py-2 bg-accent-50 border-t border-accent-200 flex items-center gap-2 flex-wrap">
+      <span class="text-xs text-gray-600 tabular-nums">
+        cost $<span x-text="totals.cost.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})"></span>
+        · rev $<span x-text="totals.rev.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})"></span>
+        <span x-show="totals.margin !== null">· margin <span x-text="totals.margin + '%'"></span></span>
+      </span>
+      <span class="ml-auto flex items-center gap-1.5">
+        <span x-show="invalid.length" class="text-[11px] text-rose-600" x-text="'Qty needed on: ' + invalid.join(', ')"></span>
+        <button type="button" @click="discard()" class="btn-secondary btn-sm">Discard</button>
+        <button type="button" @click="saveAll()" :disabled="!canSave" data-loading-disable
+                class="btn-primary btn-sm">Save lines</button>
+      </span>
+    </div>
+  </div>
+
+  {% elif lines %}
+  {# ── Read-only dense table (viewer cannot edit at this stage) ── #}
+  <div class="overflow-x-auto">
+    <table class="min-w-full text-xs">
+      <thead>
+        <tr class="text-left text-[11px] font-semibold text-gray-400 uppercase tracking-wider border-b border-line-subtle">
+          <th class="px-3 py-1.5">Part</th>
+          <th class="px-3 py-1.5">Vendor</th>
+          <th class="px-3 py-1.5 text-right">Qty × Cost</th>
+          <th class="px-3 py-1.5 text-right">Sell</th>
+          <th class="px-3 py-1.5">PO#</th>
+          <th class="px-3 py-1.5">Status</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-line-subtle">
+        {% for line in lines %}
+        <tr>
+          <td class="px-3 py-1.5 font-mono text-gray-900">{{ (line.requirement.primary_mpn if line.requirement else none) or (line.offer.mpn if line.offer else none) or '—' }}</td>
+          <td class="px-3 py-1.5 text-gray-700">{{ line.offer.vendor_name if line.offer else '—' }}</td>
+          <td class="px-3 py-1.5 text-right tabular-nums">{{ line.quantity }} × ${{ '{:,.4f}'.format(line.unit_cost | float) if line.unit_cost is not none else '—' }}</td>
+          <td class="px-3 py-1.5 text-right tabular-nums">{% if line.unit_sell is not none %}${{ '{:,.4f}'.format(line.unit_sell | float) }}{% else %}—{% endif %}</td>
+          <td class="px-3 py-1.5">{% if line.po_number %}{{ copy_chip(line.po_number) }}{% else %}<span class="text-gray-300">—</span>{% endif %}</td>
+          <td class="px-3 py-1.5 text-gray-700">{{ po_labels.get(line.status, line.status) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="px-3 py-4 text-xs text-gray-400">No lines yet{% if can_edit_plan %} — no active offers on this requisition to pick from{% endif %}.</div>
+  {% endif %}
+</div>

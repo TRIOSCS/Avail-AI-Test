@@ -47,6 +47,7 @@ from .buyplan_approval import (
     reset_buy_plan_to_draft,
     resume_plan,
     submit_buy_plan,
+    withdraw_buy_plan,
 )
 from .buyplan_lines import (
     _LOCKED_EDIT_STATUSES,
@@ -129,5 +130,6 @@ __all__ = [
     "set_sales_order_number",
     "submit_buy_plan",
     "verify_po",
+    "withdraw_buy_plan",
     "verify_po_sent",
 ]

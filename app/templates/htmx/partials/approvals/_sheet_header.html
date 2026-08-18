@@ -1,0 +1,134 @@
+{#
+  approvals/_sheet_header.html — Deal Sheet header: stage track (the signature) +
+  identity row with click-to-edit cells (SO# / Customer PO#) + money + readiness chip.
+  The ATOMIC swap target for every header-field save: POST .../plan/{id}/header
+  re-renders the whole pane (header included), keeping money/readiness/chips honest.
+  Receives: bp, lens, can_edit_plan, plan_stale_token, order_type_label, readiness,
+            readiness_missing, can_decide, is_plan_owner.
+  Called by: _pane_sales_order.html (Deal Sheet composition).
+  Depends on: HTMX, Alpine, Tailwind; shared copy_chip + age_chip + status_badge macros.
+#}
+{% from "htmx/partials/shared/_macros.html" import copy_chip, age_chip, status_badge %}
+
+{# ── Stage math: Build · Approve · Purchase · Done ── #}
+{% set _stages = ['Build', 'Approve', 'Purchase', 'Done'] %}
+{% set _idx = {'draft': 0, 'pending': 1, 'active': 2, 'inbound': 2, 'halted': 2, 'completed': 3, 'cancelled': 0}[bp.status] if bp.status in ('draft','pending','active','inbound','halted','completed','cancelled') else 0 %}
+{% set _yours = (bp.status == 'draft' and can_edit_plan) or (bp.status == 'pending' and can_decide) %}
+{% set _stage_ts = {'draft': bp.created_at, 'pending': bp.submitted_at or bp.created_at, 'active': bp.approved_at, 'inbound': bp.approved_at, 'halted': bp.halted_at, 'completed': bp.completed_at}.get(bp.status) %}
+{% set _label = {'draft': ('Build — yours to finish' if _yours else 'Build — draft'),
+                 'pending': ('Approve — awaiting you' if _yours else 'Approve — awaiting manager'),
+                 'active': 'Purchase — POs in motion', 'inbound': 'Purchase — inbound',
+                 'halted': 'Halted', 'completed': 'Done', 'cancelled': 'Cancelled'}[bp.status] %}
+
+<div id="sheet-header" class="space-y-2 max-md:sticky max-md:top-0 max-md:z-10 max-md:bg-white max-md:pb-2 max-md:border-b max-md:border-line-subtle">
+
+  {# Row 1 — the stage track #}
+  <div class="flex items-center gap-2.5">
+    <div class="flex flex-1 gap-1 max-w-[240px]" role="img" aria-label="Stage: {{ _label }}">
+      {% for s in _stages %}
+        {% set i = loop.index0 %}
+        {% if bp.status == 'cancelled' %}
+          <div class="h-1 flex-1 rounded-full bg-gray-200"></div>
+        {% elif bp.status == 'halted' and i == _idx %}
+          <div class="h-1 flex-1 rounded-full bg-rose-400"></div>
+        {% elif i < _idx or bp.status == 'completed' %}
+          <div class="h-1 flex-1 rounded-full bg-emerald-400"></div>
+        {% elif i == _idx %}
+          <div class="h-1 flex-1 rounded-full {{ 'bg-amber-400 animate-pulse' if _yours else ('bg-gray-400' if bp.status == 'draft' else 'bg-amber-400') }}"></div>
+        {% else %}
+          <div class="h-1 flex-1 rounded-full bg-gray-200"></div>
+        {% endif %}
+      {% endfor %}
+    </div>
+    <span class="text-[11px] font-semibold uppercase tracking-wide {{ 'text-rose-600' if bp.status == 'halted' else ('text-gray-400' if bp.status in ('cancelled',) else ('text-amber-600' if _yours else ('text-emerald-600' if bp.status == 'completed' else 'text-gray-500'))) }}">
+      {{ _label }}
+    </span>
+    {% if _stage_ts and bp.status not in ('completed', 'cancelled') %}{{ age_chip(_stage_ts) }}{% endif %}
+    <span class="hidden max-md:inline-flex text-[11px] font-medium text-accent-600 cursor-pointer whitespace-nowrap"
+          @click="document.getElementById('aw-list')?.scrollIntoView({behavior: 'smooth'})">&uarr; List</span>
+  </div>
+
+  {# Row 2 — identity + editable cells #}
+  <div class="flex items-start justify-between gap-3">
+    <div class="min-w-0">
+      <div class="flex items-center gap-2 flex-wrap">
+        <h2 class="text-base font-semibold text-gray-900 truncate">
+          {{ (bp.requisition.customer_name if bp.requisition else none) or 'Plan #' ~ bp.id }}
+        </h2>
+        {% if order_type_label %}
+        <span class="inline-flex items-center px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide rounded bg-brand-50 text-brand-600 border border-brand-200">{{ order_type_label }}</span>
+        {% endif %}
+        {{ status_badge(bp.status) }}
+      </div>
+      <div class="flex items-center gap-2 mt-1 flex-wrap">
+        <span class="text-tertiary">Plan #{{ bp.id }}</span>
+        {# SO# + Customer PO# — Deal Sheet cells: dashed underline = editable; value
+           doubles as a copy chip; Enter/blur saves, Escape reverts. #}
+        {% for field, label, value in [('sales_order_number', 'SO', bp.sales_order_number), ('customer_po_number', 'Cust PO', bp.customer_po_number)] %}
+        {% if can_edit_plan %}
+        {# Deal Sheet cell: Enter/blur saves via imperative htmx.ajax (static hx-attrs
+           inside Alpine <template> are not processed — same reason the old header
+           widget went imperative); Escape reverts. Sends the plan stale token. #}
+        <span x-data='{ editing: false, val: {{ (value or "") | tojson }},
+                        save() {
+                          this.editing = false;
+                          if (this.val === {{ (value or "") | tojson }}) return;
+                          htmx.ajax("POST", "/v2/partials/approvals/plan/{{ bp.id }}/header", {
+                            target: "#aw-pane", swap: "innerHTML", indicator: "#aw-pane-ind",
+                            values: { "{{ field }}": this.val, lens: {{ lens | tojson }},
+                                      expected_updated_at: {{ plan_stale_token | tojson }} }
+                          });
+                        } }'
+              class="inline-flex items-center gap-1">
+          <template x-if="!editing">
+            <span class="inline-flex items-center gap-1">
+              {% if value %}{{ copy_chip(value, label=label ~ ' ' ~ value) }}{% endif %}
+              <button type="button" @click="editing = true; $nextTick(() => $refs.inp.focus())"
+                      class="cursor-pointer rounded px-1 -mx-0.5 text-xs hover:bg-brand-50 transition-colors border-b border-dashed border-brand-200 {{ 'text-gray-300' if not value else 'text-gray-500' }}"
+                      title="Click to edit {{ label }}">{{ '✎' if value else label ~ ' —' }}</button>
+            </span>
+          </template>
+          <template x-if="editing">
+            <input x-ref="inp" type="text" x-model="val"
+                   class="input input-sm !py-0.5 w-32 font-mono text-xs"
+                   @keydown.escape.prevent='editing = false; val = {{ (value or "") | tojson }}'
+                   @keydown.enter.prevent="save()" @blur="save()">
+          </template>
+        </span>
+        {% elif value %}
+        {{ copy_chip(value, label=label ~ ' ' ~ value) }}
+        {% endif %}
+        {% endfor %}
+        {% if bp.quote and bp.quote.quote_number %}
+        <span class="text-tertiary font-mono">{{ bp.quote.quote_number }}</span>
+        {% endif %}
+        {{ age_chip(bp.submitted_at or bp.created_at) }}
+      </div>
+    </div>
+    <div class="text-right flex-shrink-0">
+      {% if bp.total_cost is not none %}
+      <div class="text-[11px] uppercase tracking-wide text-gray-400">Cost</div>
+      <div class="text-sm font-semibold tabular-nums text-gray-900">${{ '{:,.2f}'.format(bp.total_cost | float) }}</div>
+      {% endif %}
+      {% if bp.total_revenue is not none %}
+      <div class="text-tertiary tabular-nums">Rev ${{ '{:,.2f}'.format(bp.total_revenue | float) }}{% if bp.total_margin_pct is not none %} · {{ '{:.0f}'.format(bp.total_margin_pct | float) }}%{% endif %}</div>
+      {% endif %}
+    </div>
+  </div>
+
+  {# Row 3 — readiness chip (draft only) #}
+  {% if readiness %}
+  {% if not readiness_missing %}
+  <span class="inline-flex items-center gap-1.5 rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
+    ✓ Ready to submit
+  </span>
+  {% else %}
+  <span class="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 flex-wrap">
+    {{ readiness_missing | length }} to go
+    {% for item in readiness_missing %}
+    <span class="text-amber-600">· {{ item.label }}{% if item.gates %} (required){% endif %}</span>
+    {% endfor %}
+  </span>
+  {% endif %}
+  {% endif %}
+</div>

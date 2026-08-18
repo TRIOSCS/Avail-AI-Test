@@ -383,9 +383,108 @@ def render_plan_pane(
             "can_lifecycle": is_manager_or_admin(user),
             # Why the plan is silently stalled for lack of a configured approver.
             "no_approver_reason": plan_needs_approver_reason(bp, db),
+            # ── Deal Sheet (T2) ──
+            **_sheet_ctx(db, user, bp, is_sourcing=is_sourcing),
         }
     )
     return template_response("htmx/partials/approvals/_pane_sales_order.html", ctx)
+
+
+def _sheet_ctx(db: Session, user: User, bp: BuyPlan, *, is_sourcing: bool) -> dict:
+    """Deal Sheet context: edit gates, offer-picker groups, readiness, stale token.
+
+    The picker groups EVERY requirement on the plan's requisition with its ACTIVE
+    offers; picked lines pre-check their offer with qty/sell. A picked line whose
+    offer is no longer ACTIVE still renders (truth over tidiness — same rule the
+    legacy editor had). Seeds load only when the viewer can actually edit.
+    """
+    from ...constants import OfferStatus
+    from ...models import Offer, Requirement
+    from ...services.buyplan_workflow import can_edit_plan
+    from ...services.stale_guard import stale_token
+
+    lines = bp.lines or []
+    can_edit = can_edit_plan(user, bp)
+    is_owner = bool(bp.requisition and bp.requisition.created_by == user.id)
+
+    picker_groups: list[dict] = []
+    if can_edit and is_sourcing and bp.requisition_id:
+        requirements = db.scalars(
+            select(Requirement).where(Requirement.requisition_id == bp.requisition_id).order_by(Requirement.id)
+        ).all()
+        active_offers = db.scalars(
+            select(Offer)
+            .where(Offer.requisition_id == bp.requisition_id, Offer.status == OfferStatus.ACTIVE.value)
+            .order_by(Offer.unit_price)
+        ).all()
+        offers_by_req: dict[int, list[Offer]] = {}
+        for off in active_offers:
+            if off.requirement_id is not None:
+                offers_by_req.setdefault(off.requirement_id, []).append(off)
+        lines_by_offer = {ln.offer_id: ln for ln in lines if ln.offer_id}
+        for rq in requirements:
+            group_lines = [ln for ln in lines if ln.requirement_id == rq.id]
+            offers = list(offers_by_req.get(rq.id, []))
+            # Truth option: a picked line whose offer left ACTIVE still renders.
+            seen_ids = {o.id for o in offers}
+            stale_offers = [ln.offer for ln in group_lines if ln.offer and ln.offer.id not in seen_ids]
+            costs = [float(o.unit_price) for o in offers if o.unit_price is not None]
+            best_cost = min(costs) if costs else None
+            rows = []
+            for off in offers + stale_offers:
+                ln = lines_by_offer.get(off.id)
+                rows.append(
+                    {
+                        "offer_id": off.id,
+                        "vendor": off.vendor_name or "—",
+                        "cost": float(off.unit_price) if off.unit_price is not None else None,
+                        "condition": off.condition or "",
+                        "avail": off.qty_available,
+                        "active": off.status == OfferStatus.ACTIVE.value,
+                        "line_id": ln.id if ln else None,
+                        "qty": ln.quantity if ln else None,
+                        "locked": bool(ln.has_cut_po) if ln else False,
+                        "best": best_cost is not None
+                        and off.unit_price is not None
+                        and float(off.unit_price) == best_cost,
+                    }
+                )
+            sell = next((float(ln.unit_sell) for ln in group_lines if ln.unit_sell is not None), None)
+            if sell is None and rq.target_price is not None:
+                sell = float(rq.target_price)
+            picker_groups.append(
+                {
+                    "requirement_id": rq.id,
+                    "mpn": rq.primary_mpn or "—",
+                    "need": rq.target_qty,
+                    "sell": sell,
+                    "offers": rows,
+                }
+            )
+
+    # Readiness (draft only): informative checklist — only the SO# item gates Submit.
+    readiness = []
+    if bp.status == BuyPlanStatus.DRAFT.value:
+        readiness = [
+            {"key": "so", "label": "SO#", "ok": bool(bp.sales_order_number), "gates": True},
+            {"key": "lines", "label": "a vendor picked", "ok": bool(lines) or not is_sourcing, "gates": False},
+            {
+                "key": "sell",
+                "label": "sell price on every line",
+                "ok": all(ln.unit_sell is not None for ln in lines) if lines else True,
+                "gates": False,
+            },
+        ]
+
+    return {
+        "can_edit_plan": can_edit,
+        "is_plan_owner": is_owner,
+        "plan_stale_token": stale_token(bp),
+        "picker_groups": picker_groups,
+        "picker_known_line_ids": [ln.id for ln in lines],
+        "readiness": readiness,
+        "readiness_missing": [r for r in readiness if not r["ok"]],
+    }
 
 
 @router.get("/v2/partials/approvals/plan/{plan_id:int}/pane", response_class=HTMLResponse)

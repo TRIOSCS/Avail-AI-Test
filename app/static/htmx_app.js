@@ -3320,6 +3320,122 @@ Alpine.data('avatarCropper', (postUrl, maxBytes) => ({
 }));
 
 /**
+ * offerPicker — the Deal Sheet's ONE lines component (T2): offers grouped by part,
+ * check = buy from this vendor, qty to the right, sell per part group, live fill +
+ * margin. Serves sales compose/draft AND the manager's pending review (same view);
+ * at active/inbound rows follow the server-seeded locks (PO-cut = sell-only).
+ * Dirty changes surface a Save/Discard bar; Save posts ONE atomic /lines/bulk
+ * payload (line_id = edit, no line_id = add, omission = remove; known_line_ids
+ * scopes removal). 409 stale → toast, client state survives (HX-Reswap: none).
+ *
+ * Called by: partials/approvals/_sheet_lines.html.
+ * Depends on: Alpine.js, htmx.
+ */
+Alpine.data('offerPicker', (bpId, seedGroups, knownLineIds, opts) => ({
+  groups: [],
+  orig: '',
+  saving: false,
+  opts: Object.assign({ lens: 'sales-orders', staleToken: '', editable: true }, opts || {}),
+
+  init() {
+    this.groups = (seedGroups || []).map((g) => ({
+      ...g,
+      sell: g.sell === null || g.sell === undefined ? '' : String(g.sell),
+      offers: (g.offers || []).map((o) => ({
+        ...o,
+        checked: o.line_id !== null && o.line_id !== undefined,
+        qty: o.qty === null || o.qty === undefined ? '' : String(o.qty),
+      })),
+    }));
+    this.orig = this._snapshot();
+  },
+
+  _snapshot() { return JSON.stringify(this.groups.map((g) => [g.sell, g.offers.map((o) => [o.checked, o.qty])])); },
+  get dirty() { return this._snapshot() !== this.orig; },
+
+  toggle(o, g) {
+    if (o.locked || !this.opts.editable) return;
+    o.checked = !o.checked;
+    if (o.checked && !o.qty) {
+      const remaining = (g.need || 0) - this.filled(g);
+      o.qty = String(Math.max(remaining, 0) || g.need || '');
+    }
+  },
+
+  filled(g) {
+    return g.offers.reduce((s, o) => s + (o.checked ? (parseInt(o.qty, 10) || 0) : 0), 0);
+  },
+
+  groupMargin(g) {
+    const sell = parseFloat(g.sell);
+    if (!sell || sell <= 0) return null;
+    let cost = 0; let qty = 0;
+    for (const o of g.offers) {
+      if (!o.checked) continue;
+      const q = parseInt(o.qty, 10) || 0;
+      cost += (o.cost || 0) * q; qty += q;
+    }
+    if (!qty) return null;
+    return Math.round(((sell * qty - cost) / (sell * qty)) * 1000) / 10;
+  },
+
+  get totals() {
+    let cost = 0; let rev = 0;
+    for (const g of this.groups) {
+      const sell = parseFloat(g.sell) || 0;
+      for (const o of g.offers) {
+        if (!o.checked) continue;
+        const q = parseInt(o.qty, 10) || 0;
+        cost += (o.cost || 0) * q; rev += sell * q;
+      }
+    }
+    return { cost, rev, margin: rev > 0 ? Math.round(((rev - cost) / rev) * 1000) / 10 : null };
+  },
+
+  get invalid() {
+    // every checked, unlocked row needs a positive whole qty
+    const bad = [];
+    for (const g of this.groups) {
+      for (const o of g.offers) {
+        if (o.checked && !o.locked) {
+          const q = Number(o.qty);
+          if (!Number.isInteger(q) || q <= 0) bad.push(g.mpn);
+        }
+      }
+    }
+    return bad;
+  },
+  get canSave() { return this.dirty && this.invalid.length === 0 && !this.saving; },
+
+  discard() { this.init(); },
+
+  saveAll() {
+    if (!this.canSave) return;
+    this.saving = true;
+    const rows = [];
+    for (const g of this.groups) {
+      const sell = g.sell === '' ? null : parseFloat(g.sell);
+      for (const o of g.offers) {
+        if (o.locked && o.line_id) { rows.push({ line_id: o.line_id, unit_sell: sell }); continue; }
+        if (!o.checked) continue;
+        const row = { offer_id: o.offer_id, quantity: parseInt(o.qty, 10), unit_sell: sell,
+                      requirement_id: g.requirement_id };
+        if (o.line_id) row.line_id = o.line_id;
+        rows.push(row);
+      }
+    }
+    htmx.ajax('POST', `/v2/partials/buy-plans/${bpId}/lines/bulk`, {
+      target: '#aw-pane', swap: 'innerHTML', indicator: '#aw-pane-ind',
+      values: {
+        payload: JSON.stringify({ lines: rows, known_line_ids: knownLineIds || [] }),
+        origin: 'approvals_workspace', lens: this.opts.lens,
+        expected_updated_at: this.opts.staleToken,
+      },
+    }).finally(() => { this.saving = false; });
+  },
+}));
+
+/**
  * buyPlanLinesEditor — whole-table "Edit plan" mode for the buy-plan line-items
  * table. Replaces the old per-row Edit/Remove toggles + bottom Add-line panel
  * with one editMode flag, a client-side `rows` array (seeded from the server),

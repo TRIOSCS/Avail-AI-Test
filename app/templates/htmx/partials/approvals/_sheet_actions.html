@@ -1,0 +1,129 @@
+{#
+  approvals/_sheet_actions.html — Deal Sheet stage-adaptive action bar. Exactly ONE
+  bar renders per stage; every decision is one click with its note INLINE (no
+  x-collapse second click, no modal):
+    draft   → salesperson-notes textarea (blur-autosave, seeded) + Submit for approval
+              (posts NO field values — the record already carries them; server 400s
+              without an SO#; the button disables client-side off the readiness rule)
+    pending → decide bar (Approve & notify / Send back / Reject) + ONE shared inline
+              note input; Reject disabled until the note is typed. Manager edits since
+              submission surface as a delta chip and flip the button to
+              "Approve with changes". Change summary embedded.
+    active/inbound → approved stamp + PO progress line
+    halted/cancelled/completed → tone banners (Resume/Reset live in Plan controls)
+  Receives: bp, lens, can_decide, can_edit_plan, is_plan_owner, plan_stale_token,
+            change_edits, readiness_missing, lines, po_labels.
+  Called by: _pane_sales_order.html. Depends on: HTMX, Alpine, Tailwind.
+#}
+
+<div id="sheet-actions">
+{% if bp.status == 'draft' and can_edit_plan %}
+<div class="rounded-lg border-2 border-gray-300 bg-gray-50 p-3 space-y-2">
+  <div class="flex items-start gap-2">
+    <textarea rows="1" placeholder="Notes for the manager (saved as you type away)"
+              class="input input-sm flex-1"
+              x-data='{ orig: {{ (bp.salesperson_notes or "") | tojson }} }'
+              @blur='if ($el.value !== orig) { htmx.ajax("POST", "/v2/partials/approvals/plan/{{ bp.id }}/header", { target: "#aw-pane", swap: "innerHTML", indicator: "#aw-pane-ind", values: { salesperson_notes: $el.value, lens: {{ lens | tojson }}, expected_updated_at: {{ plan_stale_token | tojson }} } }); }'
+    >{{ bp.salesperson_notes or '' }}</textarea>
+    <form hx-post="/v2/partials/buy-plans/{{ bp.id }}/submit" hx-target="#aw-pane" hx-swap="innerHTML" class="flex-shrink-0">
+      <input type="hidden" name="origin" value="approvals_workspace">
+      <input type="hidden" name="lens" value="{{ lens }}">
+      <button type="submit" data-loading-disable class="btn-primary btn-sm"
+              {% if not bp.sales_order_number %}disabled title="Add the SO# first (the readiness chip shows what's left)"{% endif %}>
+        Submit for approval
+      </button>
+    </form>
+  </div>
+  {% if bp.approval_notes %}
+  <div class="text-xs text-gray-500 italic">Last decision note: “{{ bp.approval_notes }}”</div>
+  {% endif %}
+</div>
+
+{% elif bp.status == 'pending' and can_decide %}
+<div class="rounded-lg border-2 border-accent-300 bg-accent-50 p-3 space-y-2" x-data="{ note: '' }">
+  <div class="flex items-center justify-between gap-3 flex-wrap">
+    <div class="text-sm font-semibold text-accent-700">
+      Awaiting your approval
+      {% if change_edits %}
+      <span class="ml-1 inline-flex items-center rounded-full border border-accent-300 bg-white px-1.5 py-0.5 text-[11px] font-medium text-accent-700"
+            title="Edits since submission — the change summary below lists them">
+        {{ change_edits | length }} change{{ 's' if change_edits | length != 1 }}
+      </span>
+      {% endif %}
+    </div>
+  </div>
+  <div class="flex items-center gap-1.5 flex-wrap">
+    <input type="text" x-model="note" placeholder="Note — optional to send back, required to reject"
+           class="input input-sm flex-1 min-w-[180px]">
+    <form hx-post="/v2/partials/buy-plans/{{ bp.id }}/approve" hx-target="#aw-pane" hx-swap="innerHTML" class="inline">
+      <input type="hidden" name="origin" value="approvals_workspace">
+      <input type="hidden" name="lens" value="{{ lens }}">
+      <input type="hidden" name="handoff" value="proceed">
+      <input type="hidden" name="notes" :value="note">
+      <button type="submit" data-loading-disable class="btn-primary btn-sm">
+        {{ 'Approve with changes' if change_edits else 'Approve & notify' }}
+      </button>
+    </form>
+    <form hx-post="/v2/partials/buy-plans/{{ bp.id }}/approve" hx-target="#aw-pane" hx-swap="innerHTML" class="inline">
+      <input type="hidden" name="origin" value="approvals_workspace">
+      <input type="hidden" name="lens" value="{{ lens }}">
+      <input type="hidden" name="handoff" value="send_back">
+      <input type="hidden" name="notes" :value="note">
+      <button type="submit" data-loading-disable class="btn-secondary btn-sm">Send back</button>
+    </form>
+    <form hx-post="/v2/partials/buy-plans/{{ bp.id }}/approve" hx-target="#aw-pane" hx-swap="innerHTML" class="inline">
+      <input type="hidden" name="origin" value="approvals_workspace">
+      <input type="hidden" name="lens" value="{{ lens }}">
+      <input type="hidden" name="action" value="reject">
+      <input type="hidden" name="notes" :value="note">
+      <button type="submit" data-loading-disable class="btn-danger btn-sm"
+              :disabled="!note.trim()" :title="note.trim() ? '' : 'Type the note first — a reject always carries the reason'">
+        Reject
+      </button>
+    </form>
+  </div>
+  {% include "htmx/partials/approvals/_change_summary.html" %}
+</div>
+
+{% elif bp.status == 'pending' %}
+<div class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+  Awaiting manager approval.
+  {% if is_plan_owner %}
+  <form hx-post="/v2/partials/buy-plans/{{ bp.id }}/withdraw" hx-target="#aw-pane" hx-swap="innerHTML" class="inline ml-2"
+        hx-confirm="Pull this plan back to draft? The approval request is withdrawn.">
+    <input type="hidden" name="origin" value="approvals_workspace">
+    <input type="hidden" name="lens" value="{{ lens }}">
+    <button type="submit" data-loading-disable class="text-xs font-medium text-amber-700 underline decoration-dashed">Withdraw &amp; edit</button>
+  </form>
+  {% endif %}
+  {% include "htmx/partials/approvals/_change_summary.html" %}
+</div>
+
+{% elif bp.approved_at and bp.status in ('active', 'inbound', 'completed') %}
+<div class="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+  Approved by {{ (bp.approved_by.name if bp.approved_by else none) or '—' }} · {{ bp.approved_at | fmtdate('%b %d, %Y') }}
+  {% if lines and bp.status in ('active', 'inbound') %}
+  {% set _counts = {} %}
+  {% for line in lines %}{% if _counts.update({line.status: (_counts.get(line.status, 0) + 1)}) %}{% endif %}{% endfor %}
+  <span class="ml-2 text-xs text-emerald-700">
+    {% for status, n in _counts.items() %}{{ n }} {{ po_labels.get(status, status) | lower }}{{ ' · ' if not loop.last }}{% endfor %}
+  </span>
+  {% endif %}
+</div>
+
+{% elif bp.status == 'cancelled' %}
+<div class="rounded-lg border border-line-base bg-gray-50 p-3 text-sm text-gray-500">
+  Cancelled{% if bp.cancellation_reason %} — {{ bp.cancellation_reason }}{% endif %}
+</div>
+
+{% elif bp.status == 'halted' %}
+<div class="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+  Halted{% if bp.so_rejection_note %} — {{ bp.so_rejection_note }}{% endif %}
+</div>
+
+{% elif bp.status == 'draft' %}
+<div class="rounded-lg border border-line-base bg-gray-50 p-3 text-sm text-gray-600">
+  Draft — not yet submitted for approval.{% if bp.approval_notes %} <span class="italic">Last decision note: “{{ bp.approval_notes }}”</span>{% endif %}
+</div>
+{% endif %}
+</div>

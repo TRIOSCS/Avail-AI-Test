@@ -615,6 +615,39 @@ async def buy_plan_submit_partial(
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
 
+    if form.get("origin") == "approvals_workspace":
+        return _workspace_pane_response(request, user, db, plan_id, form)
+    return await buy_plan_detail_partial(request, plan_id, user, db)
+
+
+@router.post("/v2/partials/buy-plans/{plan_id}/withdraw", response_class=HTMLResponse)
+async def buy_plan_withdraw_partial(
+    request: Request,
+    plan_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Withdraw a PENDING plan back to DRAFT (Deal Sheet flexibility).
+
+    The submitting salesperson (or a manager) pulls their own plan back to fix a
+    mistake without asking the manager to reject it. Thin route →
+    ``withdraw_buy_plan`` (cancels the open engine request, clears the decision
+    stamps, audits).
+    """
+    from ...services.buyplan_workflow import withdraw_buy_plan
+
+    get_buyplan_for_user(db, user, plan_id)
+    form = await request.form()
+    try:
+        withdraw_buy_plan(plan_id, user, db)
+        db.commit()
+    except PermissionError as e:
+        raise HTTPException(403, str(e)) from e
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+    if form.get("origin") == "approvals_workspace":
+        return _workspace_pane_response(request, user, db, plan_id, form)
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
 
@@ -1577,6 +1610,8 @@ async def buy_plan_bulk_lines_partial(
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
 
+    if form.get("origin") == "approvals_workspace":
+        return _workspace_pane_response(request, user, db, plan_id, form)
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
 

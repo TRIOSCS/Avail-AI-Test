@@ -223,6 +223,36 @@ def _run_reject_side_effects(plan: BuyPlan, user: User, db: Session, *, reason: 
     _log_approval_activity(plan, "reject", user, reason, db)
 
 
+def withdraw_buy_plan(plan_id: int, user: User, db: Session) -> BuyPlan:
+    """The submitter pulls their own PENDING plan back to DRAFT (Deal Sheet).
+
+    Owner-approved flexibility: fixing a mistake no longer needs a manager
+    reject. Gate: the plan owner (requisition creator) or a manager/admin.
+    Cancels the open engine request (never an orphaned REQUESTED row), clears
+    the decision stamps, and audits — a withdraw is NOT a rejection, so no
+    rejecting user/reason is stamped. Caller commits.
+    """
+    plan = db.get(BuyPlan, plan_id, options=[joinedload(BuyPlan.requisition)])
+    if not plan:
+        raise ValueError(f"Buy plan {plan_id} not found")
+    if plan.status != BuyPlanStatus.PENDING.value:
+        raise ValueError(f"Can only withdraw a pending plan (current: {plan.status})")
+    is_manager = user.role in (UserRole.MANAGER, UserRole.ADMIN)
+    is_owner = bool(plan.requisition and plan.requisition.created_by == user.id)
+    if not (is_manager or is_owner):
+        raise PermissionError("Only the plan owner or a manager can withdraw this plan.")
+
+    _cancel_open_engine_requests_for_plan(plan, user, db)
+    plan.status = BuyPlanStatus.DRAFT.value
+    plan.approved_by_id = None
+    plan.approved_at = None
+    plan.approval_notes = None
+    logger.info("Buy plan {} withdrawn to draft by {}", plan.id, user.email)
+    _log_approval_activity(plan, "withdraw", user, None, db)
+    db.flush()
+    return plan
+
+
 def _cancel_open_engine_requests_for_plan(plan: BuyPlan, user: User | None, db: Session) -> int:
     """Cancel every open (REQUESTED) BUY_PLAN ApprovalRequest for *plan* via the engine.
 
