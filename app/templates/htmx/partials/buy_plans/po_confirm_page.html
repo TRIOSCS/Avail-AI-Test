@@ -1,0 +1,124 @@
+{#-
+  po_confirm_page.html — STANDALONE public "confirm PO cut" page (Deal Sheet T4, the
+  buyer leg's no-login confirm).
+
+  Rendered by app/routers/po_confirm.py for the auth-less, CSRF-exempt, rate-limited
+  tokenized route GET/POST /po/confirm/{token}. NOT the app base: its own minimal
+  <html>/<head>/<body> shell (no nav, no JS, no Alpine, no auth) because the audience is
+  a buyer tapping the approval email on a phone, mid-errand, possibly logged out.
+
+  Context: `mode` selects the panel (form | recorded | confirmed | inactive | not_found);
+  `line`/`plan` (None only for not_found); `mpn`, `vendor`, `need_by`,
+  `payment_methods` (choices), `error` (form re-render).
+-#}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>AVAIL — Confirm PO</title>
+  <style>
+    :root { color-scheme: light; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; padding: 24px;
+      display: flex; align-items: center; justify-content: center;
+      background: #f3f4f6; color: #111827;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      line-height: 1.5;
+    }
+    .card {
+      width: 100%; max-width: 520px; background: #ffffff;
+      border: 1px solid #e5e7eb; border-radius: 12px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.08); overflow: hidden;
+    }
+    .brand {
+      padding: 16px 24px; border-bottom: 1px solid #e5e7eb;
+      font-weight: 700; letter-spacing: .04em; color: #111827; font-size: 14px;
+    }
+    .body { padding: 24px; }
+    .banner { border-radius: 8px; padding: 12px 16px; margin: 0 0 18px; font-weight: 700; }
+    .banner-ok { background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
+    .banner-warn { background: #fffbeb; color: #92400e; border: 1px solid #fde68a; }
+    .banner-danger { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+    h1 { font-size: 20px; margin: 0 0 8px; }
+    p { margin: 0 0 12px; }
+    dl { margin: 0 0 18px; display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; font-size: 14px; }
+    dt { color: #6b7280; }
+    dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; }
+    label { display: block; font-size: 13px; color: #374151; font-weight: 600; margin: 12px 0 4px; }
+    input, select {
+      width: 100%; padding: 10px 12px; font-size: 16px;
+      border: 1px solid #d1d5db; border-radius: 8px; background: #fff;
+    }
+    button {
+      margin-top: 18px; width: 100%; padding: 12px; font-size: 16px; font-weight: 700;
+      color: #fff; background: #007DBD; border: 0; border-radius: 8px; cursor: pointer;
+    }
+    .muted { color: #6b7280; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="brand">AVAIL · TRIO Supply Chain Solutions</div>
+    <div class="body">
+
+      {% if mode == 'not_found' %}
+      <div class="banner banner-danger">Link expired or invalid</div>
+      <p>This confirm link no longer works. Open the plan in AVAIL to confirm the PO there,
+         or ask for a fresh approval email.</p>
+
+      {% elif mode == 'confirmed' %}
+      <div class="banner banner-ok">Already confirmed</div>
+      <p><strong>{{ mpn }}</strong> · {{ vendor }} — PO
+         <strong>{{ line.po_number or '—' }}</strong> is already recorded
+         {% if line.po_confirmed_at %} ({{ line.po_confirmed_at | fmtdate('%b %d, %Y') }}){% endif %}.
+         Nothing more to do here.</p>
+
+      {% elif mode == 'inactive' %}
+      <div class="banner banner-warn">This line isn't awaiting a PO</div>
+      <p>The line's state changed since the email went out
+         (now: <strong>{{ line.status.replace('_', ' ') }}</strong>). Check the plan in AVAIL.</p>
+
+      {% elif mode == 'recorded' %}
+      <div class="banner banner-ok">PO recorded — thank you</div>
+      <p><strong>{{ mpn }}</strong> · {{ vendor }} — PO <strong>{{ line.po_number }}</strong>
+         is in and routed to the manager for approval. You're done on this line.</p>
+
+      {% else %}{# form #}
+      <h1>Confirm the PO you cut</h1>
+      <p class="muted">Buy plan #{{ plan.id }} · SO {{ plan.sales_order_number or '—' }}</p>
+      <dl>
+        <dt>Part</dt><dd>{{ mpn }}</dd>
+        <dt>Vendor</dt><dd>{{ vendor }}</dd>
+        <dt>Qty</dt><dd>{{ '{:,}'.format(line.quantity or 0) }}</dd>
+        <dt>Unit cost</dt><dd>${{ '%.4f' | format(line.unit_cost | float) if line.unit_cost is not none else '—' }}</dd>
+        {% if need_by %}<dt>Need by</dt><dd>{{ need_by | fmtdate('%b %d, %Y') }}</dd>{% endif %}
+      </dl>
+
+      {% if error %}<div class="banner banner-danger">{{ error }}</div>{% endif %}
+
+      <form method="post">
+        <label for="po_number">PO number</label>
+        <input id="po_number" name="po_number" required placeholder="PO-…" autocomplete="off">
+
+        <label for="estimated_ship_date">Estimated ship date</label>
+        <input id="estimated_ship_date" name="estimated_ship_date" type="date">
+
+        <label for="payment_method">Payment method</label>
+        <select id="payment_method" name="payment_method" required>
+          <option value="">Select…</option>
+          {% for val, label in payment_methods %}
+          <option value="{{ val }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+
+        <button type="submit">Confirm PO</button>
+      </form>
+      {% endif %}
+
+    </div>
+  </div>
+</body>
+</html>

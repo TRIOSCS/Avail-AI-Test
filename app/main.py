@@ -511,6 +511,9 @@ CSRF_EXEMPT_URLS = [
     # Public tokenized "confirm wire sent" page — no session/CSRF (the non-Avail
     # accounting team posts a plain form); the single-use pay_token IS the authorization.
     re.compile(r"/p/confirm/"),
+    # Public tokenized buyer "confirm PO cut" page (Deal Sheet T4) — same pattern: the
+    # signed token in the emailed URL is the authorization; a plain form posts back.
+    re.compile(r"/po/confirm/"),
 ]
 
 # CSRF protection (double-submit cookie) — disabled in test mode
@@ -858,6 +861,7 @@ from .routers.htmx.vendors import router as htmx_vendors_router
 from .routers.htmx_views import router as htmx_views_router
 from .routers.materials import router as materials_router
 from .routers.part_dossier import router as part_dossier_router
+from .routers.po_confirm import router as po_confirm_router
 from .routers.prepayment_confirm import router as prepayment_confirm_router
 from .routers.prepayments import router as prepayments_router
 from .routers.quality_plans import router as quality_plans_router
@@ -894,6 +898,7 @@ app.include_router(resell_router)
 app.include_router(v13_router)
 app.include_router(approvals_router)
 app.include_router(prepayments_router)
+app.include_router(po_confirm_router)
 app.include_router(prepayment_confirm_router)
 app.include_router(quality_plans_router)
 app.include_router(vendor_contacts_router)

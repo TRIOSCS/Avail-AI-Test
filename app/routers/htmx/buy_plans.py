@@ -713,7 +713,12 @@ async def buy_plan_approve_partial(
 
         return render_tab_body(request, user, db, "buy-plan", hub_scope)
 
-    return _workspace_pane_response(request, user, db, plan_id, form)
+    resp = _workspace_pane_response(request, user, db, plan_id, form)
+    # Auto-advance (Deal Sheet T4): a DECISION empties the queue Superhuman-style —
+    # the split hears aw-advance and, once the refreshed list settles, selects the
+    # next needs-your-approval row. Only decide fires this (submit/halt/etc. don't).
+    resp.headers["HX-Trigger"] = json.dumps({"awListRefresh": True, "aw-advance": True})
+    return resp
 
 
 @router.post("/v2/partials/buy-plans/{plan_id}/halt", response_class=HTMLResponse)

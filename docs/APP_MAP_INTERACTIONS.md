@@ -2075,9 +2075,12 @@ pinned in `docs/APPROVALS_PARITY_CHECKLIST.md`. What replaced what:
   Mine/All, the Closed filter) + the SO-pane kanban (`_pane_kanban.html`) for per-line
   progress. The metric strip / `open_avg_margin` aggregate was **consciously dropped**
   (per-deal margin still shows on the SO pane header — see the checklist rationale).
-- **Origination** → the workspace lists' "New sales order" button loads the SELF-HOSTED
-  picker (`_sales_order_new.html`, `#so-origination` outerHTML swaps, Cancel → the
-  workspace shell) straight into `#main-content`.
+- **Origination** → the workspace lists' "New sales order" button loads the picker
+  (`_sales_order_new.html`, `#so-origination` outerHTML swaps) INTO `#aw-pane`
+  (`embed=aw` — the list stays alive; Cancel → `GET /pane/blank`). Picking a
+  requisition CREATES the draft directly with the recommended offers auto-picked; the
+  pane becomes its Deal Sheet + `HX-Push-Url` deep link + `aw-mark` highlight. A
+  non-embedded create (stale bookmark) HX-Redirects into the workspace deep link.
 - **Deleted read models** (`services/buyplan_hub.py` slimmed): `my_queue`/`QueueRow`,
   `deals_board`, `completed_archive`, `open_avg_margin`, `supervise_overview`,
   `buyer_line_queue`/`team_line_queue`/`resourcing_pool_queue`,
@@ -2091,11 +2094,50 @@ pinned in `docs/APPROVALS_PARITY_CHECKLIST.md`. What replaced what:
   detail partial); `prepay_request_decide` without an origin renders the workspace
   Prepayments tab body.
 
-**Flagged-issue honesty (surviving).** The detail page's "AI Insights" indicator shows the
-worst flag's verbatim reason via `buyplan_naming.summarize_top_flag(bp.ai_flags)`
-(critical → warning → info) — it states WHAT is wrong, not just a count.
 `buyplan_naming.build_card_title` remains the shared one-string title helper for any
-caller that wants `{SalesOrder#} - {Customer} - {Owner} - {Type}`.
+caller that wants `{SalesOrder#} - {Customer} - {Owner} - {Type}`
+(`summarize_top_flag` died with the detail page it fed).
+
+**The Deal Sheet (2026-08 rework).** The SO/BP pane (`_pane_sales_order.html`) is the
+ONE plan surface at every stage — stage changes emphasis and locks, never the screen.
+The legacy detail page (`buy_plans/detail.html` + 4 partials + `buyPlanLinesEditor`)
+is DELETED; `/v2/partials/buy-plans/{id}` 308s to
+`/v2/approvals?tab=sales-orders&select={id}` (ownership-gated first). Composition:
+`_sheet_header.html` (Build·Approve·Purchase·Done stage track with time-in-stage,
+click-to-edit SO#/CPO cells → `POST /v2/partials/approvals/plan/{id}/header`
+(sparse key-presence via `set_plan_header_fields`, stale-guarded, field-audited),
+money row, draft readiness chip) → `_sheet_actions.html` (stage-adaptive: draft =
+notes blur-autosave + inline Submit, which also carries the notes; pending+decider =
+ONE decide form with three named submit buttons + one inline note, "Approve with
+changes" delta chip; pending+owner = Withdraw & edit (`withdraw_buy_plan`, row-locked
+like submit)) → QP-sales section (+"Open full Quality Plan" front door) →
+`_sheet_lines.html` (the `offerPicker` Alpine component: offers grouped by part,
+check = buy, qty right, sell per group, one atomic `POST /lines/bulk`;
+`known_line_ids` = ONLY rendered lines so an invisible orphan is never
+omission-deleted) → kanban → de-collapsed plan controls → notes. Edit gate:
+`can_edit_plan` (draft/pending = owner or manager; active/inbound/halted =
+manager-only; terminal locked) — one predicate for header, lines, and QP-sales.
+Response protocol: every plan action returns `_workspace_pane_response` (plan pane +
+awListRefresh); every LINE action returns `_line_action_pane_response` (lens → plan
+pane, no lens → PO pane). Approve additionally fires `aw-advance` → the split
+auto-selects the next needs-approval row after the list settles. Keyboard: j/k walk
+the list, `/` focuses search (guarded in form fields). Tab pills body-swap
+`#ap-hub-body` with `hx-include="#aw-filters"`; the tab route bakes q/show_closed
+into the list URL so filters survive a switch.
+
+**The buyer relay (Deal Sheet T4).** `notify_approved`'s per-buyer email carries the
+PO-tab deep link (`?tab=purchase-orders&select=line-{id}`), a per-line tokenized
+no-login "Confirm PO" link, need-by/customer-PO context, and a Copy-for-ERP `<pre>`
+block; the buyer Teams DM carries the same deep link. The tokenized page
+(`routers/po_confirm.py`, `GET/POST /po/confirm/{token}`, CSRF-exempt + rate-limited,
+template `buy_plans/po_confirm_page.html`) mirrors the prepayment pay-link:
+`services/po_confirm_tokens.py` signs `{line_id, buyer_id}` statelessly (no column);
+single-use by STATE (only an AWAITING_PO line on an ACTIVE plan confirms — same
+`confirm_po` service, which now REQUIRES `payment_method`, same fan-out, attributed
+to the token's buyer). Cut-PO task rows (`source_ref buyline:{id}`) deep-link the
+same PO-tab URL. Flag-issue/resolve-issue live inline on the PO pane (buyer
+disclosure + supervisor resolve), as do the prepayment request/state and the
+late-fall-down re-source on the verified branch, and Copy-for-ERP as a `copy_chip`.
 
 
 **Resell workspace — resell/excess split-panel (Chunk F, ADDITIVE).** `/v2/resell` is

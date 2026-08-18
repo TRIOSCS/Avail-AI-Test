@@ -307,30 +307,59 @@ async def notify_approved(plan: BuyPlan, db: Session):
     buyer_ids = {ln.buyer_id for ln in (plan.lines or []) if ln.buyer_id}
     buyers = db.query(User).filter(User.id.in_(buyer_ids)).all() if buyer_ids else []
 
-    # Email each buyer with their assigned lines
+    # Email each buyer with their assigned lines (Deal Sheet T4: one-click routes into
+    # the work — the workspace deep link for logged-in triage, a tokenized per-line
+    # "Confirm PO" link that needs NO login, need-by/terms context, and a copy-paste
+    # block for the manual Acctivate PO entry).
+    from .po_confirm_tokens import mint_po_confirm_token
+
+    base_url = (settings.app_url or "").rstrip("/")
     for buyer in buyers:
         my_lines = [ln for ln in (plan.lines or []) if ln.buyer_id == buyer.id]
+        deep_link = f"{base_url}/v2/approvals?tab=purchase-orders&select=line-{my_lines[0].id}" if my_lines else ""
+        need_bys = [ln.requirement.need_by_date for ln in my_lines if ln.requirement and ln.requirement.need_by_date]
+        need_by = min(need_bys).strftime("%b %d, %Y") if need_bys else None
         buyer_rows = ""
+        erp_lines = []
         for ln in my_lines:
             offer = ln.offer
             mpn = offer.mpn if offer else "—"
             vendor = offer.vendor_name if offer else "—"
+            confirm_url = f"{base_url}/po/confirm/{mint_po_confirm_token(ln.id, buyer.id)}"
             buyer_rows += (
                 f'<tr><td style="padding:6px 10px;border:1px solid #e5e7eb">{html_mod.escape(str(mpn))}</td>'
                 f'<td style="padding:6px 10px;border:1px solid #e5e7eb">{html_mod.escape(str(vendor))}</td>'
                 f'<td style="padding:6px 10px;border:1px solid #e5e7eb">{ln.quantity:,}</td>'
-                f'<td style="padding:6px 10px;border:1px solid #e5e7eb">${float(ln.unit_cost or 0):.4f}</td></tr>'
+                f'<td style="padding:6px 10px;border:1px solid #e5e7eb">${float(ln.unit_cost or 0):.4f}</td>'
+                f'<td style="padding:6px 10px;border:1px solid #e5e7eb">'
+                f'<a href="{confirm_url}" style="color:#007DBD;font-weight:600">Confirm PO</a></td></tr>'
             )
+            erp_lines.append(f"{vendor}\t{mpn}\t{ln.quantity}\t{float(ln.unit_cost or 0):.4f}")
+        context_bits = [
+            f"Customer: <strong>{html_mod.escape(ctx['customer_name'])}</strong>",
+            f"SO#: <strong>{html_mod.escape(plan.sales_order_number or '')}</strong>",
+        ]
+        if plan.customer_po_number:
+            context_bits.append(f"Customer PO#: <strong>{html_mod.escape(plan.customer_po_number)}</strong>")
+        if need_by:
+            context_bits.append(f"Need by: <strong>{need_by}</strong>")
+        erp_block = html_mod.escape("\n".join(["Vendor\tMPN\tQty\tUnit cost", *erp_lines]))
         body = (
             f"<p>Buy plan #{plan.id} has been approved. Please create POs for your assigned lines:</p>"
-            f"<p>Customer: <strong>{html_mod.escape(ctx['customer_name'])}</strong> | SO#: <strong>{html_mod.escape(plan.sales_order_number or '')}</strong></p>"
+            f"<p>{' | '.join(context_bits)}</p>"
             f'<table style="border-collapse:collapse;width:100%;margin:16px 0">'
             f'<thead><tr style="background:#f3f4f6">'
             f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">MPN</th>'
             f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">Vendor</th>'
             f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Qty</th>'
             f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Unit Cost</th>'
+            f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">After cutting</th>'
             f"</tr></thead><tbody>{buyer_rows}</tbody></table>"
+            f'<p><a href="{deep_link}" style="display:inline-block;padding:10px 18px;background:#007DBD;'
+            f'color:#ffffff;border-radius:8px;font-weight:700;text-decoration:none">Open your PO queue in AVAIL</a></p>'
+            f'<p style="color:#6b7280;font-size:13px;margin-top:16px">Copy for the ERP PO entry:</p>'
+            f'<pre style="background:#f3f4f6;border:1px solid #e5e7eb;border-radius:8px;padding:12px;'
+            f'font-size:12px;overflow-x:auto">{erp_block}</pre>'
         )
         html_body = _wrap_email("Buy Plan Approved — POs Required", body)
         await _send_email(buyer, f"[AVAIL] POs Required — {ctx['customer_name']}", html_body, db)
@@ -365,16 +394,17 @@ async def notify_approved(plan: BuyPlan, db: Session):
         f"Customer: {ctx['customer_name']} | ${total:,.2f}\n"
         f"Buyers notified: {', '.join(b.name or b.email for b in buyers)}"
     )
-    await asyncio.gather(
-        *[
-            _teams_dm(
-                b,
-                f"Buy Plan #{plan.id} approved — {len([ln for ln in plan.lines if ln.buyer_id == b.id])} POs needed",
-                db,
-            )
-            for b in buyers
-        ]
-    )
+
+    # Per-buyer DM carries the same workspace deep link as the email (Deal Sheet T4:
+    # the notification routes INTO the confirm surface, not just at the app).
+    def _dm_text(b: User) -> str:
+        mine = [ln for ln in plan.lines if ln.buyer_id == b.id]
+        text = f"Buy Plan #{plan.id} approved — {len(mine)} POs needed"
+        if mine:
+            text += f". Confirm here: {base_url}/v2/approvals?tab=purchase-orders&select=line-{mine[0].id}"
+        return text
+
+    await asyncio.gather(*[_teams_dm(b, _dm_text(b), db) for b in buyers])
 
 
 async def notify_rejected(plan: BuyPlan, db: Session):

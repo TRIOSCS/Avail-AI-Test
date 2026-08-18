@@ -183,7 +183,10 @@ def test_approve_from_pane_rerenders_pane_and_refreshes_list(
         )
     assert r.status_code == 200
     assert "Approved by Test Buyer" in r.text  # the refreshed PANE, not a tab body
-    assert r.headers.get("HX-Trigger") == "awListRefresh"  # the left list repaints
+    # A DECISION repaints the list AND auto-advances the queue (Deal Sheet T4).
+    trigger = r.headers.get("HX-Trigger", "")
+    assert "awListRefresh" in trigger
+    assert "aw-advance" in trigger
     db_session.expire(bp)
     assert bp.status == BuyPlanStatus.ACTIVE.value
 

@@ -243,6 +243,23 @@ def test_shell_defaults_to_sales_orders(hub_client: TestClient):
     assert "/v2/partials/approvals/sales-orders" in r.text  # lazy body loads the default tab
 
 
+def test_shell_tab_pills_body_swap_with_filters(hub_client: TestClient):
+    """Deal Sheet T4: a tab switch swaps ONLY #ap-hub-body and posts the live filter
+    form along, so search/closed filters survive the switch."""
+    r = hub_client.get("/v2/partials/approvals")
+    assert 'hx-get="/v2/partials/approvals/buy-plans"' in r.text  # body URL, not the shell
+    assert 'hx-include="#aw-filters"' in r.text
+
+
+def test_tab_body_bakes_filters_into_list_url(hub_client: TestClient):
+    """q/show_closed posted with the tab GET bake into the list's lazy URL — the new
+    tab's first list load keeps the filters instead of resetting."""
+    r = hub_client.get("/v2/partials/approvals/buy-plans?q=widget&show_closed=1")
+    assert r.status_code == 200
+    assert "q=widget" in r.text
+    assert "show_closed=1" in r.text
+
+
 @pytest.mark.parametrize(
     ("legacy", "mapped"),
     [("buy-plan", "buy-plans"), ("po-approval", "purchase-orders"), ("prepayment", "prepayments")],

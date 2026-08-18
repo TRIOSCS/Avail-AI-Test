@@ -249,6 +249,8 @@ async def approvals_hub_tab(
     tab: str,
     scope: str = "all",
     select: int | None = None,
+    q: str = "",
+    show_closed: str = "",
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -261,11 +263,18 @@ async def approvals_hub_tab(
     """
     if _resolve_tab(tab) is None:
         raise HTTPException(404, "Unknown approvals tab")
-    return render_tab_body(request, user, db, tab, scope, select=select)
+    return render_tab_body(request, user, db, tab, scope, select=select, q=q, show_closed=show_closed)
 
 
 def render_tab_body(
-    request: Request, user: User, db: Session, tab: str, scope: str = "all", select: int | None = None
+    request: Request,
+    user: User,
+    db: Session,
+    tab: str,
+    scope: str = "all",
+    select: int | None = None,
+    q: str = "",
+    show_closed: str = "",
 ) -> HTMLResponse:
     """Build + render one workspace tab body (shared by the tab GET route and the decide
     handlers' origin=approvals_hub / legacy re-render branches).
@@ -273,14 +282,26 @@ def render_tab_body(
     The body is the split view: the left list lazy-loads ``/{tab}/list`` (so a decide
     re-render always repaints a FRESH list), the right pane fills on row selection.
     ``select`` rides the list's lazy URL for deep-link preselection (decide re-renders
-    never pass it — a decision must not steal the selection back).
+    never pass it — a decision must not steal the selection back). ``q``/``show_closed``
+    (Deal Sheet T4) bake into the list's lazy URL so a TAB SWITCH carries the current
+    search/closed filters instead of snapping back to defaults — the pills post the
+    live #aw-filters form along with the tab GET.
     """
     resolved = _resolve_tab(tab)
     if resolved is None:
         raise HTTPException(404, "Unknown approvals tab")
     scope = "mine" if scope == "mine" else "all"
     ctx = _base_ctx(request, user, "buy-plans")
-    ctx.update({"tab": resolved, "tab_label": _TAB_LABELS[resolved], "scope": scope, "select": select})
+    ctx.update(
+        {
+            "tab": resolved,
+            "tab_label": _TAB_LABELS[resolved],
+            "scope": scope,
+            "select": select,
+            "q": (q or "").strip(),
+            "show_closed": "1" if str(show_closed) in ("1", "true", "on") else "",
+        }
+    )
     return template_response("htmx/partials/approvals/_workspace_split.html", ctx)
 
 
@@ -703,6 +724,19 @@ def render_po_pane(request: Request, user: User, db: Session, line_id: int) -> H
                 and line.status == BuyPlanLineStatus.PENDING_VERIFY.value
             ),
             "manager_edited": line.id in manager_edited_line_ids(db, plan),
+            # Copy-for-ERP (Deal Sheet T4): the PO stays manual in the ERP by design —
+            # the re-typing doesn't. One click puts the line's entry fields on the
+            # clipboard (tab-separated: vendor, MPN, qty, unit cost).
+            "erp_copy": "\t".join(
+                [
+                    (line.offer.vendor_name if line.offer else "") or "",
+                    (line.requirement.primary_mpn if line.requirement else None)
+                    or (line.offer.mpn if line.offer else None)
+                    or "",
+                    str(line.quantity or 0),
+                    f"{float(line.unit_cost):.4f}" if line.unit_cost is not None else "",
+                ]
+            ),
             # Notes + attachments (2.4): the line's own thread.
             **_notes_ctx(db, user, plan_id=plan.id, line_id=line.id),
         }
