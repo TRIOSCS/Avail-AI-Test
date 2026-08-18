@@ -133,7 +133,7 @@ def test_workspace_block_offers_both_handoffs(hub_client, db_session, test_user)
     assert 'name="handoff" value="send_back"' in body
     assert "Approve &amp; notify" in body
     assert ">Send back</button>" in body  # Deal Sheet inline decide bar copy
-    assert "Confirm reject" in body  # the hard-no path keeps its required note
+    assert "required to reject" in body  # the shared inline note carries the reject reason
 
 
 # ── handoff=proceed ──────────────────────────────────────────────────────
