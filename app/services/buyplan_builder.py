@@ -587,11 +587,52 @@ def generate_ai_flags(plan: BuyPlan, db: Session, customer_region: str | None = 
                 }
             )
 
+        # ── Vendor risk (shared with the offer Pre-check — one computation, so the
+        #    same vendor can't read differently on the offer vs here). Surfaces only the
+        #    high-signal caution codes as a flag; the full band lives on the Pre-check.
+        if offer is not None:
+            _check_vendor_risk(line, offer, flags, db)
+
     # ── Quantity gap check (plan-level)
     if plan.lines:
         _check_quantity_gaps(plan, flags, db)
 
     return flags
+
+
+# Vendor caution codes worth raising as a buy-plan flag, with their severity. A
+# standing do-not-contact / blacklist is critical; cancellation/feedback history warns.
+_VENDOR_RISK_CODES: dict[str, str] = {
+    "internal_do_not_contact_history": "critical",
+    "buyer_marked_do_not_contact": "critical",
+    "high_cancellation_rate": "warning",
+    "repeated_bad_feedback": "warning",
+}
+
+
+def _check_vendor_risk(line: BuyPlanLine, offer: Offer, flags: list[dict], db: Session):
+    """Append a vendor_risk flag when the line's vendor carries high-signal caution
+    codes.
+
+    Reads the SHARED vendor-safety computation (sourcing_leads.vendor_safety_for_card)
+    so the flag can never disagree with the offer Pre-check for the same vendor.
+    """
+    from .sourcing_leads import vendor_safety_for_card
+
+    vc = offer.vendor_card or (db.get(VendorCard, offer.vendor_card_id) if offer.vendor_card_id else None)
+    caution = vendor_safety_for_card(db, vc)["caution"]
+    hits = [c for c in caution if c in _VENDOR_RISK_CODES]
+    if not hits:
+        return
+    severity = "critical" if any(_VENDOR_RISK_CODES[c] == "critical" for c in hits) else "warning"
+    flags.append(
+        {
+            "type": "vendor_risk",
+            "severity": severity,
+            "line_id": line.id,
+            "message": "Vendor risk: " + ", ".join(c.replace("_", " ") for c in hits),
+        }
+    )
 
 
 def _check_better_offer(

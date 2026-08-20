@@ -61,6 +61,11 @@
               <span class="text-gray-400" x-text="o.condition"></span>
               <span class="text-gray-400 tabular-nums" x-show="o.avail">avail <span x-text="(o.avail || 0).toLocaleString()"></span></span>
               <span x-show="o.locked" class="inline-flex items-center rounded border border-amber-200 bg-amber-50 px-1 text-[10px] font-medium text-amber-700" title="A PO is cut on this line — vendor/qty locked; sell stays editable">PO cut</span>
+              {# AI flag count for this picked line (fresh) — @click.stop so reading it
+                 doesn't pick/unpick the offer; the full list is in the header strip. #}
+              <span x-show="o.flags" @click.stop
+                    class="inline-flex items-center gap-0.5 rounded border border-rose-200 bg-rose-50 px-1 text-[11px] font-medium text-rose-700"
+                    title="This line has AI flags — see the header">&#9873; <span x-text="o.flags"></span></span>
               <span class="ml-auto flex items-center gap-1">
                 qty &rarr;
                 <input type="text" inputmode="numeric" x-model="o.qty"
@@ -110,7 +115,10 @@
         {% for line in lines %}
         <tr>
           <td class="px-3 py-1.5 font-mono text-gray-900">{{ (line.requirement.primary_mpn if line.requirement else none) or (line.offer.mpn if line.offer else none) or '—' }}</td>
-          <td class="px-3 py-1.5 text-gray-700">{{ line.offer.vendor_name if line.offer else '—' }}</td>
+          <td class="px-3 py-1.5 text-gray-700">{{ line.offer.vendor_name if line.offer else '—' }}
+            {% set _lf = (ai_flags_by_line | default({})).get(line.id) %}
+            {% if _lf %}<span class="ml-1 inline-flex items-center gap-0.5 rounded border border-rose-200 bg-rose-50 px-1 text-[11px] font-medium text-rose-700" title="AI flags on this line — see the header">&#9873; {{ _lf | length }}</span>{% endif %}
+          </td>
           <td class="px-3 py-1.5 text-right tabular-nums">{{ line.quantity }} × ${{ '{:,.4f}'.format(line.unit_cost | float) if line.unit_cost is not none else '—' }}</td>
           <td class="px-3 py-1.5 text-right tabular-nums">{% if line.unit_sell is not none %}${{ '{:,.4f}'.format(line.unit_sell | float) }}{% else %}—{% endif %}</td>
           <td class="px-3 py-1.5">{% if line.po_number %}{{ copy_chip(line.po_number) }}{% else %}<span class="text-gray-300">—</span>{% endif %}</td>
