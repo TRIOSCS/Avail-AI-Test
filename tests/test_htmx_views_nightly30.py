@@ -851,11 +851,14 @@ class TestBuyPlanDetail:
         assert resp.status_code == 404
 
     def test_detail_found(self, client: TestClient, test_buy_plan):
-        # The detail page retired into the workspace (Deal Sheet T3b): a found plan 308s
-        # to the deep link (a missing one still 404s first — see test_detail_not_found).
+        # The detail page retired into the workspace (Deal Sheet T3b). An htmx caller
+        # gets HX-Redirect — following a 308 would swap the whole /v2/approvals document
+        # inside the caller's target (doubled chrome, nav audit 2026-08-20 #4). A plain
+        # browser still 308s (covered in tests/test_nav_wayfinding.py). A missing plan
+        # still 404s first — see test_detail_not_found.
         resp = client.get(f"/v2/partials/buy-plans/{test_buy_plan.id}", headers=HX, follow_redirects=False)
-        assert resp.status_code == 308
-        assert resp.headers["location"] == f"/v2/approvals?tab=sales-orders&select={test_buy_plan.id}"
+        assert resp.status_code == 200
+        assert resp.headers["HX-Redirect"] == f"/v2/approvals?tab=sales-orders&select={test_buy_plan.id}"
 
 
 class TestBuyPlanSubmit:

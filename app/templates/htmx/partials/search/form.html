@@ -5,11 +5,13 @@
    Called by: htmx_views.search_form_partial (no mpn).
    Depends on: part_dossier.py (dossier shell + recent endpoint). #}
 
+<title hx-swap-oob="true">Part Search — AvailAI</title>
+
 <div class="max-w-2xl mx-auto space-y-3">
   {# Search form card — deep-links to the dossier. #}
   <div class="bg-white border border-brand-200 rounded-lg shadow-card p-3">
     <form x-data="{ q: '' }"
-          @submit.prevent="const v=q.trim(); if(v){ const u='/v2/partials/search?mpn='+encodeURIComponent(v); htmx.ajax('GET', u, {target:'#main-content', indicator:'#ds-landing-spin'}); history.pushState({},'','/v2/search?mpn='+encodeURIComponent(v)); }">
+          @submit.prevent="const v=q.trim(); if(v){ const u='/v2/partials/search?mpn='+encodeURIComponent(v); htmx.ajax('GET', u, {target:'#main-content', indicator:'#ds-landing-spin', push:'/v2/search?mpn='+encodeURIComponent(v)}); }">
       <div class="flex gap-2">
         <input aria-label="Part number search" type="text" name="mpn" x-model="q"
                placeholder="Enter part number (e.g. LM317T, STM32F407VG)"

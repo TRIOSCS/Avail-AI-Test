@@ -31,10 +31,8 @@
         {% for bp in buy_plans %}
         <tr class="hover:bg-brand-50 cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-inset focus:ring-accent-500"
             role="button" tabindex="0"
-            hx-get="/v2/partials/buy-plans/{{ bp.id }}"
-            hx-target="#main-content"
-            hx-push-url="/v2/buy-plans/{{ bp.id }}"
-            hx-trigger="click, keyup[key=='Enter']">
+            @click="window.location.href = '/v2/approvals?tab=sales-orders&select={{ bp.id }}'"
+            @keyup.enter="window.location.href = '/v2/approvals?tab=sales-orders&select={{ bp.id }}'">
           <td class="px-4 py-2.5 text-sm font-medium text-brand-500 hover:text-brand-600">#{{ bp.id }}</td>
           <td class="px-4 py-2.5 text-sm text-gray-600">{{ bp.requisition.name if bp.requisition else "—" }}</td>
           <td class="px-4 py-2.5 text-sm text-gray-600 font-mono">{{ bp.sales_order_number or "—" }}</td>

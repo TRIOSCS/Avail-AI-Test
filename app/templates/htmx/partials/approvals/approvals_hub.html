@@ -28,7 +28,7 @@
             hx-target="#ap-hub-body"
             hx-swap="innerHTML"
             hx-include="#aw-filters"
-            hx-push-url="/v2/approvals?tab={{ key }}"
+            hx-replace-url="/v2/approvals?tab={{ key }}"
             @click="tab = '{{ key }}'"
             :class="tab === '{{ key }}'
                     ? 'bg-accent-600 text-white shadow-sm'

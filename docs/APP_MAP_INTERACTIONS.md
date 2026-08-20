@@ -4111,6 +4111,89 @@ OUTBOUND email is not captured — that would need a Sent-folder scan.)
 
 ---
 
+## 12. Navigation & History (Wayfinding Layer)
+
+Four cooperating mechanisms (nav audit 2026-08-20) keep the browser URL, the
+history stack, and the rendered page telling the same story. The invariant:
+**the address bar always holds a canonical `/v2/...` page URL that survives
+reload/share/Back — never a `/v2/partials/...` fragment URL.**
+
+```
+1. Shell negotiation (reload/share/back-past-cache of ANY partial URL):
+    browser GET /v2/partials/<anything>            Sec-Fetch-Dest: document
+        |
+        v
+    ShellNegotiationMiddleware (app/main.py)  — pure ASGI scope REWRITE
+        |   GET + /v2/partials/* + not export-ish + Sec-Fetch-Dest: document
+        |   → scope.path = /v2/shell, ?partial=<original url>
+        |   (htmx/XHR/TestClient requests lack the header → untouched)
+        v
+    htmx_views.v2_shell  — ordinary route, ordinary auth (get_user):
+        logged-out → login page; partial not starting /v2/partials/ OR
+        containing ".." → 404 (traversal would let the embedded hx-get
+        climb out once the browser normalizes it); the nav-highlight key
+        is validated against the closed _VALID_NAV_KEYS set, never the raw
+        ?partial= segment (it lands in base.html's Alpine x-data, which the
+        browser HTML-decodes before JS eval — a raw segment = reflected XSS);
+        else full_page_shell(...) = chrome + nav lazy-loading the SAME
+        partial into #main-content
+
+2. Server-owned canonical history (list partials):
+    requisitions/prospecting list routes call _shared.set_canonical_url(resp,
+    request, "/v2/requisitions?view=list" | "/v2/prospecting")
+        → HX-Replace-Url: <canonical page URL>+<current query> on every htmx
+          response. REPLACE, never push: entering the page (the nav <a>'s own
+          hx-push-url) is the single history entry; filters/typing/lazy loads
+          just keep the address bar truthful. Templates must never carry
+          hx-push-url="true" on filter controls (pushes the partial URL).
+
+3. Workspace state in the URL (Approvals):
+    ?select= accepts plan-N / line-N / prepay-N / bare digits on all four tabs
+    (_normalize_select + _selected_row in approvals_hub.py, access-gated via
+    get_buyplan_for_user). Row selection does history.replaceState to
+    /v2/approvals?tab=..&select=..; tab pills use hx-replace-url. htmx
+    htmx:historyRestore listener (htmx_app.js) re-renders #ap-hub-body from
+    the URL. The retired /v2/partials/buy-plans/{id} answers htmx callers
+    with HX-Redirect (a followed 308 would nest the full document — doubled
+    chrome) and plain browsers with 308.
+
+4. Query threading (v2_page + v2_shell):
+    /v2/requisitions?view=list&q=… threads the filters into the lazy partial
+    URL (minus `view`, which picks the branch); detail views and the generic
+    else thread the whole query. hx-history-elt sits on #main-content;
+    htmx.config.refreshOnHistoryMiss=true turns a history-cache miss into a
+    full reload, which mechanism 1 then answers with a correct shell.
+
+5. History hygiene (template conventions, pinned by tests/test_nav_wayfinding.py):
+    - set_canonical_url stamps ONLY when HX-Trigger-Name is present (a named
+      filter control). An HX-Replace-Url response header OVERRIDES the
+      element's own hx-push-url in htmx, so stamping a navigation would erase
+      the origin page. Unnamed state pills carry template hx-replace-url with
+      the baked canonical query instead.
+    - Row containers that push their detail URL carry
+      hx-disinherit="hx-push-url" (descendant actions must not push).
+    - NO raw history.pushState anywhere — imperative navigations use
+      htmx.ajax(..., {push: canonicalUrl}) so htmx can snapshot/restore.
+    - Junk-entry guards: bottom-nav re-taps of the exact current URL are
+      no-ops; origination Cancel pushes nothing; best-match cards render link
+      attrs only when the URL map + id resolve (bm_dead guard).
+
+6. Mobile shell: bottom nav = 4 primary (Sales Hub, Approvals, Search,
+    Tasks) + More sheet holding the rest (same hx/access/badge wiring); the
+    workspace ↑ List chip is mounted once in _workspace_split.html outside
+    #aw-pane (sticky top-12 under the topbar) so every pane type has it; one
+    breakpoint (768 = Tailwind md) shared by CSS and JS.
+
+7. Identity: topbar renders a current-view label kept fresh from
+    htmx:pushed-into-history / htmx:replaced-in-history via a URL-prefix map;
+    every top surface sends <title hx-swap-oob>; urlToNav covers the lateral
+    pages (/v2/qp, /v2/follow-ups, /v2/offers, /v2/quotes, /v2/sourcing,
+    /v2/companies, /v2/trouble-tickets); Follow-ups and Offer review carry an
+    h1 + a "← Sightings" way back; the QP has "← Back to deal".
+```
+
+---
+
 ## Enrichment Pipeline
 
 ### CRM / Vendor Firmographic + Contact Enrichment

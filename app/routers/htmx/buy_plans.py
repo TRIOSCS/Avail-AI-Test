@@ -466,10 +466,11 @@ async def prepay_request_decide(
 
 @router.get("/v2/partials/buy-plans/{plan_id:int}")
 async def buy_plan_detail_partial(
+    request: Request,
     plan_id: int,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
-) -> RedirectResponse:
+):
     """Retired legacy plan-detail page → 308 into the Approvals Workspace deep link.
 
     The Deal Sheet (the workspace pane) is the plan's one surface (T3). The
@@ -479,7 +480,13 @@ async def buy_plan_detail_partial(
     ``{tab}`` redirect never captures a numeric id.
     """
     get_buyplan_for_user(db, user, plan_id)
-    return RedirectResponse(f"/v2/approvals?tab=sales-orders&select={plan_id}", status_code=308)
+    deep_link = f"/v2/approvals?tab=sales-orders&select={plan_id}"
+    # An htmx caller would FOLLOW a 308 and swap the full /v2/approvals document
+    # inside its target (doubled chrome — nav audit 2026-08-20 #4); HX-Redirect makes
+    # the client do a real top-level navigation instead.
+    if request.headers.get("hx-request"):
+        return HTMLResponse("", headers={"HX-Redirect": deep_link})
+    return RedirectResponse(deep_link, status_code=308)
 
 
 # ── Retired hub lens redirects (registered AFTER the {plan_id:int} detail route so a

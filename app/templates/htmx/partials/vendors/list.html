@@ -206,6 +206,7 @@
             hx-get="/v2/partials/vendors/{{ v.id }}"
             hx-target="{{ hx_target|default('#main-content') }}"
             hx-push-url="/v2/vendors/{{ v.id }}"
+            hx-disinherit="hx-push-url"
             hx-trigger="click, keyup[key=='Enter']"
             preload="mouseover">
           {# Cadence dot #}

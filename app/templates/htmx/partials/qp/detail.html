@@ -51,6 +51,15 @@
 
   {# ═══ 1. COMPACT HEADER ═══ #}
   <div class="mb-4">
+    {# Way back (nav audit #5): the QP was a cul-de-sac — its only exit was browser
+       Back. A real link lands on the owning deal's workspace pane. #}
+    {% if bp %}
+    <a href="/v2/approvals?tab=sales-orders&select={{ bp.id }}"
+       class="inline-flex items-center gap-1 text-sm text-accent-600 hover:text-accent-700 mb-1.5">
+      <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
+      Back to deal
+    </a>
+    {% endif %}
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div class="flex items-center gap-3">
         <h1 class="h1">Quality Plan #{{ qp.id }}</h1>
@@ -71,9 +80,7 @@
       <span>
         Buy Plan:
         {% if bp %}
-        <a hx-get="/v2/partials/buy-plans/{{ bp.id }}"
-           hx-target="#main-content"
-           hx-push-url="/v2/buy-plans/{{ bp.id }}"
+        <a href="/v2/approvals?tab=sales-orders&select={{ bp.id }}"
            class="font-mono text-brand-600 hover:text-brand-500 cursor-pointer">#{{ bp.id }}</a>
         {% else %}
         <span class="text-gray-400 italic">unavailable</span>

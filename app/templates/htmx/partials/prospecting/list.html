@@ -8,6 +8,8 @@
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
 
+<title hx-swap-oob="true">Prospecting — AvailAI</title>
+
 <div class="page-fluid">
 
   {# ── Page header ─────────────────────────────────────────────────── #}
@@ -74,7 +76,7 @@
               aria-pressed="{{ 'true' if status == val else 'false' }}"
               hx-get="/v2/partials/prospecting?status={{ val|urlencode }}&sort={{ sort|urlencode }}&q={{ q|urlencode }}&scope={{ scope|urlencode }}"
               hx-target="#main-content"
-              hx-push-url="true">
+              hx-replace-url="/v2/prospecting?status={{ val|urlencode }}&sort={{ sort|urlencode }}&q={{ q|urlencode }}&scope={{ scope|urlencode }}">
         {{ label }}
         <span class="ml-1 text-xs opacity-75">{{ pill_counts.get(val, 0) }}</span>
       </button>
@@ -87,7 +89,6 @@
                hx-get="/v2/partials/prospecting"
                hx-trigger="keyup changed delay:300ms"
                hx-target="#main-content"
-               hx-push-url="true"
                hx-include="[name='sort'], [name='status'], [name='scope']">
         {# Everyone / Mine scope toggle — relabelled from All/Mine so it no longer reads
            as a duplicate of the "All" status pill. Scopes grid + pill counts to my claims. #}
@@ -98,7 +99,7 @@
                   aria-pressed="{{ 'true' if scope == s else 'false' }}"
                   hx-get="/v2/partials/prospecting?scope={{ s|urlencode }}&status={{ status|urlencode }}&sort={{ sort|urlencode }}&q={{ q|urlencode }}"
                   hx-target="#main-content"
-                  hx-push-url="true">
+                  hx-replace-url="/v2/prospecting?scope={{ s|urlencode }}&status={{ status|urlencode }}&sort={{ sort|urlencode }}&q={{ q|urlencode }}">
             {{ lbl }}
           </button>
           {% endfor %}
@@ -108,7 +109,6 @@
                 hx-get="/v2/partials/prospecting"
                 hx-trigger="change"
                 hx-target="#main-content"
-                hx-push-url="true"
                 hx-include="[name='q'], [name='status'], [name='scope']">
           <option value="ai_match_desc" {% if sort == 'ai_match_desc' %}selected{% endif %}>AI match (best first)</option>
           <option value="buyer_ready_desc" {% if sort == 'buyer_ready_desc' %}selected{% endif %}>Most buyer-ready</option>
@@ -145,7 +145,7 @@
     {% if page > 1 %}
     <a hx-get="/v2/partials/prospecting?page={{ page - 1 }}&status={{ status|urlencode }}&sort={{ sort|urlencode }}&q={{ q|urlencode }}&scope={{ scope|urlencode }}"
        hx-target="#main-content"
-       hx-push-url="true"
+       hx-replace-url="/v2/prospecting?page={{ page - 1 }}&status={{ status|urlencode }}&sort={{ sort|urlencode }}&q={{ q|urlencode }}&scope={{ scope|urlencode }}"
        class="btn-secondary btn-sm cursor-pointer">
       &larr; Prev
     </a>
@@ -158,7 +158,7 @@
     {% if page < total_pages %}
     <a hx-get="/v2/partials/prospecting?page={{ page + 1 }}&status={{ status|urlencode }}&sort={{ sort|urlencode }}&q={{ q|urlencode }}&scope={{ scope|urlencode }}"
        hx-target="#main-content"
-       hx-push-url="true"
+       hx-replace-url="/v2/prospecting?page={{ page + 1 }}&status={{ status|urlencode }}&sort={{ sort|urlencode }}&q={{ q|urlencode }}&scope={{ scope|urlencode }}"
        class="btn-secondary btn-sm cursor-pointer">
       Next &rarr;
     </a>

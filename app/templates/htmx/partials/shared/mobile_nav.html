@@ -11,28 +11,38 @@
        moreOpen: false,
        activeNav: '{{ current_view }}',
        urlToNav(url) {
-         const map = {'/v2/requisitions':'requisitions','/v2/sightings':'sightings','/v2/materials':'materials','/v2/search':'search','/v2/buy-plans':'buy-plans','/v2/resell':'resell','/v2/crm':'crm','/v2/customers':'crm','/v2/contacts':'crm','/v2/vendor-contacts':'crm','/v2/vendors':'crm','/v2/proactive':'proactive','/v2/prospecting':'prospecting','/v2/my-day':'my-day','/v2/approvals':'buy-plans','/v2/settings':'settings'};
+         const map = {'/v2/requisitions':'requisitions','/v2/sightings':'sightings','/v2/materials':'materials','/v2/search':'search','/v2/buy-plans':'buy-plans','/v2/resell':'resell','/v2/crm':'crm','/v2/customers':'crm','/v2/contacts':'crm','/v2/vendor-contacts':'crm','/v2/vendors':'crm','/v2/companies':'crm','/v2/proactive':'proactive','/v2/prospecting':'prospecting','/v2/my-day':'my-day','/v2/approvals':'buy-plans','/v2/settings':'settings','/v2/qp':'buy-plans','/v2/quotes':'requisitions','/v2/follow-ups':'sightings','/v2/offers':'sightings','/v2/sourcing':'requisitions','/v2/trouble-tickets':'settings'};
          for (const [prefix, id] of Object.entries(map)) { if (url.startsWith(prefix)) return id; }
          return this.activeNav;
        }
      }"
      @htmx:pushed-into-history.window="activeNav = urlToNav($event.detail.path || location.pathname)"
+     @htmx:replaced-in-history.window="activeNav = urlToNav($event.detail.path || location.pathname)"
+     @htmx:history-restore.window="activeNav = urlToNav($event.detail.path || location.pathname)"
      @click.outside="moreOpen = false"
      @keydown.escape.window="moreOpen = false"
      :data-current-view="activeNav"
      aria-label="Main navigation">
   <div class="flex items-stretch justify-center mx-auto max-w-[720px]">
+    {# Nav audit #9: 10 slots at w-[62px] demanded 682px on a 390px phone — sub-44px
+       tap targets were the most direct cause of "kept ending up on different pages".
+       Four primary destinations stay in the bar; the rest live in the More sheet
+       below (same hx behavior, badges included). #}
     {% set nav_items = [
       ('requisitions', 'Sales Hub', '/v2/requisitions', '/v2/partials/parts/workspace',
        'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2'),
+      ('buy-plans', 'Approvals', '/v2/approvals', '/v2/partials/approvals',
+       'M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 100 4 2 2 0 000-4z'),
+      ('search', 'Search', '/v2/search', '/v2/partials/search',
+       'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z'),
+      ('my-day', 'Tasks', '/v2/my-day', '/v2/partials/my-day',
+       'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z')
+    ] %}
+    {% set more_nav_items = [
       ('sightings', 'Sightings', '/v2/sightings', '/v2/partials/sightings/workspace',
        'M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z'),
       ('materials', 'Materials', '/v2/materials', '/v2/partials/materials/workspace',
        'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4'),
-      ('search', 'Search', '/v2/search', '/v2/partials/search',
-       'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z'),
-      ('buy-plans', 'Approvals', '/v2/approvals', '/v2/partials/approvals',
-       'M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 100 4 2 2 0 000-4z'),
       ('resell', 'Resell', '/v2/resell', '/v2/partials/resell/workspace',
        'M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4'),
       ('crm', 'CRM', '/v2/crm', '/v2/partials/crm/shell',
@@ -40,10 +50,12 @@
       ('proactive', 'Proactive', '/v2/proactive', '/v2/partials/proactive',
        'M13 10V3L4 14h7v7l9-11h-7z'),
       ('prospecting', 'Prospect', '/v2/prospecting', '/v2/partials/prospecting',
-       'M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7'),
-      ('my-day', 'Tasks', '/v2/my-day', '/v2/partials/my-day',
-       'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z')
+       'M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7')
     ] %}
+    {% set more_nav_ids = more_nav_items | map(attribute=0) | list %}
+    {# Single-quoted JS array literal — tojson would emit double quotes and terminate
+       the double-quoted :class attribute. Ids are fixed slugs, safe to inline. #}
+    {% set more_ids_js = "['settings','" ~ (more_nav_ids | join("','")) ~ "']" %}
     {# The "Approvals" nav item (internal id 'buy-plans' — alert badge + active-nav wiring)
        leads to the Approvals Workspace at /v2/approvals (/v2/partials/approvals: Sales
        Orders / Buy Plans / Purchase Orders / Prepayments). The old /v2/buy-plans hub
@@ -54,13 +66,18 @@
     {# Per-user nav gate: hide a section the user lacks access to. `access` is a
        {nav-id: bool} map from _base_ctx; default-show if it's somehow absent. #}
     {% if (access | default({})).get(id, True) %}
+    {# Trigger filter (nav audit #12): re-tapping the tab for the EXACT page you are
+       already on is a no-op — without it every re-tap pushed a duplicate history
+       entry and Back visibly "did nothing". From a detail page or filtered list the
+       pathname+search differs, so the tap still navigates home. #}
     <a href="{{ href }}"
        hx-get="{{ partial }}"
        hx-target="#main-content"
        hx-push-url="{{ href }}"
-       @click="activeNav = '{{ id }}'"
+       hx-trigger="click[(window.location.pathname + window.location.search) !== '{{ href }}']"
+       @click="if ((window.location.pathname + window.location.search) === '{{ href }}') $event.preventDefault(); else activeNav = '{{ id }}'"
        :class="activeNav === '{{ id }}' ? 'text-accent-600' : 'text-gray-500 hover:text-gray-600'"
-       class="relative flex flex-col items-center justify-center py-1.5 text-center transition-colors duration-150 w-[62px] min-w-0">
+       class="relative flex flex-col items-center justify-center py-1.5 text-center transition-colors duration-150 flex-1 max-w-[96px] min-w-0">
       <span x-show="activeNav === '{{ id }}'" x-cloak class="absolute top-0 inset-x-[8px] h-[3px] bg-accent-500 rounded-b-sm"></span>
       <div class="relative inline-flex">
         <svg xmlns="http://www.w3.org/2000/svg"
@@ -107,13 +124,14 @@
     {% endif %}
     {% endfor %}
 
-    {# More button — vertical dots #}
-    <div class="relative flex items-stretch w-[62px] min-w-0">
+    {# More button — vertical dots. Lights up when the CURRENT view lives in the sheet
+       (its nav item is hidden), so "you are here" survives the 4+More split. #}
+    <div class="relative flex items-stretch flex-1 max-w-[96px] min-w-0">
       <button @click="moreOpen = !moreOpen"
-              :class="(activeNav === 'settings' || moreOpen) ? 'text-accent-600' : 'text-gray-500 hover:text-gray-600'"
-              class="flex flex-col items-center justify-center py-1.5 text-center transition-colors duration-150 w-[62px]"
+              :class="(moreOpen || {{ more_ids_js }}.includes(activeNav)) ? 'text-accent-600' : 'text-gray-500 hover:text-gray-600'"
+              class="flex flex-col items-center justify-center py-1.5 text-center transition-colors duration-150 w-full"
               aria-label="More options">
-        <span x-show="activeNav === 'settings'" x-cloak class="absolute top-0 inset-x-[8px] h-[3px] bg-accent-500 rounded-b-sm"></span>
+        <span x-show="{{ more_ids_js }}.includes(activeNav)" x-cloak class="absolute top-0 inset-x-[8px] h-[3px] bg-accent-500 rounded-b-sm"></span>
         <svg xmlns="http://www.w3.org/2000/svg" class="h-[17px] w-[17px]" viewBox="0 0 24 24" fill="currentColor">
           <circle cx="12" cy="5" r="2"/>
           <circle cx="12" cy="12" r="2"/>
@@ -139,12 +157,54 @@
           <p class="text-[11px] text-brand-400 mt-0.5">{{ user_email or '' }}</p>
         </div>
 
+        {# Secondary modules (nav audit #9) — same hx behavior + access gating as the
+           bar items; the crm/proactive badge pollers live on, rendered as row pills. #}
+        {% for id, label, href, partial, icon_path in more_nav_items %}
+        {% if (access | default({})).get(id, True) %}
+        {# Same re-tap no-op guard as the bar items (nav audit #12): tapping the sheet
+           entry for the page you are already on just closes the sheet — no dup push. #}
+        <a href="{{ href }}"
+           hx-get="{{ partial }}"
+           hx-target="#main-content"
+           hx-push-url="{{ href }}"
+           hx-trigger="click[(window.location.pathname + window.location.search) !== '{{ href }}']"
+           @click="moreOpen = false; if ((window.location.pathname + window.location.search) !== '{{ href }}') activeNav = '{{ id }}'"
+           :class="activeNav === '{{ id }}' ? 'text-accent-600 bg-accent-50' : 'text-gray-700 hover:bg-brand-50/50'"
+           class="flex items-center gap-2 px-3.5 py-2 text-[13px] font-medium transition-colors">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 flex-shrink-0 text-brand-400" fill="none"
+               viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+            <path d="{{ icon_path }}"/>
+          </svg>
+          {{ label }}
+          {% if id == 'proactive' %}
+          <span id="proactive-nav-badge"
+                hx-get="/v2/partials/proactive/badge"
+                hx-trigger="load, every 60s"
+                hx-target="#proactive-nav-badge"
+                hx-swap="innerHTML"
+                hx-push-url="false"
+                class="ml-auto flex items-center justify-center min-w-[14px] h-[14px]"></span>
+          {% elif id == 'crm' %}
+          <span id="crm-nav-badge"
+                hx-get="/v2/partials/alerts/crm/badge"
+                hx-trigger="load, every 60s"
+                hx-target="#crm-nav-badge"
+                hx-swap="innerHTML"
+                hx-push-url="false"
+                class="ml-auto flex items-center justify-center min-w-[14px] h-[14px]"></span>
+          {% endif %}
+        </a>
+        {% endif %}
+        {% endfor %}
+        <div class="border-b border-brand-100"></div>
+
         {# Settings #}
         <a href="/v2/settings"
            hx-get="/v2/partials/settings"
            hx-target="#main-content"
            hx-push-url="/v2/settings"
-           @click="moreOpen = false; activeNav = 'settings'"
+           hx-trigger="click[(window.location.pathname + window.location.search) !== '/v2/settings']"
+           @click="moreOpen = false; if ((window.location.pathname + window.location.search) !== '/v2/settings') activeNav = 'settings'"
            :class="activeNav === 'settings' ? 'text-accent-600 bg-accent-50' : 'text-gray-700 hover:bg-brand-50/50'"
            class="flex items-center gap-2 px-3.5 py-2 text-[13px] font-medium transition-colors">
           <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 flex-shrink-0 text-brand-400" fill="none"

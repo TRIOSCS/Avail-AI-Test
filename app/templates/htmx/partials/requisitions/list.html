@@ -62,7 +62,6 @@
                  hx-get="/v2/partials/requisitions"
                  hx-target="#main-content"
                  hx-swap="innerHTML"
-                 hx-push-url="true"
                  hx-include="#req-filters"
                  :hx-vals="JSON.stringify({status: rStatus, sort: rSort, dir: rDir})"
                  hx-trigger="input changed delay:300ms"
@@ -101,7 +100,6 @@
           <select name="owner" aria-label="Filter by owner"
                   hx-get="/v2/partials/requisitions"
                   hx-target="#main-content"
-                  hx-push-url="true"
                   hx-include="#req-filters"
                   :hx-vals="JSON.stringify({status: rStatus, sort: rSort, dir: rDir})"
                   class="px-3 py-1.5 border border-gray-200 rounded-lg text-sm input-focus">
@@ -119,7 +117,6 @@
           <input type="date" name="date_from" value="{{ date_from }}" aria-label="Filter from date"
                  hx-get="/v2/partials/requisitions"
                  hx-target="#main-content"
-                 hx-push-url="true"
                  hx-include="#req-filters"
                  :hx-vals="JSON.stringify({status: rStatus, sort: rSort, dir: rDir})"
                  class="px-3 py-1.5 border border-gray-200 rounded-lg text-sm input-focus">
@@ -129,7 +126,6 @@
           <input type="date" name="date_to" value="{{ date_to }}" aria-label="Filter to date"
                  hx-get="/v2/partials/requisitions"
                  hx-target="#main-content"
-                 hx-push-url="true"
                  hx-include="#req-filters"
                  :hx-vals="JSON.stringify({status: rStatus, sort: rSort, dir: rDir})"
                  class="px-3 py-1.5 border border-gray-200 rounded-lg text-sm input-focus">
@@ -147,11 +143,13 @@
       <div class="flex flex-wrap gap-2">
         {# 'won' is the real RequisitionStatus; the old 'awarded' value doesn't exist and always returned empty. #}
         {% for s_val, s_label in [('', 'All'), ('open', 'Open'), ('hotlist', 'Hotlist'), ('won', 'Won')] %}
-        <button type="button"
+        {# name= makes HX-Trigger-Name arrive so set_canonical_url stamps the replace
+           (the pill's query is Alpine-dynamic — a static hx-replace-url can't carry it).
+           hx-vals overrides the button's own empty status param. #}
+        <button type="button" name="status"
                 @click="rStatus = '{{ s_val }}'"
                 hx-get="/v2/partials/requisitions"
                 hx-target="#main-content"
-                hx-push-url="true"
                 hx-include="#req-filters"
                 :hx-vals="JSON.stringify({status: '{{ s_val }}', sort: rSort, dir: rDir})"
                 class="px-3 py-1 text-xs font-medium rounded-full transition-colors
@@ -181,7 +179,6 @@
                 hx-get="/v2/partials/requisitions"
                 hx-target="#main-content"
                 hx-swap="innerHTML"
-                hx-push-url="true"
                 hx-include="#req-filters"
                 :hx-vals="JSON.stringify({status: rStatus, sort: rSort, dir: rDir})"
                 class="px-3 py-1 border border-gray-200 rounded-full text-xs font-medium input-focus">
@@ -192,11 +189,14 @@
         {# Clean & reset — the single reset control: FULL reset via a server GET with no
            params clears search + every filter + grouping; @click re-expands all groups
            (mutate in place, never reassign) and clears the selection. Always visible. #}
+        {# hx-replace-url keeps the address bar truthful after a reset (nav audit #1):
+           the button has no name (no HX-Trigger-Name → the server stamp won't fire),
+           and its canonical URL is static, so a static replace is the right tool. #}
         <button type="button"
                 hx-get="/v2/partials/requisitions"
                 hx-target="#main-content"
                 hx-swap="innerHTML"
-                hx-push-url="true"
+                hx-replace-url="/v2/requisitions?view=list"
                 @click="selectedIds = new Set(); Object.keys(collapsed).forEach(k => collapsed[k] = false)"
                 class="btn btn-sm btn-secondary self-center"
                 title="Clear search, filters &amp; grouping, expand all groups, and clear selection">
@@ -247,8 +247,7 @@
               const ids = Array.from(selectedIds);
               const idStr = ids.join(',');
               if (ids.length === 1) {
-                htmx.ajax('GET', '/v2/partials/requisitions/' + ids[0] + '?tab=build_quote', {target:'#main-content', swap:'innerHTML', indicator:'#quote-builder-skeleton'});
-                window.history.pushState({}, '', '/v2/requisitions/' + ids[0]);
+                htmx.ajax('GET', '/v2/partials/requisitions/' + ids[0] + '?tab=build_quote', {target:'#main-content', swap:'innerHTML', indicator:'#quote-builder-skeleton', push:'/v2/requisitions/' + ids[0]});
               } else {
                 htmx.ajax('GET', '/v2/partials/quote-builder/multi?requisition_ids=' + idStr, {target:'#modal-content', swap:'innerHTML', indicator:'#modal-loading'}).then(() => $dispatch('open-modal', {wide:true}));
               }
@@ -288,9 +287,12 @@
             {% for col_name, col_key in columns %}
             <th class="table-cell--head text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
               {% if col_key %}
-              <a hx-get="/v2/partials/requisitions"
+              {# name="sort" makes HX-Trigger-Name arrive so set_canonical_url stamps
+                 the sorted canonical URL (the sort/dir are Alpine-dynamic via hx-vals,
+                 so a static hx-replace-url can't carry them) — nav audit #10. #}
+              <a name="sort"
+                 hx-get="/v2/partials/requisitions"
                  hx-target="#main-content"
-                 hx-push-url="true"
                  hx-include="#req-filters"
                  :hx-vals="JSON.stringify({status: rStatus, sort: '{{ col_key }}', dir: '{{ 'asc' if sort == col_key and dir == 'desc' else 'desc' }}'})"
                  class="cursor-pointer hover:text-brand-500 inline-flex items-center gap-1">

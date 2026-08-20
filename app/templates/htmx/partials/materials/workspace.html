@@ -2,6 +2,8 @@
    Called by: htmx_views.py materials_workspace route
    Depends on: Alpine.js materialsFilter() in htmx_app.js
 #}
+
+<title hx-swap-oob="true">Materials — AvailAI</title>
 {% from "htmx/partials/materials/filters/_macros.html" import disclosure_header, removable_chip %}
 <div id="materials-workspace" x-data="materialsFilter"
      data-display-names='{{ display_names|tojson }}' class="flex h-full">

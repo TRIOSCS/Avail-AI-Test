@@ -20,6 +20,7 @@ Depends on: app.dependencies, app.database, app.services.approvals.{queue,po_que
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -218,7 +219,7 @@ def _viewer_badges(db: Session, user: User) -> dict[str, int]:
 async def approvals_hub_shell(
     request: Request,
     tab: str = "",
-    select: int | None = None,
+    select: str = "",
     user: User = Depends(require_access(AccessKey.BUY_PLANS)),
     db: Session = Depends(get_db),
 ):
@@ -248,7 +249,7 @@ async def approvals_hub_tab(
     request: Request,
     tab: str,
     scope: str = "all",
-    select: int | None = None,
+    select: str = "",
     q: str = "",
     show_closed: str = "",
     user: User = Depends(require_user),
@@ -272,7 +273,7 @@ def render_tab_body(
     db: Session,
     tab: str,
     scope: str = "all",
-    select: int | None = None,
+    select: str = "",
     q: str = "",
     show_closed: str = "",
 ) -> HTMLResponse:
@@ -1186,27 +1187,67 @@ async def approvals_remove_attachment(
 # ── The left work list ──────────────────────────────────────────────────
 
 
-def _selected_plan_row(db: Session, user: User, rows: list[WorkspaceRow], tab: str, select: int) -> WorkspaceRow | None:
-    """Resolve a ``?select=<plan id>`` deep link to the row whose pane should open.
+_SELECT_SHAPES = re.compile(r"^(?:plan-\d+|line-\d+|prepay-\d+|\d+)$")
 
-    The plan's own rendered row when it is in the list; otherwise (the plan sits in the
-    other live/closed set, or is filtered out) a dispatch-only stand-in targeting its
-    pane — gated by the SAME access check the pane route uses (get_buyplan_for_user), so
-    an unknown/inaccessible id resolves to None and the caller falls back to the normal
-    default silently.
+
+def _normalize_select(raw: str | None, tab: str) -> str:
+    """Validate + normalize a ?select= deep-link key (nav audit 2026-08-20 #3).
+
+    Accepts the row-key shapes the lists use (plan-N / line-N / prepay-N) plus bare
+    digits (the retired /v2/buy-plans/{id} redirect), normalized to the tab's shape.
+    Anything else → "" (silently fall back to the default selection — same contract the
+    digits-only version had).
     """
-    row = next((r for r in rows if r.key == f"plan-{select}"), None)
+    val = (raw or "").strip()
+    if not val or not _SELECT_SHAPES.match(val):
+        return ""
+    if val.isdigit():
+        val = (
+            f"line-{val}" if tab == "purchase-orders" else (f"prepay-{val}" if tab == "prepayments" else f"plan-{val}")
+        )
+    return val
+
+
+def _selected_row(db: Session, user: User, rows: list[WorkspaceRow], tab: str, select_key: str) -> WorkspaceRow | None:
+    """Resolve a normalized select key to the row whose pane should open — on ANY tab.
+
+    The rendered row when present; otherwise an access-gated dispatch-only stand-in
+    targeting the key's pane (the Cut-PO task cards and buyer notifications deep-link
+    line-N on the PO tab; buyer emails predate the list's filters). Unknown or
+    inaccessible keys resolve to None → the caller keeps the normal default.
+    """
+    row = next((r for r in rows if r.key == select_key), None)
     if row is not None:
         return row
+    kind, _, ident = select_key.partition("-")
+    obj_id = int(ident)
     from ...dependencies import get_buyplan_for_user
 
     try:
-        get_buyplan_for_user(db, user, select)
+        if kind == "plan" and tab in ("sales-orders", "buy-plans"):
+            get_buyplan_for_user(db, user, obj_id)
+            pane_url = f"/v2/partials/approvals/plan/{obj_id}/pane?lens={tab}"
+        elif kind == "line" and tab == "purchase-orders":
+            line = db.get(BuyPlanLine, obj_id)
+            if line is None:
+                return None
+            get_buyplan_for_user(db, user, line.buy_plan_id)
+            pane_url = f"/v2/partials/approvals/po/{obj_id}/pane"
+        elif kind == "prepay" and tab == "prepayments":
+            from ...models.quality_plan import Prepayment
+
+            pp = db.get(Prepayment, obj_id)
+            if pp is None:
+                return None
+            get_buyplan_for_user(db, user, pp.buy_plan_id)
+            pane_url = f"/v2/partials/approvals/prepayments/{obj_id}/pane"
+        else:
+            return None
     except HTTPException:
         return None
     return WorkspaceRow(
-        key=f"plan-{select}",
-        pane_url=f"/v2/partials/approvals/plan/{select}/pane?lens={tab}",
+        key=select_key,
+        pane_url=pane_url,
         title="",
         subtitle="",
         status="",
@@ -1222,7 +1263,7 @@ async def approvals_workspace_list(
     q: str = "",
     scope: str = "all",
     show_closed: bool = False,
-    select: int | None = None,
+    select: str = "",
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -1249,8 +1290,9 @@ async def approvals_workspace_list(
     needs = [r for r in rows if r.needs_approval]
     rest = [r for r in rows if not r.needs_approval]
     default_row = needs[0] if needs else None
-    if select is not None and resolved in ("sales-orders", "buy-plans"):
-        default_row = _selected_plan_row(db, user, rows, resolved, select) or default_row
+    select_key = _normalize_select(select, resolved)
+    if select_key:
+        default_row = _selected_row(db, user, rows, resolved, select_key) or default_row
 
     ctx = _base_ctx(request, user, "buy-plans")
     ctx.update(

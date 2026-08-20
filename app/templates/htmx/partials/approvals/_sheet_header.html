@@ -20,7 +20,10 @@
                  'active': 'Purchase — POs in motion', 'inbound': 'Purchase — inbound',
                  'halted': 'Halted', 'completed': 'Done', 'cancelled': 'Cancelled'}[bp.status] %}
 
-<div id="sheet-header" class="space-y-2 max-md:sticky max-md:top-0 max-md:z-10 max-md:bg-white max-md:pb-2 max-md:border-b max-md:border-line-subtle">
+{# No longer sticky on mobile (nav audit #8): sticking at top-0 slid under the 48px
+   topbar, and the workspace's ↑ List chip strip (in _workspace_split.html) is now the
+   one sticky element — two competing sticky bars overlapped at the same offset. #}
+<div id="sheet-header" class="space-y-2 max-md:bg-white max-md:pb-2 max-md:border-b max-md:border-line-subtle">
 
   {# Row 1 — the stage track #}
   <div class="flex items-center gap-2.5">
@@ -44,8 +47,8 @@
       {{ _label }}
     </span>
     {% if _stage_ts and bp.status not in ('completed', 'cancelled') %}{{ age_chip(_stage_ts) }}{% endif %}
-    <span class="hidden max-md:inline-flex text-[11px] font-medium text-accent-600 cursor-pointer whitespace-nowrap"
-          @click="document.getElementById('aw-list')?.scrollIntoView({behavior: 'smooth'})">&uarr; List</span>
+    {# ↑ List chip moved to _workspace_split.html (outside #aw-pane) so ALL pane
+       types get it, not just this one — nav audit #8. #}
   </div>
 
   {# Row 2 — identity + editable cells #}

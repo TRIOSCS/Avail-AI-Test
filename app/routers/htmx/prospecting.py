@@ -40,7 +40,7 @@ from ...models.prospect_account import ProspectAccount
 from ...services.prospect_priority import build_priority_snapshot, build_signal_tags, contacts_summary
 from ...template_env import template_response
 from ...utils.search_builder import SearchBuilder
-from ._shared import _base_ctx
+from ._shared import _base_ctx, set_canonical_url
 
 router = APIRouter(tags=["htmx-views"])
 
@@ -366,7 +366,9 @@ async def prospecting_list_partial(
             "ai_screen_enabled": _list_settings.ai_screen_enabled,
         }
     )
-    return template_response("htmx/partials/prospecting/list.html", ctx)
+    resp = template_response("htmx/partials/prospecting/list.html", ctx)
+    set_canonical_url(resp, request, "/v2/prospecting")
+    return resp
 
 
 # Sprint 8 prospecting static routes — must precede {prospect_id} catch-all

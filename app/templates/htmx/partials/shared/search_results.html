@@ -32,26 +32,32 @@
         "requisition": "/v2/requisitions/" ~ bm.id,
         "company": "/v2/companies/" ~ bm.id,
         "vendor": "/v2/vendors/" ~ bm.id,
-        "vendor_contact": "/v2/vendors/" ~ (bm.vendor_card_id|default(bm.id)),
-        "part": "/v2/requisitions/" ~ (bm.requisition_id|default("")),
-        "offer": "/v2/requisitions/" ~ (bm.requisition_id|default("")),
+        "vendor_contact": "/v2/vendors/" ~ (bm.vendor_card_id|default(bm.id, true)),
+        "part": "/v2/requisitions/" ~ (bm.requisition_id|default("", true)),
+        "offer": "/v2/requisitions/" ~ (bm.requisition_id|default("", true)),
         "material_card": "/v2/search?mpn=" ~ (bm.display_mpn|default(bm.normalized_mpn|default(""))|urlencode),
-        "sighting": "/v2/requisitions/" ~ (bm.requisition_id|default(""))
+        "sighting": "/v2/requisitions/" ~ (bm.requisition_id|default("", true))
       } %}
       {% set bm_partials_map = {
         "requisition": "/v2/partials/requisitions/" ~ bm.id,
         "company": "/v2/partials/customers/" ~ bm.id,
         "vendor": "/v2/partials/vendors/" ~ bm.id,
-        "vendor_contact": "/v2/partials/vendors/" ~ (bm.vendor_card_id|default(bm.id)),
-        "part": "/v2/partials/requisitions/" ~ (bm.requisition_id|default("")),
-        "offer": "/v2/partials/requisitions/" ~ (bm.requisition_id|default("")),
+        "vendor_contact": "/v2/partials/vendors/" ~ (bm.vendor_card_id|default(bm.id, true)),
+        "part": "/v2/partials/requisitions/" ~ (bm.requisition_id|default("", true)),
+        "offer": "/v2/partials/requisitions/" ~ (bm.requisition_id|default("", true)),
         "material_card": "/v2/partials/search?mpn=" ~ (bm.display_mpn|default(bm.normalized_mpn|default(""))|urlencode),
-        "sighting": "/v2/partials/requisitions/" ~ (bm.requisition_id|default(""))
+        "sighting": "/v2/partials/requisitions/" ~ (bm.requisition_id|default("", true))
       } %}
-      <a href="{{ bm_url_map.get(bm.type, '#') }}"
-         hx-get="{{ bm_partials_map.get(bm.type, '#') }}"
+      {# Link attrs only when the type is mapped AND the id resolved — an unmapped type
+         or missing requisition/mpn produced href="#" / truncated URLs that pushed junk
+         history entries (nav audit #12). A bare <a> renders the card non-interactive. #}
+      {% set bm_url = bm_url_map.get(bm.type) %}
+      {% set bm_partial = bm_partials_map.get(bm.type) %}
+      {% set bm_dead = (not bm_url) or bm_url.endswith('/') or bm_url.endswith('=') %}
+      <a {% if not bm_dead %}href="{{ bm_url }}"
+         hx-get="{{ bm_partial }}"
          hx-target="#main-content"
-         hx-push-url="{{ bm_url_map.get(bm.type, '#') }}"
+         hx-push-url="{{ bm_url }}"{% endif %}
          @click="searchOpen = false"
          class="flex items-center gap-3 rounded-lg px-3 py-2.5 bg-brand-50 border border-brand-200 hover:bg-brand-100 transition-colors">
         <div class="flex-shrink-0">

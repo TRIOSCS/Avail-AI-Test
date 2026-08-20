@@ -1,6 +1,7 @@
 <div hx-get="/v2/partials/trouble-tickets/{{ t.id }}"
      hx-target="#main-content"
      hx-push-url="/v2/trouble-tickets/{{ t.id }}"
+     hx-disinherit="hx-push-url"
      class="flex items-center gap-4 px-4 py-3 bg-white border border-gray-100 rounded-lg mb-1 cursor-pointer hover:bg-gray-50 transition-colors">
   {# Checkbox — accent via accent-color + input-focus ring (not brand-500). #}
   <input type="checkbox" @click.stop

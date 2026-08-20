@@ -12,6 +12,24 @@
     <img src="/static/avail_logo_tight.png" alt="AVAIL" class="h-12 w-auto py-1">
   </a>
 
+  {# "You are here" (nav audit #11): compact current-view label, seeded from the shell
+     context and kept fresh from the URL on every htmx history change — the topbar is
+     never re-rendered by partial swaps, so a static server label would go stale. #}
+  {% set _view_labels = {'requisitions':'Sales Hub','sightings':'Sightings','materials':'Materials','search':'Search','buy-plans':'Approvals','resell':'Resell','crm':'CRM','customers':'CRM','vendors':'CRM','contacts':'CRM','vendor-contacts':'CRM','proactive':'Proactive','prospecting':'Prospecting','my-day':'Tasks','settings':'Settings','quotes':'Quote','follow-ups':'Follow-ups','offers':'Offer review','trouble-tickets':'Settings'} %}
+  <span class="flex-shrink-0 text-sm font-semibold text-brand-900 tracking-tight max-sm:hidden"
+        x-data="{
+          label: '{{ _view_labels.get(current_view, '') }}',
+          urlToLabel(url) {
+            const map = {'/v2/qp':'Quality Plan','/v2/follow-ups':'Follow-ups','/v2/offers':'Offer review','/v2/quotes':'Quote','/v2/requisitions':'Sales Hub','/v2/sightings':'Sightings','/v2/materials':'Materials','/v2/search':'Search','/v2/approvals':'Approvals','/v2/buy-plans':'Approvals','/v2/resell':'Resell','/v2/crm':'CRM','/v2/customers':'CRM','/v2/contacts':'CRM','/v2/vendor-contacts':'CRM','/v2/vendors':'CRM','/v2/companies':'CRM','/v2/proactive':'Proactive','/v2/prospecting':'Prospecting','/v2/my-day':'Tasks','/v2/settings':'Settings','/v2/trouble-tickets':'Settings','/v2/sourcing':'Sales Hub'};
+            for (const [prefix, l] of Object.entries(map)) { if (url.startsWith(prefix)) return l; }
+            return this.label;
+          }
+        }"
+        @htmx:pushed-into-history.window="label = urlToLabel($event.detail.path || location.pathname)"
+        @htmx:replaced-in-history.window="label = urlToLabel($event.detail.path || location.pathname)"
+        @htmx:history-restore.window="label = urlToLabel($event.detail.path || location.pathname)"
+        x-text="label"></span>
+
   {# Center: Global search #}
   <div class="relative mx-auto w-full max-w-lg" x-data="{ searchOpen: false }">
     <div class="relative">

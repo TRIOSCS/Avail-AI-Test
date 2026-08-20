@@ -89,6 +89,32 @@ def _base_ctx(request: Request, user: User, current_view: str = "") -> dict:
     }
 
 
+def set_canonical_url(resp, request: Request, canonical_path: str) -> None:
+    """Server-owned history for a filtered list partial (nav audit 2026-08-20 #1, #10).
+
+    Templates must NEVER push a /v2/partials/* URL (the old hx-push-url="true" attrs
+    pushed fragment URLs keystroke-by-keystroke); instead the list route calls this and
+    the response REPLACES the address bar with the CANONICAL page URL + current query.
+
+    The stamp fires only when a NAMED form control triggered the request (HX-Trigger-
+    Name: the filter selects and search inputs) — that is precisely the "state changed
+    within the page" case, where replace keeps one history entry per page and the URL
+    truthful. It deliberately stays silent for navigations (nav <a>s, view toggles,
+    "view all" links have no name): an HX-Replace-Url header OVERRIDES the triggering
+    element's own hx-push-url in htmx, so stamping those would erase the page you came
+    from instead of pushing. Non-htmx callers no-op (a full-page load's address bar is
+    already canonical, and reloads are healed by /v2/shell).
+    """
+    if not request.headers.get("hx-request"):
+        return
+    if not request.headers.get("hx-trigger-name"):
+        return
+    query = str(request.url.query)
+    sep = "&" if "?" in canonical_path else "?"
+    canonical = f"{canonical_path}{sep}{query}" if query else canonical_path
+    resp.headers["HX-Replace-Url"] = canonical
+
+
 def full_page_shell(request: Request, user: User, partial_url: str, nav_active: str = "") -> Response:
     """Serve the base app shell that HTMX-loads ``partial_url`` into #main-content.
 

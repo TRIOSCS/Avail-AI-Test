@@ -10,7 +10,8 @@
             hover:shadow-md transition-all cursor-pointer p-4 space-y-3"
      hx-get="/v2/partials/vendors/{{ v.id }}"
      hx-target="{{ hx_target|default('#main-content') }}"
-     hx-push-url="/v2/vendors/{{ v.id }}">
+     hx-push-url="/v2/vendors/{{ v.id }}"
+     hx-disinherit="hx-push-url">
 
   {# Row 1: Vendor name + strategic badge #}
   <div class="flex items-start justify-between">
