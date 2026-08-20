@@ -32,7 +32,7 @@ def _make_offer(db_session, req_name, mpn):
         mpn=mpn,
         qty_available=100,
         unit_price=1.0,
-        status="new",
+        status="pending_review",
     )
     db_session.add(offer)
     db_session.commit()

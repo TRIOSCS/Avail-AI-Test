@@ -87,7 +87,7 @@ def _make_plan(
     req = Requisition(
         name=f"REQ-POL-{uuid.uuid4().hex[:6]}",
         customer_name="POLCo",
-        status="active",
+        status="open",
         created_by=user.id,
         created_at=datetime.now(UTC),
     )

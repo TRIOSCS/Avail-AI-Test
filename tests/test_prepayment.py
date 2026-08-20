@@ -76,7 +76,7 @@ def _make_buy_plan(db: Session, requester: User):
     req = Requisition(
         name="REQ-PP-001",
         customer_name="Test Co",
-        status="active",
+        status="open",
         created_by=requester.id,
         created_at=datetime.now(UTC),
     )

@@ -35,7 +35,7 @@ def _mk_activity(db, requisition_id=None, company_id=None):
     if requisition_id:
         existing = db.get(Req, requisition_id)
         if existing is None:
-            db.add(Req(id=requisition_id, name=f"REQ-{requisition_id}", status="active"))
+            db.add(Req(id=requisition_id, name=f"REQ-{requisition_id}", status="open"))
             db.flush()
 
     a = ActivityLog(
@@ -218,7 +218,7 @@ class TestSourcingAutoProgressEdgeCases:
         from app.models.sourcing import Requisition as Req
         from app.services.sourcing_auto_progress import auto_progress_status
 
-        req = Req(name="REQ-SKIP", status="active")
+        req = Req(name="REQ-SKIP", status="open")
         db_session.add(req)
         db_session.flush()
 
@@ -243,7 +243,7 @@ class TestSourcingAutoProgressEdgeCases:
         from app.models.sourcing import Requisition as Req
         from app.services.sourcing_auto_progress import auto_progress_status
 
-        req = Req(name="REQ-SKIP2", status="active")
+        req = Req(name="REQ-SKIP2", status="open")
         db_session.add(req)
         db_session.flush()
 

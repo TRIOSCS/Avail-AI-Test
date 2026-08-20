@@ -197,7 +197,7 @@ class TestBuildLinesNoOffers:
         requirement = _make_requirement(db_session, req)
         vendor = _make_vendor(db_session)
         # Add offer with inactive status
-        _make_offer(db_session, req, requirement, vendor, status="inactive")
+        _make_offer(db_session, req, requirement, vendor, status="expired")
         quote = _make_quote(db_session, req, site, user)
         plan = build_buy_plan(quote.id, db_session)
         assert plan is not None

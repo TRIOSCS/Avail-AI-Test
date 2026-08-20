@@ -186,12 +186,10 @@ class TestPipelineAndHelpers:
         transition(test_requisition, "rfqs_sent", test_user, db_session)
         assert test_requisition.status == "rfqs_sent"
 
-    def test_legacy_sourcing_origin_allows_open(self, db_session, test_requisition, test_user):
-        # rows still on a legacy value can always move to open
-        test_requisition.status = "sourcing"
-        db_session.commit()
-        transition(test_requisition, "open", test_user, db_session)
-        assert test_requisition.status == "open"
+    # test_legacy_sourcing_origin_allows_open removed (2026-08-20): legacy values like
+    # "sourcing" can no longer EXIST — ck_requisitions_status (enum-derived, migration
+    # 212 era) rejects them at write time, which supersedes the transition helper's
+    # runtime tolerance. Production was verified clean of legacy values first.
 
     def test_set_hotlist_and_back(self, db_session, test_requisition, test_user):
         test_requisition.status = "open"

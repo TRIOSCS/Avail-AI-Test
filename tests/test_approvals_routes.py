@@ -78,7 +78,7 @@ def _make_buy_plan(db: Session, user: User) -> BuyPlan:
     req = Requisition(
         name=f"REQ-TEST-{uuid.uuid4().hex[:6]}",
         customer_name="TestCo",
-        status="active",
+        status="open",
         created_by=user.id,
         created_at=datetime.now(UTC),
     )

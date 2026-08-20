@@ -23,7 +23,7 @@ from app.models.vendor_sighting_summary import VendorSightingSummary
 from app.models.vendors import VendorCard, VendorContact
 
 
-def _seed(db, *, user=None, status="active", mpn="MPN-001", sourcing_status="open", target_qty=100):
+def _seed(db, *, user=None, status="open", mpn="MPN-001", sourcing_status="open", target_qty=100):
     """Create requisition + requirement + sighting summary."""
     req = Requisition(
         name="Test RFQ",
@@ -213,7 +213,7 @@ class TestSightingsDetailBranches:
         resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
         assert resp.status_code == 200
 
-    @pytest.mark.parametrize("sourcing_status", ["sourcing", "offered", "won", "archived"])
+    @pytest.mark.parametrize("sourcing_status", ["sourcing", "offered", "won", "lost"])
     def test_detail_status_variants(self, client, db_session, sourcing_status):
         """Detail renders for each sourcing status with no extra activity/offers."""
         _, r, _ = _seed(db_session, sourcing_status=sourcing_status)

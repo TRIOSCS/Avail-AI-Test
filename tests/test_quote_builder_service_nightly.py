@@ -104,7 +104,7 @@ class TestGetBuilderData:
             vendor_name="Some Vendor",
             mpn="LM317T",
             normalized_mpn="LM317T",
-            status="inactive",
+            status="expired",
             unit_price=0.50,
             qty_available=1000,
             created_at=datetime.now(UTC),

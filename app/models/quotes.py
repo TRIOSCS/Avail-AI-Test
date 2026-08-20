@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import (
     JSON,
+    CheckConstraint,
     Column,
     ForeignKey,
     Index,
@@ -19,6 +20,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship, validates
 
+from ..constants import QuoteStatus
 from ..database import UTCDateTime
 from .base import Base
 
@@ -88,6 +90,12 @@ class Quote(Base):
         return value
 
     __table_args__ = (
+        # Mirrors the migration-owned DB constraint (fresh create_all parity — the
+        # drift gate compares these by name).
+        CheckConstraint(
+            "status IN ({})".format(", ".join(f"'{s.value}'" for s in QuoteStatus)),
+            name="ck_quotes_status",
+        ),
         Index("ix_quotes_req", "requisition_id"),
         Index("ix_quotes_site", "customer_site_id"),
         Index("ix_quotes_status", "status"),

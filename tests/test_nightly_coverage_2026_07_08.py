@@ -56,7 +56,7 @@ def _make_prepayment_direct(db: Session, buyer: User) -> Prepayment:
     req = Requisition(
         name=f"REQ-{uuid.uuid4().hex[:6]}",
         customer_name="TestCo",
-        status="active",
+        status="open",
         created_by=buyer.id,
         created_at=datetime.now(UTC),
     )

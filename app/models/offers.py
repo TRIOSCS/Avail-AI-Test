@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from sqlalchemy import (
     JSON,
     Boolean,
+    CheckConstraint,
     Column,
     Date,
     Float,
@@ -17,6 +18,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship, validates
 
+from ..constants import OfferStatus
 from ..database import UTCDateTime
 from .base import Base
 
@@ -210,6 +212,17 @@ class Offer(Base):
     attachments = relationship("OfferAttachment", back_populates="offer", cascade="all, delete-orphan")
 
     __table_args__ = (
+        # Mirror the migration-owned DB constraints (fresh create_all parity).
+        CheckConstraint(
+            "status IN ({})".format(", ".join(f"'{s.value}'" for s in OfferStatus)),
+            name="ck_offers_status",
+        ),
+        CheckConstraint("qty_available >= 0", name="ck_offers_qty_available_nonneg"),
+        CheckConstraint("unit_price >= 0", name="ck_offers_unit_price_nonneg"),
+        CheckConstraint(
+            "parse_confidence IS NULL OR (parse_confidence >= 0.0 AND parse_confidence <= 1.0)",
+            name="ck_offers_parse_confidence_range",
+        ),
         Index("ix_offers_req", "requisition_id"),
         Index("ix_offers_requirement", "requirement_id"),
         Index("ix_offers_vendor", "vendor_card_id"),

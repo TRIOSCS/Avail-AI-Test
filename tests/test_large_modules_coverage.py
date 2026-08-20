@@ -1124,7 +1124,7 @@ class TestBuildPipelineContext:
 
         user = _make_user(db_session, email="test25@test.com", azure_id="az-025", name="Test25")
 
-        for status in ["active", "active", "closed"]:
+        for status in ["open", "open", "won"]:
             req = Requisition(
                 name=f"Req {status}",
                 status=status,
@@ -1136,7 +1136,7 @@ class TestBuildPipelineContext:
 
         context = build_pipeline_context(db_session)
         assert "Pipeline status breakdown" in context
-        assert "active" in context
+        assert "open" in context
 
 
 class TestBuildCompanyContext:

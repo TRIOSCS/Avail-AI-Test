@@ -105,7 +105,7 @@ class TestCompanyCommercialStats:
         _make_req(db_session, site, "won")
         _make_req(db_session, site, "lost")
         # active req should NOT count as decided
-        _make_req(db_session, site, "active")
+        _make_req(db_session, site, "open")
         db_session.commit()
 
         result = company_commercial_stats(db_session, [co.id])
@@ -121,8 +121,8 @@ class TestCompanyCommercialStats:
         co = _make_company(db_session, "NoneWin Co")
         site = _make_site(db_session, co)
 
-        _make_req(db_session, site, "active")
-        _make_req(db_session, site, "sourcing")
+        _make_req(db_session, site, "open")
+        _make_req(db_session, site, "offers")
         db_session.commit()
 
         result = company_commercial_stats(db_session, [co.id])
@@ -188,7 +188,7 @@ class TestCompanyCommercialStats:
         newer = NOW - timedelta(days=10)
 
         _make_req(db_session, site, "won", created_at=older)
-        _make_req(db_session, site, "active", created_at=newer)
+        _make_req(db_session, site, "open", created_at=newer)
         db_session.commit()
 
         result = company_commercial_stats(db_session, [co.id])

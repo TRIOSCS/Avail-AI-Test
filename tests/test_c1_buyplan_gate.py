@@ -74,7 +74,7 @@ def _make_draft_plan(db: Session, user: User, *, total_cost: float = 10_000.0) -
     req = Requisition(
         name=f"REQ-C1-{uuid.uuid4().hex[:6]}",
         customer_name="C1Co",
-        status="active",
+        status="open",
         created_by=user.id,
         created_at=datetime.now(UTC),
     )

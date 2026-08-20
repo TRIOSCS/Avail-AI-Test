@@ -27,6 +27,7 @@ from datetime import UTC, datetime
 from sqlalchemy import (
     JSON,
     Boolean,
+    CheckConstraint,
     Column,
     Float,
     ForeignKey,
@@ -183,6 +184,12 @@ class BuyPlan(Base):
         return value
 
     __table_args__ = (
+        # Derived from the enum so the constraint can never lag it again (the pre-212
+        # DB shape was missing 'inbound' — a fresh-deploy landmine).
+        CheckConstraint(
+            "status IN ({})".format(", ".join(f"'{s.value}'" for s in BuyPlanStatus)),
+            name="ck_buy_plans_status",
+        ),
         Index("ix_bpv3_order_type", "order_type"),
         Index("ix_bpv3_status", "status"),
         Index("ix_bpv3_so_status", "so_status"),

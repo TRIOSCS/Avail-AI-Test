@@ -379,7 +379,7 @@ def test_get_saved_sightings_buyer_outcomes_offer_and_unavailable(client, db_ses
         qty_available=100,
         unit_price=0.55,
         entered_by_id=test_user.id,
-        status="open",
+        status="active",
         created_at=datetime.now(UTC),
     )
     db_session.add(offer)
@@ -889,7 +889,7 @@ def test_saved_sightings_with_historical_offers(client, db_session, test_requisi
         qty_available=200,
         unit_price=0.55,
         entered_by_id=test_user.id,
-        status="open",
+        status="active",
         created_at=datetime.now(UTC),
     )
     db_session.add(hist_offer)

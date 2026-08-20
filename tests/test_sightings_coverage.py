@@ -266,7 +266,10 @@ class TestSuggestedActionSourcingStatus:
         [
             pytest.param("offered", id="offered_no_pending_offers"),
             pytest.param("won", id="won_status"),
-            pytest.param("custom_unknown_status", id="unknown_status_returns_none_action"),
+            # ("custom_unknown_status" param removed 2026-08-20: ck_requirements_
+            # sourcing_status now rejects non-enum values at write time, so the
+            # defensive none-action branch can't be seeded via the ORM — the
+            # constraint IS the guarantee.)
         ],
     )
     def test_status_only_detail_renders(self, client, db_session, sourcing_status):

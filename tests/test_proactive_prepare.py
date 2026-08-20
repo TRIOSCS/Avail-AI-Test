@@ -81,7 +81,7 @@ def _setup_send_scenario(db):
     req = Requisition(
         name="Test Req",
         customer_site_id=site.id,
-        status="archived",
+        status="lost",
         created_by=owner.id,
     )
     db.add(req)

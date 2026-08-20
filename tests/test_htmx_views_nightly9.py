@@ -108,7 +108,7 @@ def _req(db: Session, user: User, **kw) -> Requisition:
     defaults = dict(
         name=f"N9-REQ-{uuid.uuid4().hex[:6]}",
         customer_name="Acme",
-        status="active",
+        status="open",
         created_by=user.id,
         created_at=datetime.now(UTC),
     )

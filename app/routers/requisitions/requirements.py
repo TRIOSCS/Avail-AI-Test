@@ -1098,7 +1098,7 @@ async def import_stock_list(
                 date_code=normalize_date_code(parsed.get("date_code")),
                 lead_time_days=normalize_lead_time(parsed.get("lead_time")),
                 source_type="stock_list",
-                confidence=70,
+                confidence=0.7,  # 0..1 scale (ck_sightings_confidence_range) — was 70, a percent on a fraction column
                 raw_data=row,
                 created_at=datetime.now(UTC),
             )

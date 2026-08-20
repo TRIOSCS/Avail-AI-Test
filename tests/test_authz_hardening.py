@@ -89,7 +89,7 @@ def _requisition(db_session, owner_id, *, name="REQ-AUTHZ", site_id=None):
     req = Requisition(
         name=name,
         customer_name="Cust",
-        status="active",
+        status="open",
         created_by=owner_id,
         customer_site_id=site_id,
         created_at=_now(),

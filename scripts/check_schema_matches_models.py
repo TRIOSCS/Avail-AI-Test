@@ -22,23 +22,19 @@ from collections.abc import Callable, Iterable
 
 from alembic.autogenerate import compare_metadata
 from alembic.runtime.migration import MigrationContext
-from sqlalchemy import CheckConstraint, create_engine
+from sqlalchemy import create_engine
 
 from app.models import Base
 
 
 def _include_object(obj, name, type_, reflected, compare_to) -> bool:
-    """Keep the gate's original scope: CHECK constraints are invisible to it.
+    """CHECK constraints are IN SCOPE (the 08-20 follow-up to the alembic-1.19 fix).
 
-    Alembic 1.19 turned on CHECK-constraint autogenerate detection; our ~33 checks live
-    in raw migration DDL, not on the models, so the new detection reports them all as
-    remove_constraint "drift". Excluding the TYPE (both directions) reproduces the
-    pre-1.19 comparison exactly — this gate has always been about
-    tables/columns/indexes, and check-constraint coverage would be a deliberate follow-
-    up (declare all 33 on models), not a side effect of a dependency bump.
+    Every coherent constraint is now declared on its model, so autogenerate compares
+    them like everything else; the one carve-out is the enumerated LEGACY family below
+    (see _LEGACY_CHECKS_PENDING_DROP), handled in the allowlist — never here, so a
+    genuinely new undeclared CHECK still fails the gate.
     """
-    if type_ == "check_constraint" or isinstance(obj, CheckConstraint):
-        return False
     return True
 
 
@@ -185,6 +181,34 @@ def _add_constraint_key(diff: tuple) -> tuple[str | None, tuple[str, ...]]:
     return table, tuple(sorted(col.name for col in constraint.columns))
 
 
+# Legacy NOT-VALID CHECK family from the 001-era squash: superseded by (or in
+# direct conflict with) the modern named ck_* constraints the models now declare —
+# e.g. chk_offer_price demands unit_price > 0 while the app deliberately supports
+# zero-price free-sample offers, and the production DB (schema-stamped before the
+# squash) has NONE of these. Declaring them on models would re-impose abandoned
+# semantics; dropping them from the migration chain is a pending owner decision.
+# Until then they are enumerated here BY NAME so fresh-DB-only legacy noise is
+# allowed while any new undeclared CHECK still fails the gate.
+_LEGACY_CHECKS_PENDING_DROP = {
+    "chk_offer_condition",
+    "chk_offer_moq",
+    "chk_offer_packaging",
+    "chk_offer_price",
+    "chk_offer_qty",
+    "chk_req_condition",
+    "chk_req_packaging",
+    "chk_req_target_price",
+    "chk_req_target_qty",
+    "chk_sight_condition",
+    "chk_sight_confidence",
+    "chk_sight_lead_time",
+    "chk_sight_moq",
+    "chk_sight_packaging",
+    "chk_sight_price",
+    "chk_sight_qty",
+    "chk_sight_score",
+}
+
 # Each entry is a (diff_kind, predicate) tuple. The predicate gets the raw diff
 # tuple and returns True if the entry should be dropped from the result. Keep
 # every entry commented with the underlying alembic/sqlalchemy quirk or the
@@ -208,6 +232,9 @@ _ALLOWLIST: list[tuple[str, Callable[..., bool]]] = [
     ("add_constraint", lambda d: _add_constraint_key(d) in _GRANDFATHERED_ADD_CONSTRAINTS),
     ("modify_type", lambda d: len(d) >= 4 and (d[2], d[3]) in _GRANDFATHERED_MODIFY_TYPE),
     ("modify_comment", lambda d: len(d) >= 4 and (d[2], d[3]) in _GRANDFATHERED_MODIFY_COMMENT),
+    # Legacy 001-era CHECKs (see _LEGACY_CHECKS_PENDING_DROP above) — fresh DBs have
+    # them, models deliberately do not.
+    ("remove_constraint", lambda d: getattr(d[1], "name", None) in _LEGACY_CHECKS_PENDING_DROP),
 ]
 
 

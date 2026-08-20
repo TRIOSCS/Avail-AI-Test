@@ -55,7 +55,7 @@ def _plan(
     req = Requisition(
         name=f"REQ-SW-{uuid.uuid4().hex[:6]}",
         customer_name="SweepCo",
-        status="active",
+        status="open",
         created_by=user.id,
         created_at=datetime.now(UTC),
     )

@@ -489,7 +489,7 @@ async def test_mark_unavailable_success(db_session: Session, test_user: User, te
         vendor_name_normalized="arrow electronics",
         mpn_matched="LM317T",
         source_type="manual",
-        confidence=80,
+        confidence=0.8,
         score=50,
         created_at=datetime.now(UTC),
     )

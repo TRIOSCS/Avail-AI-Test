@@ -79,7 +79,7 @@ def _req_quote(db: Session, user: User) -> tuple[Requisition, Quote, Requirement
     req = Requisition(
         name=f"REQ-{uuid.uuid4().hex[:6]}",
         customer_name="AcmeCo",
-        status="active",
+        status="open",
         created_by=user.id,
         created_at=datetime.now(UTC),
     )

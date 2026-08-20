@@ -80,6 +80,12 @@ class OfferStatus(StrEnum):
     SOLD = "sold"
     WON = "won"
     EXPIRED = "expired"
+    # A non-live copy carried onto a cloned requisition for context (see
+    # requisition_service._copy_reference_offer) — never feeds quotes/matching
+    # (those filter status == ACTIVE). Was written without being in the enum,
+    # so every clone tripped the model validator's warning AND would have
+    # violated ck_offers_status on any constraint-bearing DB.
+    REFERENCE = "reference"
 
 
 class AttributionStatus(StrEnum):

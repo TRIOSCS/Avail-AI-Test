@@ -80,7 +80,7 @@ def _make_prepayment(
     req = Requisition(
         name=f"REQ-{uuid.uuid4().hex[:6]}",
         customer_name="AcmeCo",
-        status="active",
+        status="open",
         created_by=requester.id,
         created_at=datetime.now(UTC),
     )
@@ -377,7 +377,7 @@ def _make_paid_prepay(db: Session, buyer: User, salesperson: User) -> Prepayment
     req = Requisition(
         name=f"REQ-{uuid.uuid4().hex[:6]}",
         customer_name="AcmeCo",
-        status="active",
+        status="open",
         created_by=salesperson.id,
         created_at=datetime.now(UTC),
     )
