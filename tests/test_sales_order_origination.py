@@ -224,7 +224,7 @@ def test_builder_labels_say_sales_order(nonadmin_client: TestClient, so_setup):
     req, _requirement, _offer = so_setup
     r = nonadmin_client.get("/v2/partials/buy-plans/sales-orders/new")
     assert r.status_code == 200
-    assert "New Sales Order" in r.text  # heading
+    assert "New Buy Plan" in r.text  # heading
     assert "Start" in r.text  # per-row primary action (creates the draft directly)
 
 

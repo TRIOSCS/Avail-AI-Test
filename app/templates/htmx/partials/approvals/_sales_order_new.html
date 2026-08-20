@@ -14,7 +14,7 @@
 #}
 <div id="so-origination" class="{{ 'p-4' if embed == 'aw' else 'page-fluid' }}">
   <div class="flex items-center justify-between mb-3">
-    <h2 class="{{ 'text-base font-semibold text-gray-900' if embed == 'aw' else 'h2' }}">New Sales Order</h2>
+    <h2 class="{{ 'text-base font-semibold text-gray-900' if embed == 'aw' else 'h2' }}">New Buy Plan</h2>
     {% if embed == 'aw' %}
     <button hx-get="/v2/partials/approvals/pane/blank" hx-target="#aw-pane" hx-swap="innerHTML"
             class="btn btn-secondary btn-sm">Cancel</button>
