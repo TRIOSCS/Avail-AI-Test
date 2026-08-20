@@ -50,9 +50,8 @@ class TestNavHighlightingReactive:
         assert "urlToNav" in NAV_CONTENT
 
     def test_click_updates_active_nav(self):
-        """Clicking a nav item updates activeNav immediately (the active-guard added by
-        nav audit #12 wraps it in an if/else, so pin the assignment)."""
-        assert "else activeNav = '{{ id }}'" in NAV_CONTENT
+        """Clicking a nav item updates activeNav immediately."""
+        assert '@click="activeNav' in NAV_CONTENT
 
     @pytest.mark.parametrize(
         "section",
@@ -74,12 +73,9 @@ class TestNavHighlightingReactive:
     def test_quotes_not_in_nav(self):
         """Quotes was retired as a standalone nav tab (PR quotes-relocation).
 
-        Quotes are now surfaced via the Reqs workspace and CRM account tabs. urlToNav
-        DOES alias /v2/quotes → Sales Hub (nav audit #11: a pushed quote detail URL
-        should highlight its parent), so pin the nav-item tuple shape, not the bare
-        substring.
+        Quotes are now surfaced via the Reqs workspace and CRM account tabs.
         """
-        assert "('quotes'," not in NAV_CONTENT
+        assert "quotes" not in NAV_CONTENT
 
 
 class TestNoSidebar:

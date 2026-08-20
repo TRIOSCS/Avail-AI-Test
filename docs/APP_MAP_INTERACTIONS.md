@@ -4178,11 +4178,13 @@ reload/share/Back — never a `/v2/partials/...` fragment URL.**
       no-ops; origination Cancel pushes nothing; best-match cards render link
       attrs only when the URL map + id resolve (bm_dead guard).
 
-6. Mobile shell: bottom nav = 4 primary (Sales Hub, Approvals, Search,
-    Tasks) + More sheet holding the rest (same hx/access/badge wiring); the
-    workspace ↑ List chip is mounted once in _workspace_split.html outside
-    #aw-pane (sticky top-12 under the topbar) so every pane type has it; one
-    breakpoint (768 = Tailwind md) shared by CSS and JS.
+6. Mobile shell: the bottom bar is THE primary navigation and holds every
+    module tab (Sales Hub, Sightings, Materials, Search, Approvals, Resell,
+    CRM, Proactive, Prospect, Tasks) + a More menu (Settings / Sign out only).
+    Modules are never demoted into More — owner directive 2026-08-20, pinned by
+    tests/test_nav_wayfinding.py::test_bottom_bar_holds_all_primary_modules.
+    The workspace ↑ List chip is mounted once in _workspace_split.html outside
+    #aw-pane (sticky top-12 under the topbar) so every pane type has it.
 
 7. Identity: topbar renders a current-view label kept fresh from
     htmx:pushed-into-history / htmx:replaced-in-history via a URL-prefix map;
