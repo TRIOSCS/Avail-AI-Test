@@ -163,9 +163,16 @@ def test_plan_select_accepts_prefixed_key(client: TestClient, db_session, test_u
     assert f"plan-{bp.id}" in r.text
 
 
-def test_garbage_select_falls_back_silently(client: TestClient):
-    r = client.get("/v2/partials/approvals/sales-orders/list?select=%3Cscript%3E", headers=_HX)
+def test_garbage_select_falls_back_silently(client: TestClient, db_session, test_user: User):
+    _grant_decide_rights(db_session, test_user)
+    req, q, _rq = _req_quote(db_session, test_user)
+    bp = _plan(db_session, req, q, status=BuyPlanStatus.DRAFT.value)
+    db_session.commit()
+
+    r = client.get("/v2/partials/approvals/sales-orders/list?select=%3Cscript%3EGARBAGE123", headers=_HX)
     assert r.status_code == 200
+    assert f"plan-{bp.id}" in r.text  # the normal list rendered — garbage key ignored
+    assert "GARBAGE123" not in r.text  # and the rejected key is never reflected
 
 
 def test_retired_detail_htmx_gets_hx_redirect(client: TestClient, db_session, test_user: User):

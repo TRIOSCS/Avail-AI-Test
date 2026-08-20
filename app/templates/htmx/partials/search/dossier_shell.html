@@ -18,7 +18,7 @@
     <svg class="h-4 w-4 text-brand-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
     <form class="flex flex-1 items-center gap-2"
           x-data="{ q: '{{ mpn|default('') }}' }"
-          @submit.prevent="const v=q.trim(); if(v){ const u='/v2/partials/search?mpn='+encodeURIComponent(v); htmx.ajax('GET', u, {target:'#main-content', indicator:'#ds-bar-spin'}); history.pushState({},'','/v2/search?mpn='+encodeURIComponent(v)); }">
+          @submit.prevent="const v=q.trim(); if(v){ const u='/v2/partials/search?mpn='+encodeURIComponent(v); htmx.ajax('GET', u, {target:'#main-content', indicator:'#ds-bar-spin', push:'/v2/search?mpn='+encodeURIComponent(v)}); }">
       {# input-focus adds accent ring on keyboard focus — a11y fix for the bare bg-transparent bar #}
       <input x-model="q" name="mpn" type="text" aria-label="Part number"
              placeholder="Enter a part number…"

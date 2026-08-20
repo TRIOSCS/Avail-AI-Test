@@ -240,8 +240,7 @@
               const ids = Array.from(selectedIds);
               const idStr = ids.join(',');
               if (ids.length === 1) {
-                htmx.ajax('GET', '/v2/partials/requisitions/' + ids[0] + '?tab=build_quote', {target:'#main-content', swap:'innerHTML', indicator:'#quote-builder-skeleton'});
-                window.history.pushState({}, '', '/v2/requisitions/' + ids[0]);
+                htmx.ajax('GET', '/v2/partials/requisitions/' + ids[0] + '?tab=build_quote', {target:'#main-content', swap:'innerHTML', indicator:'#quote-builder-skeleton', push:'/v2/requisitions/' + ids[0]});
               } else {
                 htmx.ajax('GET', '/v2/partials/quote-builder/multi?requisition_ids=' + idStr, {target:'#modal-content', swap:'innerHTML', indicator:'#modal-loading'}).then(() => $dispatch('open-modal', {wide:true}));
               }

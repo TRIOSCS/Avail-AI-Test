@@ -54,11 +54,16 @@
     {# Per-user nav gate: hide a section the user lacks access to. `access` is a
        {nav-id: bool} map from _base_ctx; default-show if it's somehow absent. #}
     {% if (access | default({})).get(id, True) %}
+    {# Trigger filter (nav audit #12): re-tapping the tab for the EXACT page you are
+       already on is a no-op — without it every re-tap pushed a duplicate history
+       entry and Back visibly "did nothing". From a detail page or filtered list the
+       pathname+search differs, so the tap still navigates home. #}
     <a href="{{ href }}"
        hx-get="{{ partial }}"
        hx-target="#main-content"
        hx-push-url="{{ href }}"
-       @click="activeNav = '{{ id }}'"
+       hx-trigger="click[(window.location.pathname + window.location.search) !== '{{ href }}']"
+       @click="if ((window.location.pathname + window.location.search) === '{{ href }}') $event.preventDefault(); else activeNav = '{{ id }}'"
        :class="activeNav === '{{ id }}' ? 'text-accent-600' : 'text-gray-500 hover:text-gray-600'"
        class="relative flex flex-col items-center justify-center py-1.5 text-center transition-colors duration-150 w-[62px] min-w-0">
       <span x-show="activeNav === '{{ id }}'" x-cloak class="absolute top-0 inset-x-[8px] h-[3px] bg-accent-500 rounded-b-sm"></span>

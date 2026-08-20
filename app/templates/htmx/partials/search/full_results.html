@@ -121,10 +121,14 @@
       "material_card": "/v2/partials/search?mpn=" ~ (bm.display_mpn|default(bm.normalized_mpn|default(""))|urlencode),
       "sighting": "/v2/partials/requisitions/" ~ (bm.requisition_id|default(""))
     } %}
-    <a href="{{ bm_url_map.get(bm.type, '#') }}"
-       hx-get="{{ bm_partials_map.get(bm.type, '#') }}"
+    {# Same dead-link guard as shared/search_results.html (nav audit #12). #}
+    {% set bm_url = bm_url_map.get(bm.type) %}
+    {% set bm_partial = bm_partials_map.get(bm.type) %}
+    {% set bm_dead = (not bm_url) or bm_url.endswith('/') or bm_url.endswith('=') %}
+    <a {% if not bm_dead %}href="{{ bm_url }}"
+       hx-get="{{ bm_partial }}"
        hx-target="#main-content"
-       hx-push-url="{{ bm_url_map.get(bm.type, '#') }}"
+       hx-push-url="{{ bm_url }}"{% endif %}
        class="block rounded-xl border-2 border-brand-200 bg-brand-50 p-4 hover:border-brand-400 hover:bg-brand-100 transition-all">
       <div class="flex items-center gap-4">
         <span class="inline-flex items-center justify-center h-10 w-10 rounded-xl bg-brand-500 text-white text-sm font-bold uppercase">

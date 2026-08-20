@@ -19,8 +19,10 @@
     <button hx-get="/v2/partials/approvals/pane/blank" hx-target="#aw-pane" hx-swap="innerHTML"
             class="btn btn-secondary btn-sm">Cancel</button>
     {% else %}
+    {# push="false" (nav audit #12): Cancel returns to the workspace it came from —
+       pushing /v2/approvals here dropped ?tab and stacked a junk Back entry. #}
     <button hx-get="/v2/partials/approvals" hx-target="#main-content" hx-swap="innerHTML"
-            hx-push-url="/v2/approvals" class="btn btn-secondary btn-sm">Cancel</button>
+            hx-push-url="false" class="btn btn-secondary btn-sm">Cancel</button>
     {% endif %}
   </div>
 

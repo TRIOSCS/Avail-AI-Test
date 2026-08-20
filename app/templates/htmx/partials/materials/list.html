@@ -87,6 +87,7 @@
             hx-get="/v2/partials/materials/{{ m.id }}"
             hx-target="#main-content"
             hx-push-url="/v2/materials/{{ m.id }}"
+            hx-disinherit="hx-push-url"
             hx-trigger="click, keyup[key=='Enter']"
             preload="mouseover">
           <td>

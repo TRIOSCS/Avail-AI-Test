@@ -48,10 +48,16 @@
         "material_card": "/v2/partials/search?mpn=" ~ (bm.display_mpn|default(bm.normalized_mpn|default(""))|urlencode),
         "sighting": "/v2/partials/requisitions/" ~ (bm.requisition_id|default(""))
       } %}
-      <a href="{{ bm_url_map.get(bm.type, '#') }}"
-         hx-get="{{ bm_partials_map.get(bm.type, '#') }}"
+      {# Link attrs only when the type is mapped AND the id resolved — an unmapped type
+         or missing requisition/mpn produced href="#" / truncated URLs that pushed junk
+         history entries (nav audit #12). A bare <a> renders the card non-interactive. #}
+      {% set bm_url = bm_url_map.get(bm.type) %}
+      {% set bm_partial = bm_partials_map.get(bm.type) %}
+      {% set bm_dead = (not bm_url) or bm_url.endswith('/') or bm_url.endswith('=') %}
+      <a {% if not bm_dead %}href="{{ bm_url }}"
+         hx-get="{{ bm_partial }}"
          hx-target="#main-content"
-         hx-push-url="{{ bm_url_map.get(bm.type, '#') }}"
+         hx-push-url="{{ bm_url }}"{% endif %}
          @click="searchOpen = false"
          class="flex items-center gap-3 rounded-lg px-3 py-2.5 bg-brand-50 border border-brand-200 hover:bg-brand-100 transition-colors">
         <div class="flex-shrink-0">
