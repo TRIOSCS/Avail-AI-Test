@@ -371,7 +371,7 @@ class TestClonePartsToActive:
                     requirement_id=part.id,
                     vendor_name="V2",
                     mpn="PART-OFF",
-                    status="selected",
+                    status="active",
                 ),
                 Offer(
                     requisition_id=src_req.id,

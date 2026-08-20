@@ -359,7 +359,7 @@ async def test_get_saved_sightings_with_data(db_session: Session, test_user: Use
         vendor_name_normalized="arrow electronics",
         mpn_matched="LM317T",
         source_type="manual",
-        confidence=80,
+        confidence=0.8,
         score=50,
         created_at=datetime.now(UTC),
     )
@@ -493,7 +493,7 @@ async def test_list_requirement_sightings_success(db_session: Session, test_user
         vendor_name_normalized="arrow electronics",
         mpn_matched="LM317T",
         source_type="manual",
-        confidence=80,
+        confidence=0.8,
         score=50,
         created_at=datetime.now(UTC),
     )
@@ -1083,7 +1083,7 @@ async def test_get_saved_sightings_with_material_history(
         vendor_name_normalized="arrow",
         mpn_matched="LM317T",
         source_type="manual",
-        confidence=70,
+        confidence=0.7,
         score=50,
         created_at=datetime.now(UTC),
     )

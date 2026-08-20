@@ -217,7 +217,7 @@ class TestNoOffersForRequirement:
 
     def test_build_buy_plan_skips_reqs_with_no_offers(self, db_session: Session):
         """build_buy_plan completes even if some requirements have no active offers."""
-        quote, requisition, requirement, offer, *_ = _make_chain(db_session, offer_status="inactive")
+        quote, requisition, requirement, offer, *_ = _make_chain(db_session, offer_status="expired")
         # Build should succeed but lines list will be empty
         plan = build_buy_plan(quote.id, db_session)
         assert plan is not None

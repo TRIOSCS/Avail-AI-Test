@@ -42,7 +42,7 @@ def _make_sighting(db: Session, req_item: Requirement, **kw) -> Sighting:
         source_type="brokerbin",
         qty_available=500,
         unit_price=0.45,
-        confidence=80,
+        confidence=0.8,
         score=50,
         created_at=datetime.now(UTC),
     )

@@ -84,7 +84,7 @@ def _make_qp(db: Session, owner: User) -> QualityPlan:
     req = Requisition(
         name=f"REQ-C2A-{uuid.uuid4().hex[:6]}",
         customer_name="C2ACo",
-        status="active",
+        status="open",
         created_by=owner.id,
         created_at=datetime.now(UTC),
     )

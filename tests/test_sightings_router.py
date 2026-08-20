@@ -4424,7 +4424,7 @@ class TestRequisitionStatusFilter:
     def test_active_pipeline_requisition_included(self, client, db_session):
         """Active-pipeline requisitions (sourcing/offers/quoted) still appear — only the
         terminal won/lost/cancelled deals are hidden."""
-        for status in ("sourcing", "offers", "quoted"):
+        for status in ("rfqs_sent", "offers", "quoted"):
             req = Requisition(name=f"{status} RFQ", status=status, customer_name="Acme")
             db_session.add(req)
             db_session.flush()
@@ -4435,7 +4435,7 @@ class TestRequisitionStatusFilter:
         db_session.commit()
         resp = client.get("/v2/partials/sightings")
         assert resp.status_code == 200
-        for status in ("sourcing", "offers", "quoted"):
+        for status in ("rfqs_sent", "offers", "quoted"):
             assert f"MPN-{status.upper()}" in resp.text
 
 

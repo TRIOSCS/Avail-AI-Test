@@ -340,7 +340,7 @@ class TestGetBuilderDataActiveOffer:
             vendor_name="Avnet",
             mpn="LM317T",
             normalized_mpn="LM317T",
-            status="inactive",
+            status="expired",
             unit_price=0.60,
             qty_available=200,
             created_at=datetime.now(UTC),

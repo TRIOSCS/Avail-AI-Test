@@ -745,7 +745,7 @@ class TestOfferPromoteRematch:
         req = Requisition(
             name="Promote Req",
             customer_site_id=site.id,
-            status="archived",
+            status="lost",
             created_by=owner.id,
             created_at=datetime.now(UTC),
         )

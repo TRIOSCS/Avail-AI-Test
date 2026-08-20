@@ -29,6 +29,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import (
     JSON,
+    CheckConstraint,
     Column,
     ForeignKey,
     Index,
@@ -149,6 +150,8 @@ class ExcessLineItem(Base):
         return value
 
     __table_args__ = (
+        CheckConstraint("asking_price >= 0", name="ck_excess_line_items_asking_price_nonneg"),
+        CheckConstraint("quantity > 0", name="ck_excess_line_items_quantity_pos"),
         Index("ix_excess_line_items_list", "excess_list_id"),
         Index("ix_excess_line_items_status", "status"),
         Index("ix_excess_line_items_pn_status", "part_number", "status"),

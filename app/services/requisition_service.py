@@ -15,7 +15,7 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from ..constants import ActivityType, RequisitionStatus, SourcingStatus
+from ..constants import ActivityType, OfferStatus, RequisitionStatus, SourcingStatus
 from ..models import Offer, Requirement, Requisition, User
 from ..utils.normalization import (
     normalize_condition,
@@ -185,7 +185,7 @@ def _copy_reference_offer(
         source=offer.source,
         entered_by_id=user_id,
         notes=f"Reference from REQ-{source_req_id:03d}",
-        status="reference",
+        status=OfferStatus.REFERENCE.value,
     )
 
 
@@ -219,7 +219,9 @@ def clone_requisition(
         req_map[r.id] = new_r.id
 
     for o in source_req.offers:
-        if o.status in ("active", "selected"):
+        # "selected" was checked here for years but has no writer and no enum member —
+        # ACTIVE is the only live-offer status the clone carries forward.
+        if o.status == OfferStatus.ACTIVE.value:
             new_o = _copy_reference_offer(
                 o,
                 new_requisition_id=new_req.id,
@@ -307,7 +309,7 @@ def clone_parts_to_active(db: Session, parts: list[Requirement], user: User) -> 
 
             # Carry the SOURCE PART's live offers over as reference intel.
             part_offers = db.scalars(
-                select(Offer).where(Offer.requirement_id == part.id, Offer.status.in_(("active", "selected")))
+                select(Offer).where(Offer.requirement_id == part.id, Offer.status == OfferStatus.ACTIVE.value)
             ).all()
             for o in part_offers:
                 new_o = _copy_reference_offer(

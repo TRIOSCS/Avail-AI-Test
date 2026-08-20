@@ -201,7 +201,7 @@ class TestAccountSummaryService:
         _make_contact(db_session, site.id, "Bob Buyer", title="Buyer")
 
         req1 = _make_requisition(db_session, site.id, "REQ-100", "open", _NOW - timedelta(days=5))
-        req2 = _make_requisition(db_session, site.id, "REQ-101", "closed", _NOW - timedelta(days=30))
+        req2 = _make_requisition(db_session, site.id, "REQ-101", "won", _NOW - timedelta(days=30))
         _make_requirement(db_session, req1.id, "LM317T")
         _make_requirement(db_session, req1.id, "LM7805")
         _make_requirement(db_session, req2.id, "NE555")

@@ -25,7 +25,7 @@ def _seed_match(db, owner, company, site, *, mpn: str) -> ProactiveMatch:
     card = MaterialCard(normalized_mpn=mpn.lower(), display_mpn=mpn)
     db.add(card)
     db.flush()
-    req = Requisition(name=f"R-{mpn}", customer_site_id=site.id, status="archived", created_by=owner.id)
+    req = Requisition(name=f"R-{mpn}", customer_site_id=site.id, status="lost", created_by=owner.id)
     db.add(req)
     db.flush()
     requirement = Requirement(

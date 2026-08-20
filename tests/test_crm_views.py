@@ -4874,7 +4874,7 @@ class TestDispositionFilter:
         req = Requisition(
             name="Bucket Open Req",
             company_id=bucketed_with_req.id,
-            status="sourcing",
+            status="open",
         )
         db_session.add(req)
         db_session.commit()

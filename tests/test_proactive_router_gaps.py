@@ -69,7 +69,7 @@ def _build_scenario(db: Session) -> dict:
 
     req = Requisition(
         name="ScenReq",
-        status="archived",
+        status="lost",
         created_by=owner.id,
         customer_site_id=site.id,
     )

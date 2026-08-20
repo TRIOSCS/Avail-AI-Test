@@ -31,7 +31,7 @@ def _scaffold(db: Session) -> dict:
     card = MaterialCard(normalized_mpn="lm358n", display_mpn="LM358N")
     db.add(card)
     db.flush()
-    req = Requisition(name="R", customer_site_id=None, status="archived", created_by=owner.id)
+    req = Requisition(name="R", customer_site_id=None, status="lost", created_by=owner.id)
     db.add(req)
     db.flush()
     offer = Offer(

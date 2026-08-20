@@ -13,6 +13,17 @@ from __future__ import annotations
 from ..models.sourcing import Sighting
 
 
+def _norm_confidence(raw) -> float:
+    """Clamp a confidence into the 0..1 column contract; >1 is treated as a percent."""
+    try:
+        v = float(raw or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    if v > 1:
+        v = v / 100
+    return min(max(v, 0.0), 1.0)
+
+
 def sighting_from_row(requirement_id: int, item: dict) -> Sighting:
     """Map a market-result row dict to an unsaved Sighting bound to ``requirement_id``.
 
@@ -30,7 +41,9 @@ def sighting_from_row(requirement_id: int, item: dict) -> Sighting:
         currency=item.get("currency", "USD"),
         source_type=item.get("source_type"),
         is_authorized=item.get("is_authorized", False),
-        confidence=item.get("confidence", 0),
+        # 0..1 contract (ck_sightings_confidence_range). Callers historically sent
+        # percents too — normalize instead of 500ing on a crafted/legacy payload.
+        confidence=_norm_confidence(item.get("confidence", 0)),
         score=item.get("score", 0),
         evidence_tier=item.get("evidence_tier"),
         moq=item.get("moq"),

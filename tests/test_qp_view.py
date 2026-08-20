@@ -27,7 +27,7 @@ from app.models.sourcing import Requisition
 def _make_requisition(db: Session, owner_id: int) -> Requisition:
     req = Requisition(
         name="QP-TEST-001",
-        status="active",
+        status="open",
         customer_name="Acme Electronics",
         created_by=owner_id,
         created_at=datetime.now(UTC),

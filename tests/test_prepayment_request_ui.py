@@ -45,7 +45,7 @@ def _plan_with_line(db: Session, owner: User) -> tuple[BuyPlan, BuyPlanLine]:
     req = Requisition(
         name=f"REQ-{uuid.uuid4().hex[:6]}",
         customer_name="AcmeCo",
-        status="active",
+        status="open",
         created_by=owner.id,
         created_at=datetime.now(UTC),
     )

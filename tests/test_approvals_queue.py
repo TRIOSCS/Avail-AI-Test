@@ -60,7 +60,7 @@ def _bp(db: Session, user: User, *, customer: str = "TestCo") -> BuyPlan:
     req = Requisition(
         name=f"REQ-{uuid.uuid4().hex[:6]}",
         customer_name=customer,
-        status="active",
+        status="open",
         created_by=user.id,
         created_at=datetime.now(UTC),
     )

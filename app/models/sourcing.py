@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 from sqlalchemy import (
     JSON,
     Boolean,
+    CheckConstraint,
     Column,
     Date,
     FetchedValue,
@@ -23,6 +24,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship, validates
 
+from ..constants import RequisitionStatus, SourcingStatus
 from ..database import UTCDateTime
 from .base import Base
 
@@ -30,6 +32,12 @@ from .base import Base
 class Requisition(Base):
     __tablename__ = "requisitions"
     __table_args__ = (
+        # Mirrors the migration-owned DB constraint of the same name — declared here so
+        # a fresh create_all() matches migrations and alembic autogenerate stays quiet.
+        CheckConstraint(
+            "status IN ({})".format(", ".join(f"'{s.value}'" for s in RequisitionStatus)),
+            name="ck_requisitions_status",
+        ),
         Index("ix_requisitions_status", "status"),
         Index("ix_requisitions_created_by", "created_by"),
         Index("ix_requisitions_site", "customer_site_id"),
@@ -205,6 +213,11 @@ class Requirement(Base):
         return value.upper().strip() if value else value
 
     __table_args__ = (
+        CheckConstraint(
+            "sourcing_status IN ({})".format(", ".join(f"'{s.value}'" for s in SourcingStatus)),
+            name="ck_requirements_sourcing_status",
+        ),
+        CheckConstraint("target_qty >= 0", name="ck_requirements_target_qty_nonneg"),
         Index("ix_req_requisition", "requisition_id"),
         Index("ix_req_primary_mpn", "primary_mpn"),
         Index("ix_requirements_material_card", "material_card_id"),
@@ -345,6 +358,12 @@ class Sighting(Base):
         return value
 
     __table_args__ = (
+        CheckConstraint("qty_available >= 0", name="ck_sightings_qty_available_nonneg"),
+        CheckConstraint("unit_price >= 0", name="ck_sightings_unit_price_nonneg"),
+        CheckConstraint(
+            "confidence IS NULL OR (confidence >= 0.0 AND confidence <= 1.0)",
+            name="ck_sightings_confidence_range",
+        ),
         Index("ix_sightings_vendor_name", "vendor_name"),
         Index("ix_sightings_vendor_norm", "vendor_name_normalized"),
         Index("ix_sight_req", "requirement_id"),

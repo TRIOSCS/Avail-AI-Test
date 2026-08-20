@@ -53,7 +53,7 @@ def _make_buy_plan(db: Session, user: User, *, status: str = "pending") -> BuyPl
     req = Requisition(
         name=f"REQ-BRIDGE-{uuid.uuid4().hex[:6]}",
         customer_name="BridgeCo",
-        status="active",
+        status="open",
         created_by=user.id,
         created_at=datetime.now(UTC),
     )

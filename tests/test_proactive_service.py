@@ -67,7 +67,7 @@ def _make_archived_requisition(
     req = Requisition(
         name=f"Archived-{mpn}",
         customer_name="Acme Electronics",
-        status="archived",
+        status="lost",
         created_by=user.id,
         customer_site_id=site.id,
         created_at=datetime.now(UTC) - timedelta(days=days_ago),

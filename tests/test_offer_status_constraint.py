@@ -19,20 +19,23 @@ text only (no DB).
 from __future__ import annotations
 
 import pathlib
-import re
 
 from app.constants import OfferStatus
 
-_MIG = pathlib.Path(__file__).resolve().parent.parent / "alembic" / "versions" / "124_offer_status_constraint.py"
+# Migration 212 SUPERSEDES 124's constraint (drop + recreate DERIVED from the enum),
+# so the effective fresh-DB shape is 212's. Importing its module-level derivation and
+# comparing to the enum catches anyone re-hardcoding the list in a future edit.
+_MIG = pathlib.Path(__file__).resolve().parent.parent / "alembic" / "versions" / "212_worker_singleton_checks.py"
 
 
 def _ck_offers_status_set() -> set[str]:
     """Return the value set of the ck_offers_status CHECK defined in upgrade()."""
-    text = _MIG.read_text(encoding="utf-8")
-    # The upgrade() create_check_constraint is the FIRST ck_offers_status ... status IN (...)
-    m = re.search(r"ck_offers_status.*?status IN \(([^)]*)\)", text, re.S)
-    assert m, "ck_offers_status CHECK definition not found in migration 124"
-    return set(re.findall(r"'([^']+)'", m.group(1)))
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("mig212", _MIG)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return {v.strip().strip("'") for v in mod._OFFER_STATUSES.split(",")}
 
 
 def test_every_offer_status_enum_value_is_permitted():
@@ -41,7 +44,7 @@ def test_every_offer_status_enum_value_is_permitted():
     missing = enum_vals - allowed
     assert not missing, (
         f"OfferStatus value(s) {sorted(missing)} are not permitted by ck_offers_status "
-        "in migration 124 — the constraint would reject valid offer writes on a fresh DB."
+        "in migration 212 — the constraint would reject valid offer writes on a fresh DB."
     )
 
 
@@ -56,7 +59,9 @@ def test_constraint_has_no_phantom_values():
 
 
 def test_drifted_chk_offer_status_is_dropped():
-    text = _MIG.read_text(encoding="utf-8")
+    # A 124-specific historical assertion — read THAT migration, not the effective 212.
+    mig124 = _MIG.parent / "124_offer_status_constraint.py"
+    text = mig124.read_text(encoding="utf-8")
     assert "DROP CONSTRAINT IF EXISTS chk_offer_status" in text, (
         "migration 124 must drop the drifted chk_offer_status constraint (idempotent, "
         "IF EXISTS — it is absent on live but present on a fresh rebuild)."

@@ -24,7 +24,7 @@ class TestSightingFromRow:
             "currency": "USD",
             "source_type": "broker",
             "is_authorized": True,
-            "confidence": 90,
+            "confidence": 0.9,
             "score": 85,
         }
         sighting = sighting_from_row(1, item)
@@ -37,7 +37,7 @@ class TestSightingFromRow:
         assert sighting.currency == "USD"
         assert sighting.source_type == "broker"
         assert sighting.is_authorized is True
-        assert sighting.confidence == 90
+        assert sighting.confidence == 0.9
         assert sighting.score == 85
 
     def test_defaults_applied_when_keys_missing(self):
@@ -116,3 +116,15 @@ class TestSightingFromRow:
     def test_non_usd_currency_preserved(self):
         sighting = sighting_from_row(1, {"currency": "EUR"})
         assert sighting.currency == "EUR"
+
+
+def test_percent_scale_confidence_normalized():
+    """Legacy/crafted payloads sent confidence as a percent — the ingest clamps to the
+    0..1 column contract (ck_sightings_confidence_range) instead of 500ing."""
+    from app.services.sighting_ingest import _norm_confidence
+
+    assert _norm_confidence(90) == 0.9
+    assert _norm_confidence(0.35) == 0.35
+    assert _norm_confidence(None) == 0.0
+    assert _norm_confidence("junk") == 0.0
+    assert _norm_confidence(150) == 1.0

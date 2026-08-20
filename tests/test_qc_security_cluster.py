@@ -97,7 +97,7 @@ def _prepayment_request(db, requester, amount):
     site = CustomerSite(company_id=company.id, site_name="HQ")
     db.add(site)
     db.flush()
-    req = Requisition(name="REQ-QC", customer_name="Test Co", status="active", created_by=requester.id)
+    req = Requisition(name="REQ-QC", customer_name="Test Co", status="open", created_by=requester.id)
     db.add(req)
     db.flush()
     quote = Quote(

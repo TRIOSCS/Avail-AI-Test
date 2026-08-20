@@ -325,7 +325,7 @@ def _make_prepayment_stub(db: Session) -> object:
     req = Requisition(
         name=f"REQ-{uuid.uuid4().hex[:6]}",
         customer_name="Cust",
-        status="active",
+        status="open",
         created_by=u.id,
         created_at=datetime.now(UTC),
     )
