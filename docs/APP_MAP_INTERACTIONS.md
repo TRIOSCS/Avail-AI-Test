@@ -4129,7 +4129,12 @@ reload/share/Back — never a `/v2/partials/...` fragment URL.**
         |   (htmx/XHR/TestClient requests lack the header → untouched)
         v
     htmx_views.v2_shell  — ordinary route, ordinary auth (get_user):
-        logged-out → login page; bad partial → 404;
+        logged-out → login page; partial not starting /v2/partials/ OR
+        containing ".." → 404 (traversal would let the embedded hx-get
+        climb out once the browser normalizes it); the nav-highlight key
+        is validated against the closed _VALID_NAV_KEYS set, never the raw
+        ?partial= segment (it lands in base.html's Alpine x-data, which the
+        browser HTML-decodes before JS eval — a raw segment = reflected XSS);
         else full_page_shell(...) = chrome + nav lazy-loading the SAME
         partial into #main-content
 

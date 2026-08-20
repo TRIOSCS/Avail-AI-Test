@@ -498,7 +498,13 @@ class ShellNegotiationMiddleware:
     legitimately fetched as documents.
     """
 
-    _EXCLUDE_SUBSTRINGS = ("/export", "/download", "/excel", ".csv", ".xlsx")
+    # Download-ish partial routes must NOT be shell-wrapped — the browser fetches them
+    # as documents (Sec-Fetch-Dest: document) but they stream a file, not a page. This
+    # is a denylist: any NEW /v2/partials/* route that streams a download (stream_csv,
+    # StreamingResponse, FileResponse, Content-Disposition) whose URL matches none of
+    # these substrings must add one here (e.g. /bid-sheet — its .csv is only in the
+    # response filename, not the path).
+    _EXCLUDE_SUBSTRINGS = ("/export", "/download", "/excel", ".csv", ".xlsx", "/bid-sheet")
 
     def __init__(self, app_inner):
         self._app = app_inner

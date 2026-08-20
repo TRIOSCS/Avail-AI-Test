@@ -145,6 +145,7 @@
     {% if page > 1 %}
     <a hx-get="/v2/partials/prospecting?page={{ page - 1 }}&status={{ status|urlencode }}&sort={{ sort|urlencode }}&q={{ q|urlencode }}&scope={{ scope|urlencode }}"
        hx-target="#main-content"
+       hx-replace-url="/v2/prospecting?page={{ page - 1 }}&status={{ status|urlencode }}&sort={{ sort|urlencode }}&q={{ q|urlencode }}&scope={{ scope|urlencode }}"
        class="btn-secondary btn-sm cursor-pointer">
       &larr; Prev
     </a>
@@ -157,6 +158,7 @@
     {% if page < total_pages %}
     <a hx-get="/v2/partials/prospecting?page={{ page + 1 }}&status={{ status|urlencode }}&sort={{ sort|urlencode }}&q={{ q|urlencode }}&scope={{ scope|urlencode }}"
        hx-target="#main-content"
+       hx-replace-url="/v2/prospecting?page={{ page + 1 }}&status={{ status|urlencode }}&sort={{ sort|urlencode }}&q={{ q|urlencode }}&scope={{ scope|urlencode }}"
        class="btn-secondary btn-sm cursor-pointer">
       Next &rarr;
     </a>

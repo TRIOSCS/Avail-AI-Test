@@ -15,7 +15,7 @@
   {# "You are here" (nav audit #11): compact current-view label, seeded from the shell
      context and kept fresh from the URL on every htmx history change — the topbar is
      never re-rendered by partial swaps, so a static server label would go stale. #}
-  {% set _view_labels = {'requisitions':'Sales Hub','sightings':'Sightings','materials':'Materials','search':'Search','buy-plans':'Approvals','resell':'Resell','crm':'CRM','proactive':'Proactive','prospecting':'Prospecting','my-day':'Tasks','settings':'Settings'} %}
+  {% set _view_labels = {'requisitions':'Sales Hub','sightings':'Sightings','materials':'Materials','search':'Search','buy-plans':'Approvals','resell':'Resell','crm':'CRM','customers':'CRM','vendors':'CRM','contacts':'CRM','vendor-contacts':'CRM','proactive':'Proactive','prospecting':'Prospecting','my-day':'Tasks','settings':'Settings','quotes':'Quote','follow-ups':'Follow-ups','offers':'Offer review','trouble-tickets':'Settings'} %}
   <span class="flex-shrink-0 text-sm font-semibold text-brand-900 tracking-tight max-sm:hidden"
         x-data="{
           label: '{{ _view_labels.get(current_view, '') }}',
@@ -27,6 +27,7 @@
         }"
         @htmx:pushed-into-history.window="label = urlToLabel($event.detail.path || location.pathname)"
         @htmx:replaced-in-history.window="label = urlToLabel($event.detail.path || location.pathname)"
+        @htmx:history-restore.window="label = urlToLabel($event.detail.path || location.pathname)"
         x-text="label"></span>
 
   {# Center: Global search #}

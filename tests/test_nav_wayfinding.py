@@ -270,3 +270,56 @@ def test_best_match_cards_never_emit_dead_links():
         src_ = (_T / rel).read_text()
         assert "bm_dead" in src_, rel  # the guard exists
         assert "hx-push-url=\"{{ bm_url_map.get(bm.type, '#') }}\"" not in src_, rel
+
+
+# ── 6. Security & regression fixes (adversarial review 2026-08-20) ────────
+
+
+def test_shell_rejects_xss_segment_no_reflection(nonadmin_client: TestClient):
+    # The ?partial= segment lands in base.html's Alpine x-data (HTML-decoded before JS
+    # eval), so a raw segment would be reflected XSS. It must be validated against the
+    # nav-key allowlist, never echoed. Route 200s (valid /v2/partials/ prefix) but the
+    # payload never appears in current_view.
+    payload = "/v2/partials/x',init(){alert(1)},x:'"
+    r = nonadmin_client.get("/v2/shell", params={"partial": payload})
+    assert r.status_code == 200
+    # current_view seeds EMPTY for an unknown segment — the raw payload never reaches
+    # Alpine's x-data JS-eval context. (It appears once, Jinja-escaped and inert, in the
+    # hx-get URL echo; the breakout signature — an UNescaped quote+comma — must not.)
+    assert "currentView: ''" in r.text
+    assert "',init(){" not in r.text
+
+
+def test_shell_rejects_path_traversal(nonadmin_client: TestClient):
+    # /v2/partials/../../auth/logout passes the prefix check but the browser would
+    # normalize the embedded hx-get out of /v2/partials/ — reject traversal outright.
+    r = nonadmin_client.get("/v2/shell", params={"partial": "/v2/partials/../../auth/logout"})
+    assert r.status_code == 404
+
+
+def test_shell_valid_segment_still_highlights(nonadmin_client: TestClient):
+    # A legitimate segment maps to its nav key (the allowlist must not over-reject).
+    r = nonadmin_client.get("/v2/shell", params={"partial": "/v2/partials/approvals/sales-orders"})
+    assert r.status_code == 200
+    assert "buy-plans" in r.text  # approvals → buy-plans nav highlight
+
+
+def test_bid_sheet_in_shell_exclusions():
+    # The resell bid-sheet streams a CSV whose URL contains no ".csv"/"/export"/
+    # "/download" substring, so it must be named explicitly in the middleware exclusion
+    # denylist — otherwise a browser download gets wrapped in the app shell (the CSV is
+    # swapped into #main-content). The exclusion MECHANISM is exercised end-to-end by
+    # test_exports_never_shell_wrapped; this pins the bid-sheet path is covered.
+    from app.main import ShellNegotiationMiddleware
+
+    assert "/bid-sheet" in ShellNegotiationMiddleware._EXCLUDE_SUBSTRINGS
+
+
+def test_best_match_null_id_uses_boolean_default():
+    # Jinja default("") does NOT substitute None (only undefined), so a null
+    # requisition_id stringified to a live "/v2/requisitions/None" card. The , true
+    # boolean-default flag catches None → "" → the bm_dead guard's trailing-"/" check.
+    for rel in ("shared/search_results.html", "search/full_results.html"):
+        src_ = (_T / rel).read_text()
+        assert 'bm.requisition_id|default("")' not in src_, rel  # the unsafe form is gone
+        assert 'bm.requisition_id|default("", true)' in src_, rel

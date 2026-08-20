@@ -17,6 +17,8 @@
        }
      }"
      @htmx:pushed-into-history.window="activeNav = urlToNav($event.detail.path || location.pathname)"
+     @htmx:replaced-in-history.window="activeNav = urlToNav($event.detail.path || location.pathname)"
+     @htmx:history-restore.window="activeNav = urlToNav($event.detail.path || location.pathname)"
      @click.outside="moreOpen = false"
      @keydown.escape.window="moreOpen = false"
      :data-current-view="activeNav"
@@ -159,11 +161,14 @@
            bar items; the crm/proactive badge pollers live on, rendered as row pills. #}
         {% for id, label, href, partial, icon_path in more_nav_items %}
         {% if (access | default({})).get(id, True) %}
+        {# Same re-tap no-op guard as the bar items (nav audit #12): tapping the sheet
+           entry for the page you are already on just closes the sheet — no dup push. #}
         <a href="{{ href }}"
            hx-get="{{ partial }}"
            hx-target="#main-content"
            hx-push-url="{{ href }}"
-           @click="moreOpen = false; activeNav = '{{ id }}'"
+           hx-trigger="click[(window.location.pathname + window.location.search) !== '{{ href }}']"
+           @click="moreOpen = false; if ((window.location.pathname + window.location.search) !== '{{ href }}') activeNav = '{{ id }}'"
            :class="activeNav === '{{ id }}' ? 'text-accent-600 bg-accent-50' : 'text-gray-700 hover:bg-brand-50/50'"
            class="flex items-center gap-2 px-3.5 py-2 text-[13px] font-medium transition-colors">
           <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 flex-shrink-0 text-brand-400" fill="none"
@@ -198,7 +203,8 @@
            hx-get="/v2/partials/settings"
            hx-target="#main-content"
            hx-push-url="/v2/settings"
-           @click="moreOpen = false; activeNav = 'settings'"
+           hx-trigger="click[(window.location.pathname + window.location.search) !== '/v2/settings']"
+           @click="moreOpen = false; if ((window.location.pathname + window.location.search) !== '/v2/settings') activeNav = 'settings'"
            :class="activeNav === 'settings' ? 'text-accent-600 bg-accent-50' : 'text-gray-700 hover:bg-brand-50/50'"
            class="flex items-center gap-2 px-3.5 py-2 text-[13px] font-medium transition-colors">
           <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 flex-shrink-0 text-brand-400" fill="none"

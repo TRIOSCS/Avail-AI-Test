@@ -106,21 +106,21 @@
       "requisition": "/v2/requisitions/" ~ bm.id,
       "company": "/v2/customers/" ~ bm.id,
       "vendor": "/v2/vendors/" ~ bm.id,
-      "vendor_contact": "/v2/vendors/" ~ (bm.vendor_card_id|default(bm.id)),
-      "part": "/v2/requisitions/" ~ (bm.requisition_id|default("")),
-      "offer": "/v2/requisitions/" ~ (bm.requisition_id|default("")),
+      "vendor_contact": "/v2/vendors/" ~ (bm.vendor_card_id|default(bm.id, true)),
+      "part": "/v2/requisitions/" ~ (bm.requisition_id|default("", true)),
+      "offer": "/v2/requisitions/" ~ (bm.requisition_id|default("", true)),
       "material_card": "/v2/search?mpn=" ~ (bm.display_mpn|default(bm.normalized_mpn|default(""))|urlencode),
-      "sighting": "/v2/requisitions/" ~ (bm.requisition_id|default(""))
+      "sighting": "/v2/requisitions/" ~ (bm.requisition_id|default("", true))
     } %}
     {% set bm_partials_map = {
       "requisition": "/v2/partials/requisitions/" ~ bm.id,
       "company": "/v2/partials/customers/" ~ bm.id,
       "vendor": "/v2/partials/vendors/" ~ bm.id,
-      "vendor_contact": "/v2/partials/vendors/" ~ (bm.vendor_card_id|default(bm.id)),
-      "part": "/v2/partials/requisitions/" ~ (bm.requisition_id|default("")),
-      "offer": "/v2/partials/requisitions/" ~ (bm.requisition_id|default("")),
+      "vendor_contact": "/v2/partials/vendors/" ~ (bm.vendor_card_id|default(bm.id, true)),
+      "part": "/v2/partials/requisitions/" ~ (bm.requisition_id|default("", true)),
+      "offer": "/v2/partials/requisitions/" ~ (bm.requisition_id|default("", true)),
       "material_card": "/v2/partials/search?mpn=" ~ (bm.display_mpn|default(bm.normalized_mpn|default(""))|urlencode),
-      "sighting": "/v2/partials/requisitions/" ~ (bm.requisition_id|default(""))
+      "sighting": "/v2/partials/requisitions/" ~ (bm.requisition_id|default("", true))
     } %}
     {# Same dead-link guard as shared/search_results.html (nav audit #12). #}
     {% set bm_url = bm_url_map.get(bm.type) %}

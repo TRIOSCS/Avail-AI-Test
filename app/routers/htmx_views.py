@@ -133,8 +133,8 @@ _MODULE_ENTRY_URLS: tuple[tuple[AccessKey, str], ...] = (
 
 
 # Second /v2/partials/<segment> path segment → bottom-nav highlight key for the shell
-# route below. Segments matching their nav key are omitted (the .get fallback covers
-# them); only the aliases need rows. Unknown segments highlight nothing — harmless.
+# route below. Segments equal to their own nav key are omitted (the .get fallback
+# covers them); only the aliases need rows.
 _SHELL_NAV_KEYS: dict[str, str] = {
     "approvals": "buy-plans",
     "buy-plans": "buy-plans",
@@ -144,6 +144,27 @@ _SHELL_NAV_KEYS: dict[str, str] = {
     "vendor-contacts": "crm",
     "vendors": "crm",
 }
+
+# The closed set of values that may ever become ``current_view`` from the shell route.
+# current_view is rendered inside base.html's Alpine ``x-data`` attribute, which the
+# browser HTML-decodes before Alpine evaluates it as JS — so a value derived from the
+# attacker-controlled ``?partial=`` query MUST be validated against this allowlist, not
+# merely Jinja-escaped (a raw segment would be reflected XSS). Anything unknown → "".
+_VALID_NAV_KEYS: frozenset[str] = frozenset(
+    {
+        "requisitions",
+        "sightings",
+        "materials",
+        "search",
+        "buy-plans",
+        "resell",
+        "crm",
+        "proactive",
+        "prospecting",
+        "my-day",
+        "settings",
+    }
+)
 
 
 @router.get("/v2/shell", response_class=HTMLResponse)
@@ -163,10 +184,16 @@ async def v2_shell(request: Request, partial: str = "", db: Session = Depends(ge
         return template_response(
             "htmx/login.html", {"request": request, "password_login": _password_login_enabled(), **_vite_assets()}
         )
-    if not partial.startswith("/v2/partials/"):
+    # ".." would let the embedded hx-get climb out of /v2/partials/ once the browser
+    # normalizes the URL (e.g. /v2/partials/../../auth/logout → GET /auth/logout swapped
+    # into #main-content). Reject traversal outright; the prefix check alone is not enough.
+    if not partial.startswith("/v2/partials/") or ".." in partial:
         raise HTTPException(404, "Unknown page")
     segment = partial.removeprefix("/v2/partials/").split("/", 1)[0].split("?", 1)[0]
-    return full_page_shell(request, user, partial, _SHELL_NAV_KEYS.get(segment, segment))
+    nav_key = _SHELL_NAV_KEYS.get(segment, segment)
+    # Validate against the closed nav-key set — never reflect the raw segment (XSS: it
+    # lands in base.html's Alpine x-data attribute, HTML-decoded before JS eval).
+    return full_page_shell(request, user, partial, nav_key if nav_key in _VALID_NAV_KEYS else "")
 
 
 @router.get("/v2", response_class=HTMLResponse)
