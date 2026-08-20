@@ -17,7 +17,8 @@ Depends on: models, dependencies, database, .htmx.my_day, .htmx.email_views,
     .htmx.insights_views, .htmx.search_views, .htmx.requisitions_edit
 """
 
-from urllib.parse import quote
+import re
+from urllib.parse import quote, urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -30,7 +31,12 @@ from ..dependencies import get_user, require_access, require_buyer, user_has_acc
 from ..models import User
 from ..template_env import page_response, template_response, templates  # noqa: F401 — templates re-exported for tests
 from .auth import _password_login_enabled
-from .htmx._shared import _base_ctx, _safe_int, _vite_assets  # noqa: F401 — _safe_int re-exported for tests
+from .htmx._shared import (  # noqa: F401 — _safe_int re-exported for tests
+    _base_ctx,
+    _safe_int,
+    _vite_assets,
+    full_page_shell,
+)
 from .htmx.email_views import router as _email_views_router
 from .htmx.email_views import send_email_reply  # noqa: F401 — re-exported for tests
 from .htmx.insights_views import router as _insights_views_router
@@ -126,6 +132,43 @@ _MODULE_ENTRY_URLS: tuple[tuple[AccessKey, str], ...] = (
 )
 
 
+# Second /v2/partials/<segment> path segment → bottom-nav highlight key for the shell
+# route below. Segments matching their nav key are omitted (the .get fallback covers
+# them); only the aliases need rows. Unknown segments highlight nothing — harmless.
+_SHELL_NAV_KEYS: dict[str, str] = {
+    "approvals": "buy-plans",
+    "buy-plans": "buy-plans",
+    "parts": "requisitions",
+    "customers": "crm",
+    "contacts": "crm",
+    "vendor-contacts": "crm",
+    "vendors": "crm",
+}
+
+
+@router.get("/v2/shell", response_class=HTMLResponse)
+async def v2_shell(request: Request, partial: str = "", db: Session = Depends(get_db)):
+    """Serve the app shell lazy-loading ``partial`` — ShellNegotiationMiddleware's
+    target.
+
+    A browser TOP-LEVEL navigation to a /v2/partials/* URL (reload of a stale pushed
+    URL, shared link, back past the history cache) is rewritten onto this route by the
+    middleware; it answers with the full chrome + nav, loading the SAME partial into
+    #main-content (nav audit 2026-08-20 #1). Auth mirrors v2_page — a logged-out
+    browser gets the login page, never a naked fragment or a 401. ``partial`` outside
+    /v2/partials/ 404s: this is not an open content loader.
+    """
+    user = get_user(request, db)
+    if not user:
+        return template_response(
+            "htmx/login.html", {"request": request, "password_login": _password_login_enabled(), **_vite_assets()}
+        )
+    if not partial.startswith("/v2/partials/"):
+        raise HTTPException(404, "Unknown page")
+    segment = partial.removeprefix("/v2/partials/").split("/", 1)[0].split("?", 1)[0]
+    return full_page_shell(request, user, partial, _SHELL_NAV_KEYS.get(segment, segment))
+
+
 @router.get("/v2", response_class=HTMLResponse)
 @router.get("/v2/requisitions", response_class=HTMLResponse)
 @router.get("/v2/requisitions/{req_id:int}", response_class=HTMLResponse)
@@ -218,11 +261,17 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         # Split-panel workspace is the default Sales Hub; ?view=list serves the flat
         # requisitions list so the List-view toggle's pushed URL
         # (/v2/requisitions?view=list) reloads / bookmarks straight to the list.
-        partial_url = (
-            "/v2/partials/requisitions"
-            if request.query_params.get("view") == "list"
-            else "/v2/partials/parts/workspace"
-        )
+        if request.query_params.get("view") == "list":
+            partial_url = "/v2/partials/requisitions"
+            # Nav audit #10: thread the filters through so a reload of the canonical
+            # /v2/requisitions?view=list&q=… rebuilds the same filtered list. `view`
+            # itself stays out — it picked this branch, and the list partial's
+            # HX-Replace-Url stamp re-adds it to the canonical URL.
+            filters = [(k, v) for k, v in request.query_params.multi_items() if k != "view"]
+            if filters:
+                partial_url = f"{partial_url}?{urlencode(filters)}"
+        else:
+            partial_url = "/v2/partials/parts/workspace"
     elif current_view == "trouble-tickets":
         partial_url = "/v2/partials/trouble-tickets/workspace"
     elif current_view == "crm":
@@ -265,10 +314,18 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         tab_qs = request.query_params.get("tab", "").strip()
         partial_url = f"/v2/partials/approvals?tab={quote(tab_qs)}" if tab_qs else "/v2/partials/approvals"
         select_qs = request.query_params.get("select", "").strip()
-        if select_qs.isdigit():
-            partial_url = f"{partial_url}{'&' if tab_qs else '?'}select={int(select_qs)}"
+        # Nav audit #3: select is a row KEY (plan-N / line-N / prepay-N) or bare
+        # digits — validated by shape here, resolved per-tab in the workspace list.
+        if re.fullmatch(r"(?:plan-|line-|prepay-)?\d+", select_qs or ""):
+            partial_url = f"{partial_url}{'&' if tab_qs else '?'}select={quote(select_qs)}"
     else:
         partial_url = f"/v2/partials/{current_view}"
+        # Nav audit 2026-08-20 (#10): thread the WHOLE query through so a reload or
+        # share of a filtered canonical URL (/v2/requisitions?q=…&status=…) rebuilds
+        # the same filtered view instead of snapping back to defaults. Partial routes
+        # ignore unknown params, so over-threading is harmless.
+        if request.url.query:
+            partial_url = f"{partial_url}?{request.url.query}"
     # Detail views: a trailing numeric id (/{view}/{id}) overrides the list partial with
     # the detail partial. Each split key equals the current_view, so at most one applies.
     _DETAIL_VIEWS = (
@@ -287,12 +344,10 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         parts = path.split(f"/{current_view}/")
         if len(parts) > 1 and parts[1].isdigit():
             partial_url = f"/v2/partials/{current_view}/{parts[1]}"
-            # Thread ?tab= through for customer deep-links so the partial lands on
-            # the correct tab when the full page is (re)loaded from a pushed URL.
-            if current_view == "customers":
-                _tab_qs = request.query_params.get("tab", "").strip()
-                if _tab_qs:
-                    partial_url = f"{partial_url}?tab={quote(_tab_qs)}"
+            # Thread the whole query through (was customers-only ?tab=) so any
+            # detail deep-link state survives a full-page (re)load.
+            if request.url.query:
+                partial_url = f"{partial_url}?{request.url.query}"
 
     nav_active = _NAV_ID_ALIAS.get(current_view, current_view)
     ctx = _base_ctx(request, user, nav_active)

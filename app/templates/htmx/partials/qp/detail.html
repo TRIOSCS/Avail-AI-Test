@@ -71,9 +71,7 @@
       <span>
         Buy Plan:
         {% if bp %}
-        <a hx-get="/v2/partials/buy-plans/{{ bp.id }}"
-           hx-target="#main-content"
-           hx-push-url="/v2/buy-plans/{{ bp.id }}"
+        <a href="/v2/approvals?tab=sales-orders&select={{ bp.id }}"
            class="font-mono text-brand-600 hover:text-brand-500 cursor-pointer">#{{ bp.id }}</a>
         {% else %}
         <span class="text-gray-400 italic">unavailable</span>

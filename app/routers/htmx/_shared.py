@@ -89,6 +89,27 @@ def _base_ctx(request: Request, user: User, current_view: str = "") -> dict:
     }
 
 
+def set_canonical_url(resp, request: Request, canonical_path: str) -> None:
+    """Server-owned history for a filtered list partial (nav audit 2026-08-20 #1).
+
+    Templates must NEVER push a /v2/partials/* URL (a reload of one lands on a naked
+    fragment); instead the partial route stamps every htmx response with HX-Replace-Url:
+    the CANONICAL page URL + the current query. REPLACE, never push — entering the page
+    is the only history entry (the nav <a>'s own hx-push-url provides it); filters,
+    typing, and the shell's initial lazy load all just keep the address bar truthful.
+    Pushing here would trap Back (shell load → push → Back → shell load → push …) and
+    walk it keystroke-by-keystroke through filter states. A shell-negotiated reload of a
+    stale /v2/partials/* history entry gets healed to the canonical URL by the same
+    stamp. No-ops for non-htmx callers (the browser's own URL is already canonical).
+    """
+    if not request.headers.get("hx-request"):
+        return
+    query = str(request.url.query)
+    sep = "&" if "?" in canonical_path else "?"
+    canonical = f"{canonical_path}{sep}{query}" if query else canonical_path
+    resp.headers["HX-Replace-Url"] = canonical
+
+
 def full_page_shell(request: Request, user: User, partial_url: str, nav_active: str = "") -> Response:
     """Serve the base app shell that HTMX-loads ``partial_url`` into #main-content.
 

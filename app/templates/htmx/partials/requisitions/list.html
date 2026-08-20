@@ -62,7 +62,6 @@
                  hx-get="/v2/partials/requisitions"
                  hx-target="#main-content"
                  hx-swap="innerHTML"
-                 hx-push-url="true"
                  hx-include="#req-filters"
                  :hx-vals="JSON.stringify({status: rStatus, sort: rSort, dir: rDir})"
                  hx-trigger="input changed delay:300ms"
@@ -101,7 +100,6 @@
           <select name="owner" aria-label="Filter by owner"
                   hx-get="/v2/partials/requisitions"
                   hx-target="#main-content"
-                  hx-push-url="true"
                   hx-include="#req-filters"
                   :hx-vals="JSON.stringify({status: rStatus, sort: rSort, dir: rDir})"
                   class="px-3 py-1.5 border border-gray-200 rounded-lg text-sm input-focus">
@@ -119,7 +117,6 @@
           <input type="date" name="date_from" value="{{ date_from }}" aria-label="Filter from date"
                  hx-get="/v2/partials/requisitions"
                  hx-target="#main-content"
-                 hx-push-url="true"
                  hx-include="#req-filters"
                  :hx-vals="JSON.stringify({status: rStatus, sort: rSort, dir: rDir})"
                  class="px-3 py-1.5 border border-gray-200 rounded-lg text-sm input-focus">
@@ -129,7 +126,6 @@
           <input type="date" name="date_to" value="{{ date_to }}" aria-label="Filter to date"
                  hx-get="/v2/partials/requisitions"
                  hx-target="#main-content"
-                 hx-push-url="true"
                  hx-include="#req-filters"
                  :hx-vals="JSON.stringify({status: rStatus, sort: rSort, dir: rDir})"
                  class="px-3 py-1.5 border border-gray-200 rounded-lg text-sm input-focus">
@@ -151,7 +147,6 @@
                 @click="rStatus = '{{ s_val }}'"
                 hx-get="/v2/partials/requisitions"
                 hx-target="#main-content"
-                hx-push-url="true"
                 hx-include="#req-filters"
                 :hx-vals="JSON.stringify({status: '{{ s_val }}', sort: rSort, dir: rDir})"
                 class="px-3 py-1 text-xs font-medium rounded-full transition-colors
@@ -181,7 +176,6 @@
                 hx-get="/v2/partials/requisitions"
                 hx-target="#main-content"
                 hx-swap="innerHTML"
-                hx-push-url="true"
                 hx-include="#req-filters"
                 :hx-vals="JSON.stringify({status: rStatus, sort: rSort, dir: rDir})"
                 class="px-3 py-1 border border-gray-200 rounded-full text-xs font-medium input-focus">
@@ -196,7 +190,6 @@
                 hx-get="/v2/partials/requisitions"
                 hx-target="#main-content"
                 hx-swap="innerHTML"
-                hx-push-url="true"
                 @click="selectedIds = new Set(); Object.keys(collapsed).forEach(k => collapsed[k] = false)"
                 class="btn btn-sm btn-secondary self-center"
                 title="Clear search, filters &amp; grouping, expand all groups, and clear selection">
@@ -290,7 +283,6 @@
               {% if col_key %}
               <a hx-get="/v2/partials/requisitions"
                  hx-target="#main-content"
-                 hx-push-url="true"
                  hx-include="#req-filters"
                  :hx-vals="JSON.stringify({status: rStatus, sort: '{{ col_key }}', dir: '{{ 'asc' if sort == col_key and dir == 'desc' else 'desc' }}'})"
                  class="cursor-pointer hover:text-brand-500 inline-flex items-center gap-1">

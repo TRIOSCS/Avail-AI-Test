@@ -55,7 +55,7 @@ from ...utils.csv_export import stream_csv
 from ...utils.search_builder import SearchBuilder
 from ...utils.sql_helpers import escape_like
 from .._lookup_helpers import get_requisition_or_404
-from ._shared import _base_ctx, _parse_date_safe, _parse_task_due_date
+from ._shared import _base_ctx, _parse_date_safe, _parse_task_due_date, set_canonical_url
 from ._shared_tabs import requisition_tab as _requisition_tab_impl
 
 router = APIRouter(tags=["htmx-views"])
@@ -380,7 +380,9 @@ async def requisitions_list_partial(
             "inbox_status": get_inbox_sync_status(db, user),
         }
     )
-    return template_response("htmx/partials/requisitions/list.html", ctx)
+    resp = template_response("htmx/partials/requisitions/list.html", ctx)
+    set_canonical_url(resp, request, "/v2/requisitions?view=list")
+    return resp
 
 
 # CSV export column order for the requisitions list — the REAL Requisition fields. Header

@@ -4111,6 +4111,57 @@ OUTBOUND email is not captured — that would need a Sent-folder scan.)
 
 ---
 
+## 12. Navigation & History (Wayfinding Layer)
+
+Four cooperating mechanisms (nav audit 2026-08-20) keep the browser URL, the
+history stack, and the rendered page telling the same story. The invariant:
+**the address bar always holds a canonical `/v2/...` page URL that survives
+reload/share/Back — never a `/v2/partials/...` fragment URL.**
+
+```
+1. Shell negotiation (reload/share/back-past-cache of ANY partial URL):
+    browser GET /v2/partials/<anything>            Sec-Fetch-Dest: document
+        |
+        v
+    ShellNegotiationMiddleware (app/main.py)  — pure ASGI scope REWRITE
+        |   GET + /v2/partials/* + not export-ish + Sec-Fetch-Dest: document
+        |   → scope.path = /v2/shell, ?partial=<original url>
+        |   (htmx/XHR/TestClient requests lack the header → untouched)
+        v
+    htmx_views.v2_shell  — ordinary route, ordinary auth (get_user):
+        logged-out → login page; bad partial → 404;
+        else full_page_shell(...) = chrome + nav lazy-loading the SAME
+        partial into #main-content
+
+2. Server-owned canonical history (list partials):
+    requisitions/prospecting list routes call _shared.set_canonical_url(resp,
+    request, "/v2/requisitions?view=list" | "/v2/prospecting")
+        → HX-Replace-Url: <canonical page URL>+<current query> on every htmx
+          response. REPLACE, never push: entering the page (the nav <a>'s own
+          hx-push-url) is the single history entry; filters/typing/lazy loads
+          just keep the address bar truthful. Templates must never carry
+          hx-push-url="true" on filter controls (pushes the partial URL).
+
+3. Workspace state in the URL (Approvals):
+    ?select= accepts plan-N / line-N / prepay-N / bare digits on all four tabs
+    (_normalize_select + _selected_row in approvals_hub.py, access-gated via
+    get_buyplan_for_user). Row selection does history.replaceState to
+    /v2/approvals?tab=..&select=..; tab pills use hx-replace-url. htmx
+    htmx:historyRestore listener (htmx_app.js) re-renders #ap-hub-body from
+    the URL. The retired /v2/partials/buy-plans/{id} answers htmx callers
+    with HX-Redirect (a followed 308 would nest the full document — doubled
+    chrome) and plain browsers with 308.
+
+4. Query threading (v2_page + v2_shell):
+    /v2/requisitions?view=list&q=… threads the filters into the lazy partial
+    URL (minus `view`, which picks the branch); detail views and the generic
+    else thread the whole query. hx-history-elt sits on #main-content;
+    htmx.config.refreshOnHistoryMiss=true turns a history-cache miss into a
+    full reload, which mechanism 1 then answers with a correct shell.
+```
+
+---
+
 ## Enrichment Pipeline
 
 ### CRM / Vendor Firmographic + Contact Enrichment

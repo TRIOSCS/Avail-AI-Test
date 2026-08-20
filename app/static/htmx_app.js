@@ -366,8 +366,32 @@ Alpine.store('sightingSelection', {
 // ── HTMX config ─────────────────────────────────────────────
 htmx.config.defaultSwapStyle = 'innerHTML';
 htmx.config.historyCacheSize = 10;
+// Nav audit 2026-08-20: on a history-cache miss (common on phones — tab discards,
+// >10 swaps) do a REAL browser load of the pushed URL instead of an ajax re-GET
+// swapped into <body>. Combined with ShellNegotiationMiddleware (which serves the
+// full shell for any browser navigation to a partial URL), every Back press lands
+// on a complete page instead of a naked fragment.
+htmx.config.refreshOnHistoryMiss = true;
 htmx.config.selfRequestsOnly = true;
 htmx.config.timeout = 15000;  // 15s timeout — prevents requests from hanging forever
+
+// History snapshots can fail silently (localStorage quota) — every failure turns a
+// future Back into the slow refresh path. Surface it in the existing error log.
+document.body.addEventListener('htmx:historyCacheError', (e) => {
+  console.warn('htmx history cache error (Back will fall back to a full reload):', e.detail);
+});
+
+// Nav audit #3: a history-cache RESTORE re-fires the workspace's lazy loader with the
+// tab that was baked at first render — stale after tab switches. Re-render the body
+// from the URL (the single source of truth for tab + selection) instead.
+document.body.addEventListener('htmx:historyRestore', () => {
+  if (!document.getElementById('ap-hub-body')) return;
+  const params = new URLSearchParams(window.location.search);
+  const tab = params.get('tab') || 'sales-orders';
+  const sel = params.get('select');
+  const url = '/v2/partials/approvals/' + tab + (sel ? '?select=' + encodeURIComponent(sel) : '');
+  htmx.ajax('GET', url, { target: '#ap-hub-body', swap: 'innerHTML', indicator: '#ap-hub-body' });
+});
 
 // ── CSRF token for all HTMX requests ───────────────────────
 // starlette_csrf middleware requires x-csrftoken header on POST/PUT/PATCH/DELETE.

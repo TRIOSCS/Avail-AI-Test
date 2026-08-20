@@ -12,6 +12,7 @@ import os
 import re
 import uuid
 from contextlib import asynccontextmanager
+from urllib.parse import urlencode
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
@@ -475,7 +476,50 @@ class ModuleAccessMiddleware:
 # scope["session"] first, then both inner middlewares read it. ModuleAccess is added
 # after Audit (so it wraps inside Audit), which is irrelevant to correctness: both
 # only read the session Session already decoded.
+
+
+class ShellNegotiationMiddleware:
+    """Rewrite any browser TOP-LEVEL navigation to a partial URL onto the shell route.
+
+    Root cause of the owner's "ended up on different pages with no way back"
+    (nav audit 2026-08-20): controls push ``/v2/partials/*`` URLs into history, and a
+    reload / share / back-past-the-history-cache then issues a plain browser GET of
+    that URL — which routes answer with a naked, nav-less fragment. Rather than
+    content-negotiating 200+ routes individually, this chokepoint detects a top-level
+    browser navigation (``Sec-Fetch-Dest: document`` — sent by every modern browser on
+    address-bar loads, reloads, back/forward, and link opens; absent on htmx/XHR
+    requests AND on TestClient requests, so tests and fragments pass through
+    untouched) and rewrites the scope onto ``GET /v2/shell?partial=<original url>``.
+    That ORDINARY route (htmx_views.v2_shell) then does auth the ordinary way — a
+    logged-out browser gets the login page — and serves the chrome + nav,
+    lazy-loading the SAME partial URL into #main-content. A pure path rewrite: no
+    session reads, no DB access, no response building here, so it needs nothing from
+    the middlewares around it. Download-ish paths (exports) are excluded — those are
+    legitimately fetched as documents.
+    """
+
+    _EXCLUDE_SUBSTRINGS = ("/export", "/download", "/excel", ".csv", ".xlsx")
+
+    def __init__(self, app_inner):
+        self._app = app_inner
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and scope.get("method") == "GET":
+            path = scope.get("path", "")
+            if path.startswith("/v2/partials/") and not any(x in path for x in self._EXCLUDE_SUBSTRINGS):
+                headers = {k.lower(): v for k, v in scope.get("headers", [])}
+                if headers.get(b"sec-fetch-dest") == b"document":
+                    query = scope.get("query_string", b"").decode("latin-1")
+                    partial_url = f"{path}?{query}" if query else path
+                    scope = dict(scope)
+                    scope["path"] = "/v2/shell"
+                    scope["raw_path"] = b"/v2/shell"
+                    scope["query_string"] = urlencode({"partial": partial_url}).encode("latin-1")
+        await self._app(scope, receive, send)
+
+
 app.add_middleware(ModuleAccessMiddleware)
+app.add_middleware(ShellNegotiationMiddleware)
 app.add_middleware(AuditUserMiddleware)
 app.add_middleware(
     SessionMiddleware,
