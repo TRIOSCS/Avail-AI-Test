@@ -381,16 +381,24 @@ document.body.addEventListener('htmx:historyCacheError', (e) => {
   console.warn('htmx history cache error (Back will fall back to a full reload):', e.detail);
 });
 
-// Nav audit #3: a history-cache RESTORE re-fires the workspace's lazy loader with the
-// tab that was baked at first render — stale after tab switches. Re-render the body
-// from the URL (the single source of truth for tab + selection) instead.
-document.body.addEventListener('htmx:historyRestore', () => {
-  if (!document.getElementById('ap-hub-body')) return;
-  const params = new URLSearchParams(window.location.search);
-  const tab = params.get('tab') || 'sales-orders';
-  const sel = params.get('select');
-  const url = '/v2/partials/approvals/' + tab + (sel ? '?select=' + encodeURIComponent(sel) : '');
-  htmx.ajax('GET', url, { target: '#ap-hub-body', swap: 'innerHTML', indicator: '#ap-hub-body' });
+// The approvals workspace tab body (#ap-hub-body) lazy-loads via hx-trigger="load".
+// Once it has settled, strip that one-shot trigger (and its hx-get) so a history-cache
+// RESTORE of the workspace uses the cached, correct content instead of re-firing the
+// loader with the STALE tab baked at first render (the tab pills swap #ap-hub-body's
+// inner content but leave its own hx-get pointing at the first tab) — nav audit #3.
+// Combined with select()/pills driving the URL through htmx, Back restores the exact
+// tab + selected deal from cache, instantly. The strip persists into the snapshot htmx
+// saves on navigate-away, so the restored markup carries no re-firing loader. Idempotent
+// (pill swaps also settle on #ap-hub-body; after the first strip there is nothing to
+// remove) and scoped to this one element, so it never touches other lazy bodies.
+document.body.addEventListener('htmx:afterSettle', (e) => {
+  const b = document.getElementById('ap-hub-body');
+  if (!b) return;
+  const settledOn = (e.detail && e.detail.target) || e.target;
+  if (settledOn === b) {
+    b.removeAttribute('hx-trigger');
+    b.removeAttribute('hx-get');
+  }
 });
 
 // ── CSRF token for all HTMX requests ───────────────────────
