@@ -4158,6 +4158,33 @@ reload/share/Back — never a `/v2/partials/...` fragment URL.**
     else thread the whole query. hx-history-elt sits on #main-content;
     htmx.config.refreshOnHistoryMiss=true turns a history-cache miss into a
     full reload, which mechanism 1 then answers with a correct shell.
+
+5. History hygiene (template conventions, pinned by tests/test_nav_wayfinding.py):
+    - set_canonical_url stamps ONLY when HX-Trigger-Name is present (a named
+      filter control). An HX-Replace-Url response header OVERRIDES the
+      element's own hx-push-url in htmx, so stamping a navigation would erase
+      the origin page. Unnamed state pills carry template hx-replace-url with
+      the baked canonical query instead.
+    - Row containers that push their detail URL carry
+      hx-disinherit="hx-push-url" (descendant actions must not push).
+    - NO raw history.pushState anywhere — imperative navigations use
+      htmx.ajax(..., {push: canonicalUrl}) so htmx can snapshot/restore.
+    - Junk-entry guards: bottom-nav re-taps of the exact current URL are
+      no-ops; origination Cancel pushes nothing; best-match cards render link
+      attrs only when the URL map + id resolve (bm_dead guard).
+
+6. Mobile shell: bottom nav = 4 primary (Sales Hub, Approvals, Search,
+    Tasks) + More sheet holding the rest (same hx/access/badge wiring); the
+    workspace ↑ List chip is mounted once in _workspace_split.html outside
+    #aw-pane (sticky top-12 under the topbar) so every pane type has it; one
+    breakpoint (768 = Tailwind md) shared by CSS and JS.
+
+7. Identity: topbar renders a current-view label kept fresh from
+    htmx:pushed-into-history / htmx:replaced-in-history via a URL-prefix map;
+    every top surface sends <title hx-swap-oob>; urlToNav covers the lateral
+    pages (/v2/qp, /v2/follow-ups, /v2/offers, /v2/quotes, /v2/sourcing,
+    /v2/companies, /v2/trouble-tickets); Follow-ups and Offer review carry an
+    h1 + a "← Sightings" way back; the QP has "← Back to deal".
 ```
 
 ---

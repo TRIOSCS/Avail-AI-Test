@@ -143,7 +143,10 @@
       <div class="flex flex-wrap gap-2">
         {# 'won' is the real RequisitionStatus; the old 'awarded' value doesn't exist and always returned empty. #}
         {% for s_val, s_label in [('', 'All'), ('open', 'Open'), ('hotlist', 'Hotlist'), ('won', 'Won')] %}
-        <button type="button"
+        {# name= makes HX-Trigger-Name arrive so set_canonical_url stamps the replace
+           (the pill's query is Alpine-dynamic — a static hx-replace-url can't carry it).
+           hx-vals overrides the button's own empty status param. #}
+        <button type="button" name="status"
                 @click="rStatus = '{{ s_val }}'"
                 hx-get="/v2/partials/requisitions"
                 hx-target="#main-content"

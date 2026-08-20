@@ -6,9 +6,20 @@
 #}
 {%- from "htmx/partials/follow_ups/_macros.html" import parts_summary %}
 
+<title hx-swap-oob="true">Follow-ups — AvailAI</title>
+
 <div class="page-fluid">
+  {# Identity + way back (nav audit #5/#11): this queue is reached laterally from the
+     Sightings workspace and had no name, no title, and no exit. #}
+  <a href="/v2/sightings" hx-get="/v2/partials/sightings/workspace" hx-target="#main-content"
+     hx-push-url="/v2/sightings"
+     class="inline-flex items-center gap-1 text-sm text-accent-600 hover:text-accent-700 mb-1.5">
+    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
+    Sightings
+  </a>
   <div class="flex items-center justify-between mb-6">
     <div>
+      <h1 class="h1">Follow-ups</h1>
       <p class="text-sm text-gray-600 mt-1">
         <span class="font-medium text-amber-600">{{ total }}</span> contact{{ "s" if total != 1 }} needing follow-up
       </p>

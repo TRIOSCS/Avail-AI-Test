@@ -3,6 +3,8 @@
    Called by: crm/views.py crm_shell route.
    Depends on: Alpine.js, HTMX, accent palette (post-PR0), _shell_macros.html.
 #}
+
+<title hx-swap-oob="true">CRM — AvailAI</title>
 {% from "htmx/partials/crm/_shell_macros.html" import tab_button -%}
 <div x-data="{ tab: '{{ default_tab }}' }">
 

@@ -9,6 +9,8 @@
     - ai_search: bool (optional)
 #}
 
+<title hx-swap-oob="true">Search Results — AvailAI</title>
+
 <div class="page-fluid px-4 py-6" x-data="{ tab: 'all' }">
 
   {# ── Page header ── #}
@@ -42,7 +44,6 @@
            hx-get="/v2/partials/search/results"
            hx-trigger="keyup changed delay:500ms"
            hx-target="#main-content"
-           hx-push-url="/v2/search/results"
            hx-include="this"
            placeholder="Refine your search...">
   </div>

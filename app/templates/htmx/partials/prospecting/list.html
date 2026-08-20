@@ -8,6 +8,8 @@
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
 
+<title hx-swap-oob="true">Prospecting — AvailAI</title>
+
 <div class="page-fluid">
 
   {# ── Page header ─────────────────────────────────────────────────── #}
@@ -73,7 +75,8 @@
                      {% if status == val %}bg-accent-500 text-white shadow-sm{% else %}bg-accent-100 text-accent-600 hover:bg-accent-200{% endif %}"
               aria-pressed="{{ 'true' if status == val else 'false' }}"
               hx-get="/v2/partials/prospecting?status={{ val|urlencode }}&sort={{ sort|urlencode }}&q={{ q|urlencode }}&scope={{ scope|urlencode }}"
-              hx-target="#main-content">
+              hx-target="#main-content"
+              hx-replace-url="/v2/prospecting?status={{ val|urlencode }}&sort={{ sort|urlencode }}&q={{ q|urlencode }}&scope={{ scope|urlencode }}">
         {{ label }}
         <span class="ml-1 text-xs opacity-75">{{ pill_counts.get(val, 0) }}</span>
       </button>
@@ -95,7 +98,8 @@
                          {% if scope == s %}bg-accent-500 text-white{% else %}bg-white text-accent-600 hover:bg-accent-100{% endif %}"
                   aria-pressed="{{ 'true' if scope == s else 'false' }}"
                   hx-get="/v2/partials/prospecting?scope={{ s|urlencode }}&status={{ status|urlencode }}&sort={{ sort|urlencode }}&q={{ q|urlencode }}"
-                  hx-target="#main-content">
+                  hx-target="#main-content"
+                  hx-replace-url="/v2/prospecting?scope={{ s|urlencode }}&status={{ status|urlencode }}&sort={{ sort|urlencode }}&q={{ q|urlencode }}">
             {{ lbl }}
           </button>
           {% endfor %}

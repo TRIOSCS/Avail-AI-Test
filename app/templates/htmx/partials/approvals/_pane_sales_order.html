@@ -50,9 +50,12 @@
       <span class="flex items-center gap-2">
         {# Quality Plan front door (re-homed from the retired detail page): get-or-create
            this plan's QP and open the full native view (purchasing + serial/FRU too). #}
-        <span hx-get="/v2/qp/for-buy-plan/{{ bp.id }}" hx-target="#main-content" hx-push-url="true"
-              @click.stop data-loading-disable role="link"
-              class="text-xs font-medium text-accent-600 cursor-pointer">Open full Quality Plan</span>
+        {# Real <a href> (nav audit #5): long-press / open-in-new-tab work, and the
+           link survives JS failure. htmx still handles the in-app click. #}
+        <a href="/v2/qp/for-buy-plan/{{ bp.id }}"
+           hx-get="/v2/qp/for-buy-plan/{{ bp.id }}" hx-target="#main-content" hx-push-url="true"
+           @click.stop data-loading-disable
+           class="text-xs font-medium text-accent-600 cursor-pointer">Open full Quality Plan</a>
         {% if qp and qp.sales_section_reviewed_at %}<span class="text-[11px] text-emerald-600 font-medium">Reviewed</span>{% endif %}
         <svg class="w-4 h-4 text-gray-400 transition-transform" :class="qpOpen && 'rotate-180'" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
       </span>

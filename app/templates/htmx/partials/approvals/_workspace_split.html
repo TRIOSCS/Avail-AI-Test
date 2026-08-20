@@ -36,7 +36,9 @@
          history.replaceState(history.state, '', '/v2/approvals?tab={{ tab }}&select=' + encodeURIComponent(key));
          // Auto-selection (aw-default) must not yank the phone viewport mid-pane
          // (nav audit #8) — scroll only on an explicit row tap.
-         if (!auto && window.innerWidth < 900) {
+         {# 768 matches Tailwind's md breakpoint — the CSS (max-md) and this JS must
+            agree on where "mobile" starts (nav audit #8; was 900 vs 768). #}
+         if (!auto && window.innerWidth < 768) {
            this.$root.querySelector('#aw-pane')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
          }
        },
@@ -110,7 +112,15 @@
     {# Loading bar for imperative pane loads (htmx.ajax indicator target) —
        lives OUTSIDE #aw-pane so the innerHTML swap never removes it. #}
     <div id="aw-pane-ind" class="htmx-indicator h-0.5 bg-accent-500 animate-pulse flex-shrink-0"></div>
-    <div id="aw-pane" class="flex-1 min-h-0">
+    {# ↑ List chip (nav audit #8) — mounted OUTSIDE #aw-pane so every pane type gets
+       it (the per-pane copy existed on 1 of 4 panes). Mobile-only, sticky under the
+       48px topbar so it survives scrolling a long pane. #}
+    <div class="hidden max-md:flex sticky top-12 z-10 justify-end px-3 py-1 bg-white/95 backdrop-blur border-b border-line-subtle">
+      <button type="button"
+              class="text-[11px] font-medium text-accent-600 whitespace-nowrap"
+              @click="document.getElementById('aw-list')?.scrollIntoView({behavior: 'smooth'})">&uarr; List</button>
+    </div>
+    <div id="aw-pane" class="flex-1 min-h-0 scroll-mt-12">
       {% include "htmx/partials/approvals/_pane_blank.html" %}
     </div>
   </div>

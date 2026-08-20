@@ -31,7 +31,7 @@ from ...services.sighting_ingest import sighting_from_row
 from ...services.vendor_unavailability import apply_to_fresh_sightings
 from ...template_env import template_response, templates
 from ...utils.sql_helpers import escape_like
-from ._shared import _base_ctx
+from ._shared import _base_ctx, set_canonical_url
 
 router = APIRouter(tags=["htmx-views"])
 
@@ -84,10 +84,14 @@ async def search_results_page(
     from ...services.global_search_service import fast_search
 
     results = fast_search(q, db, user) if q else {"best_match": None, "groups": {}, "total_count": 0}
-    return template_response(
+    resp = template_response(
         "htmx/partials/search/full_results.html",
         {**_base_ctx(request, user), "results": results, "query": q},
     )
+    # Nav audit #10: the refine box used to push /v2/search/results with no ?q, so a
+    # reload came back empty. The canonical stamp carries the live query instead.
+    set_canonical_url(resp, request, "/v2/search/results")
+    return resp
 
 
 # ── Search partials ─────────────────────────────────────────────────────
@@ -107,6 +111,10 @@ async def search_form_partial(
     deep-links the dossier + a lazy-loaded recent list). The new routes live in
     routers/part_dossier.py; this stays the single /v2/partials/search entry point.
     """
+    # NOTE: no set_canonical_url stamp here — an HX-Replace-Url response header would
+    # override the caller's push (search form / dossier bar push /v2/search?mpn=…
+    # explicitly) and collapse back-through-parts into one entry. Dossiers are detail
+    # pages: pushes stay caller-owned; stale partial URLs survive via /v2/shell.
     ctx = _base_ctx(request, user, "search")
     if mpn.strip():
         ctx["mpn"] = mpn.strip().upper()

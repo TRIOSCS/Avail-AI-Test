@@ -111,16 +111,29 @@ def test_shell_route_rejects_non_partial_urls(nonadmin_client: TestClient):
 # ── 2. Server-owned canonical history ─────────────────────────────────────
 
 
-def test_requisitions_list_stamps_canonical_replace(client: TestClient):
-    r = client.get("/v2/partials/requisitions?q=abc&status=open", headers=_HX)
-    assert "HX-Push-Url" not in r.headers  # push would trap Back on the shell's lazy load
+def test_filter_control_stamps_canonical_replace(client: TestClient):
+    # A NAMED control (HX-Trigger-Name) = state change within the page → replace with
+    # the canonical page URL + live query. Never a push (that would stack entries per
+    # keystroke/filter tap).
+    r = client.get("/v2/partials/requisitions?q=abc&status=open", headers={**_HX, "HX-Trigger-Name": "q"})
+    assert "HX-Push-Url" not in r.headers
     assert r.headers.get("HX-Replace-Url", "").startswith("/v2/requisitions?view=list")
     assert "q=abc" in r.headers["HX-Replace-Url"]
 
 
-def test_prospecting_list_stamps_canonical_replace(client: TestClient):
-    r = client.get("/v2/partials/prospecting?scope=all", headers=_HX)
+def test_prospecting_filter_stamps_canonical_replace(client: TestClient):
+    r = client.get("/v2/partials/prospecting?scope=all", headers={**_HX, "HX-Trigger-Name": "scope"})
     assert r.headers.get("HX-Replace-Url", "").startswith("/v2/prospecting")
+
+
+def test_navigation_request_gets_no_replace_stamp(client: TestClient):
+    # An UN-named trigger (nav <a>, view toggle, "view all" link) must get NO history
+    # header: HX-Replace-Url in a response OVERRIDES the element's own hx-push-url in
+    # htmx, so stamping a navigation would erase the page the user came from instead
+    # of pushing. Same for pollers (reqListRefresh) — they must never touch history.
+    r = client.get("/v2/partials/requisitions?q=abc", headers=_HX)
+    assert "HX-Replace-Url" not in r.headers
+    assert "HX-Push-Url" not in r.headers
 
 
 def test_non_htmx_caller_gets_no_history_headers(client: TestClient):
@@ -198,3 +211,62 @@ def test_canonical_list_url_reloads_filtered(nonadmin_client: TestClient):
     # The shell's lazy partial URL carries the filters through.
     assert "q=widget" in r.text
     assert "status=open" in r.text
+
+
+# ── 5. Link & history hygiene sweeps (PR-B, nav audit #5-#9, #11-#12) ─────
+
+from pathlib import Path
+
+_T = Path("app/templates/htmx/partials")
+
+
+def test_no_raw_pushstate_in_templates_or_js():
+    # Raw history.pushState entries can never be restored by htmx (nav audit #7) —
+    # imperative navigations must use htmx.ajax's push option instead.
+    offenders = []
+    for f in list(Path("app/templates").rglob("*.html")) + [Path("app/static/htmx_app.js")]:
+        for i, line in enumerate(f.read_text().splitlines(), 1):
+            if "history.pushState" in line:
+                offenders.append(f"{f}:{i}")
+    assert not offenders, "raw history.pushState (htmx can't restore these): " + ", ".join(offenders)
+
+
+def test_row_containers_disinherit_push_url():
+    # A row's hx-push-url is INHERITED by descendant actions (dblclick edits, Claim)
+    # unless disinherited — the leak that made the URL lie (nav audit #6).
+    for rel in (
+        "requisitions/req_row.html",
+        "tickets/_row.html",
+        "vendors/list.html",
+        "vendors/vendor_card.html",
+        "materials/list.html",
+    ):
+        assert 'hx-disinherit="hx-push-url"' in (_T / rel).read_text(), rel
+
+
+def test_lateral_pages_have_identity_and_way_back():
+    fu = (_T / "follow_ups/list.html").read_text()
+    rq = (_T / "offers/review_queue.html").read_text()
+    qp = (_T / "qp/detail.html").read_text()
+    for src_ in (fu, rq):
+        assert "title hx-swap-oob" in src_
+        assert 'href="/v2/sightings"' in src_  # the way back
+    assert 'href="/v2/approvals?tab=sales-orders&select=' in qp  # back to the deal
+
+
+def test_mobile_nav_capped_at_five_slots():
+    # 10 slots at 62px demanded 682px on a 390px phone (nav audit #9); primary bar
+    # is 4 items + More, the rest live in the More sheet with badges intact.
+    src_ = (_T / "shared/mobile_nav.html").read_text()
+    primary = src_.split("more_nav_items")[0]
+    assert primary.count("('") <= 5  # 4 item tuples + the set-open paren noise guard
+    assert "more_nav_items" in src_
+    assert 'id="crm-nav-badge"' in src_  # badge poller survived the move
+    assert 'id="proactive-nav-badge"' in src_
+
+
+def test_best_match_cards_never_emit_dead_links():
+    for rel in ("shared/search_results.html", "search/full_results.html"):
+        src_ = (_T / rel).read_text()
+        assert "bm_dead" in src_, rel  # the guard exists
+        assert "hx-push-url=\"{{ bm_url_map.get(bm.type, '#') }}\"" not in src_, rel

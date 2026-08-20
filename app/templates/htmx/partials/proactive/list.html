@@ -5,6 +5,8 @@
   Called by: htmx_views.py proactive_list_partial endpoint.
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
+
+<title hx-swap-oob="true">Proactive — AvailAI</title>
 {%- from "htmx/partials/proactive/_macros.html" import company_header, empty_state, margin_badge %}
 
 <div class="page-fluid"
