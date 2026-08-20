@@ -379,6 +379,35 @@ def _compute_vendor_safety(
     return score, flags, summary
 
 
+# Human-readable, caution-language labels for the vendor-safety signal codes — feeds
+# the reusable safety_review.html signal lists (which want display strings, not codes).
+_SAFETY_FLAG_LABELS: dict[str, str] = {
+    "internal_do_not_contact_history": "On the internal do-not-contact list",
+    "buyer_marked_do_not_contact": "A buyer flagged this vendor do-not-contact",
+    "high_cancellation_rate": "History of order cancellations",
+    "repeated_bad_feedback": "Repeated unfavorable buyer feedback",
+    "no_business_footprint": "No verifiable business footprint (no site/domain)",
+    "limited_business_footprint": "Limited business footprint",
+    "unverifiable_address": "No verifiable business address",
+    "conflicting_contact_info": "No verified contact channels on file",
+    "limited_verified_contact_channels": "Few verified contact channels",
+    "new_domain": "New to us — no internal history",
+    "no_internal_vendor_profile": "No internal vendor profile",
+    "marketplace_trust_unknown": "Marketplace trust unknown",
+    "verified_business_footprint": "Verified business footprint",
+    "business_website_exists": "Business website on file",
+    "email_domain_matches_website": "Email domain matches the website",
+    "contact_channels_present": "Contact channels present",
+    "established_relationship": "Established relationship",
+    "proven_success_history": "Proven success history",
+    "marketplace_listing_found": "Marketplace listing found",
+}
+
+
+def _safety_label(code: str) -> str:
+    return _SAFETY_FLAG_LABELS.get(code, code.replace("_", " ").capitalize())
+
+
 def vendor_safety_for_card(db: Session, vendor_card: VendorCard | None) -> dict:
     """Vendor safety band + caution/positive signals computed from a VendorCard alone.
 
@@ -410,6 +439,9 @@ def vendor_safety_for_card(db: Session, vendor_card: VendorCard | None) -> dict:
         "summary": summary,
         "caution": caution,
         "positives": positives,
+        # Human-readable versions for the safety_review.html signal lists.
+        "caution_labels": [_safety_label(c) for c in caution],
+        "positive_labels": [_safety_label(p) for p in positives],
     }
 
 

@@ -136,3 +136,111 @@ def test_sheet_ctx_ai_flags_are_fresh(db_session: Session, test_user):
     assert "vendor_risk" in types, "fresh compute should catch the post-build risk"
     assert "stale_snapshot" not in types, "must not read the stale stored ai_flags"
     assert ctx["ai_flags_by_line"].get(line.id), "flags indexed per line for the row count"
+
+
+# ── below-market ("too cheap") flag — from sibling offers only ────────────
+
+
+def _plan_priced(db, picked_price, sibling_prices):
+    user = _make_user(db)
+    company = _make_company(db)
+    site = _make_site(db, company)
+    req = _make_requisition(db, user, site)
+    requirement = _make_requirement(db, req)
+    v0 = _make_vendor(db, name="Picked Vendor")
+    picked = _make_offer(db, req, requirement, v0, price=picked_price)
+    for i, p in enumerate(sibling_prices):
+        _make_offer(db, req, requirement, _make_vendor(db, name=f"Sib {i}"), price=p)
+    quote = _make_quote(db, req, site, user)
+    plan, line = _make_plan_with_line(db, quote, req, requirement, picked, buyer_id=user.id)
+    return plan
+
+
+def test_below_market_flags_too_cheap(db_session: Session):
+    # picked $0.30 vs siblings around $1.00 → ~70% below median
+    plan = _plan_priced(db_session, 0.30, [1.00, 1.10, 0.95])
+    bm = [f for f in generate_ai_flags(plan, db_session) if f["type"] == "below_market"]
+    assert bm and bm[0]["severity"] == "warning"
+
+
+def test_below_market_quiet_when_priced_normally(db_session: Session):
+    plan = _plan_priced(db_session, 0.95, [1.00, 1.10, 0.95])
+    bm = [f for f in generate_ai_flags(plan, db_session) if f["type"] == "below_market"]
+    assert not bm
+
+
+def test_below_market_needs_a_cluster(db_session: Session):
+    # only one sibling — not a "market", so no flag even though it's cheaper
+    plan = _plan_priced(db_session, 0.30, [1.00])
+    bm = [f for f in generate_ai_flags(plan, db_session) if f["type"] == "below_market"]
+    assert not bm
+
+
+# ── pre-check: human-readable labels for safety_review.html reuse ─────────
+
+
+def test_safety_returns_human_labels(db_session: Session):
+    v = _make_vendor(db_session)
+    v.cancellation_rate = 0.5
+    db_session.flush()
+    out = vendor_safety_for_card(db_session, v)
+    assert "caution_labels" in out and "positive_labels" in out
+    assert "History of order cancellations" in out["caution_labels"]
+    # labels are display strings, never raw codes
+    assert "high_cancellation_rate" not in out["caution_labels"]
+
+
+# ── offer language / contradiction screen (deterministic) ─────────────────
+
+
+def test_language_screen_flags_vague_wording(db_session: Session):
+    from app.services.offer_language_screen import screen_offer_language
+
+    user = _make_user(db_session)
+    company = _make_company(db_session)
+    site = _make_site(db_session, company)
+    req = _make_requisition(db_session, user, site)
+    requirement = _make_requirement(db_session, req)
+    offer = _make_offer(db_session, req, requirement, _make_vendor(db_session))
+    offer.notes = "Parts are New & Original, sold as-is, no returns."
+    db_session.flush()
+    codes = {f["code"] for f in screen_offer_language(offer)}
+    assert "vague_language" in codes
+
+
+def test_language_screen_flags_stock_leadtime_conflict(db_session: Session):
+    from app.services.offer_language_screen import screen_offer_language
+
+    user = _make_user(db_session)
+    company = _make_company(db_session)
+    site = _make_site(db_session, company)
+    req = _make_requisition(db_session, user, site)
+    requirement = _make_requirement(db_session, req)
+    offer = _make_offer(db_session, req, requirement, _make_vendor(db_session), qty=500)
+    offer.lead_time = "2-3 weeks"
+    db_session.flush()
+    codes = {f["code"] for f in screen_offer_language(offer)}
+    assert "stock_leadtime_conflict" in codes
+
+
+def test_language_screen_quiet_on_clean_offer(db_session: Session):
+    from app.services.offer_language_screen import screen_offer_language
+
+    user = _make_user(db_session)
+    company = _make_company(db_session)
+    site = _make_site(db_session, company)
+    req = _make_requisition(db_session, user, site)
+    requirement = _make_requirement(db_session, req)
+    offer = _make_offer(db_session, req, requirement, _make_vendor(db_session), qty=500)
+    offer.lead_time = "in stock"
+    offer.notes = "Factory sealed, full traceability, COO available."
+    db_session.flush()
+    assert screen_offer_language(offer) == []
+
+
+def test_language_flags_reach_generate_ai_flags(db_session: Session):
+    plan, line = _plan_with_vendor(db_session)
+    line.offer.notes = "New and Original"
+    db_session.flush()
+    types = {f["type"] for f in generate_ai_flags(plan, db_session)}
+    assert "offer_language" in types

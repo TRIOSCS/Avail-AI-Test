@@ -566,9 +566,10 @@ def generate_ai_flags(plan: BuyPlan, db: Session, customer_region: str | None = 
                 }
             )
 
-        # ── Better offer available check
+        # ── Better offer available check + below-market ("too cheap") risk check
         if offer and line.requirement_id:
             _check_better_offer(line, offer, better_pct, flags, db)
+            _check_below_market(line, offer, flags, db)
 
         # ── Geography mismatch check
         if offer and customer_region:
@@ -592,6 +593,15 @@ def generate_ai_flags(plan: BuyPlan, db: Session, customer_region: str | None = 
         #    high-signal caution codes as a flag; the full band lives on the Pre-check.
         if offer is not None:
             _check_vendor_risk(line, offer, flags, db)
+
+        # ── Offer communication red flags (deterministic language/contradiction screen)
+        if offer is not None:
+            from .offer_language_screen import screen_offer_language
+
+            for lf in screen_offer_language(offer):
+                flags.append(
+                    {"type": "offer_language", "severity": "warning", "line_id": line.id, "message": lf["note"]}
+                )
 
     # ── Quantity gap check (plan-level)
     if plan.lines:
@@ -674,6 +684,50 @@ def _check_better_offer(
                 }
             )
             break  # one flag per line is enough
+
+
+_BELOW_MARKET_PCT = 25.0  # picked offer this % under the median of sibling offers → "too cheap"
+
+
+def _check_below_market(line: BuyPlanLine, selected: Offer, flags: list[dict], db: Session):
+    """Flag an offer priced SUSPICIOUSLY BELOW the market of its sibling offers.
+
+    The counterfeit-relevant "too good to be true" signal — distinct from better_offer
+    (which flags a cheaper alternative you did NOT pick). Uses only the active offers
+    already recorded for this requirement: no market sweep, no new data. Needs a real
+    cluster (>=2 comparators) before it will call a "market".
+    """
+    if not selected.unit_price or float(selected.unit_price) <= 0:
+        return
+    others = sorted(
+        float(o.unit_price)
+        for o in db.query(Offer)
+        .filter(
+            Offer.requirement_id == line.requirement_id,
+            Offer.status == OfferStatus.ACTIVE.value,
+            Offer.id != selected.id,
+        )
+        .all()
+        if o.unit_price and float(o.unit_price) > 0
+    )
+    if len(others) < 2:
+        return
+    n = len(others)
+    median = others[n // 2] if n % 2 else (others[n // 2 - 1] + others[n // 2]) / 2
+    selected_price = float(selected.unit_price)
+    if median > 0 and selected_price < median * (1 - _BELOW_MARKET_PCT / 100):
+        pct = round((1 - selected_price / median) * 100, 1)
+        flags.append(
+            {
+                "type": "below_market",
+                "severity": "warning",
+                "line_id": line.id,
+                "message": (
+                    f"Priced {pct}% below the median of {n} other offers "
+                    f"(${selected_price:.4f} vs ${median:.4f}) — verify authenticity"
+                ),
+            }
+        )
 
 
 def _check_geo_mismatch(
