@@ -254,15 +254,27 @@ def test_lateral_pages_have_identity_and_way_back():
     assert 'href="/v2/approvals?tab=sales-orders&select=' in qp  # back to the deal
 
 
-def test_mobile_nav_capped_at_five_slots():
-    # 10 slots at 62px demanded 682px on a 390px phone (nav audit #9); primary bar
-    # is 4 items + More, the rest live in the More sheet with badges intact.
+def test_bottom_bar_holds_all_primary_modules():
+    # The bottom bar IS the primary navigation (owner directive 2026-08-20): every
+    # module tab lives IN the bar, never demoted into the More sheet. This guards the
+    # regression where the bar was cut to 4 tabs + a More sheet holding the rest.
     src_ = (_T / "shared/mobile_nav.html").read_text()
-    primary = src_.split("more_nav_items")[0]
-    assert primary.count("('") <= 5  # 4 item tuples + the set-open paren noise guard
-    assert "more_nav_items" in src_
-    assert 'id="crm-nav-badge"' in src_  # badge poller survived the move
-    assert 'id="proactive-nav-badge"' in src_
+    nav_items = src_.split("nav_items = [", 1)[1].split("] %}", 1)[0]
+    for module in (
+        "requisitions",
+        "sightings",
+        "materials",
+        "search",
+        "buy-plans",
+        "resell",
+        "crm",
+        "proactive",
+        "prospecting",
+        "my-day",
+    ):
+        assert f"('{module}'," in nav_items, f"{module} tab missing from the bottom bar"
+    # No secondary "More sheet" module list — the More menu is Settings/Sign-out only.
+    assert "more_nav_items" not in src_
 
 
 def test_best_match_cards_never_emit_dead_links():
