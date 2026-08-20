@@ -100,7 +100,7 @@ def test_approvals_buy_plan_list_has_new_sales_order_link(client: TestClient):
     T3)."""
     resp = client.get("/v2/partials/approvals/buy-plans/list")
     assert resp.status_code == 200
-    assert "New sales order" in resp.text
+    assert "New buy plan" in resp.text
     assert 'hx-get="/v2/partials/buy-plans/sales-orders/new?embed=aw"' in resp.text
     assert 'hx-target="#aw-pane"' in resp.text
 
