@@ -32,14 +32,16 @@ jobs:
     # script's header) so each shard carries ~half the pytest wall-clock.
     # 2026-08-17: 25 min became the cliff — green shards were already at 15-21
     # min and the #878/#879/#880 test additions pushed main past it (both
-    # shards "cancelled" at exactly 25:00 = job timeout, not a hang). 40 min
-    # restores headroom; when shards pass ~30 min real, move to a 3-way matrix
-    # instead of raising this again.
+    # shards "cancelled" at exactly 25:00 = job timeout, not a hang).
+    # 2026-08-20: shards were passing ~30 min real (the Deal Sheet stream added
+    # ~250 tests), so per the note above this moved to a 3-WAY matrix — each
+    # shard now carries ~⅓ of the pytest wall-clock; 40 min stays as generous
+    # headroom for slow runners rather than a re-tuned cliff.
     timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1]
+        shard: [0, 1, 2]
     services:
       postgres:
         image: postgres:16
@@ -282,7 +284,7 @@ jobs:
         # tests looks "uncovered" here) — --cov-fail-under is enforced once,
         # post-merge, in the coverage-report job.
         run: |
-          FILES=$(python scripts/ci_shard.py ${{ matrix.shard }} 2)
+          FILES=$(python scripts/ci_shard.py ${{ matrix.shard }} 3)
           echo "Shard ${{ matrix.shard }} running $(echo "$FILES" | wc -w) file(s)."
           pytest $FILES -q --tb=short \
             --cov=app --cov-report= \
@@ -355,19 +357,15 @@ jobs:
       - name: Install coverage (pinned lock version)
         run: pip install "coverage[toml]==7.14.1"
 
-      - name: Download shard 0 coverage data
+      - name: Download shard coverage data
         uses: actions/download-artifact@v8
         with:
-          name: coverage-data-0
-
-      - name: Download shard 1 coverage data
-        uses: actions/download-artifact@v8
-        with:
-          name: coverage-data-1
+          pattern: coverage-data-*
+          merge-multiple: true
 
       - name: Combine + enforce coverage gate
         run: |
-          coverage combine .coverage.0 .coverage.1
+          coverage combine .coverage.0 .coverage.1 .coverage.2
           coverage xml -o coverage.xml
           coverage report --fail-under=85
 
@@ -435,7 +433,9 @@ jobs:
     # so the same tests skip cleanly there.
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 2026-08-18: grazed the 15-min cap on a slow runner during the #884 merge
+    # (job-timeout reports as "cancelled", not "failure" — confusing to triage).
+    timeout-minutes: 25
     services:
       postgres:
         image: postgres:16
