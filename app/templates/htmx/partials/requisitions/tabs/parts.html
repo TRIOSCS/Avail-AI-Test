@@ -3,6 +3,7 @@
    Called by: requisition detail (inline on first load) and tab route.
    Depends on: brand palette, HTMX, Alpine.js.
 #}
+{% from "htmx/partials/shared/_macros.html" import spinner -%}
 <div x-data="{ selectedReqIds: [] }">
   {# Collapsible add requirement form #}
   <div x-data="{ addOpen: false }" class="mb-4">
@@ -189,10 +190,7 @@
        hx-trigger="load delay:8s"
        hx-target="#tab-content"
        hx-swap="innerHTML">
-    <svg class="h-4 w-4 animate-spin flex-none" fill="none" viewBox="0 0 24 24">
-      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"></circle>
-      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-    </svg>
+    {{ spinner('h-4 w-4 animate-spin flex-none', stroke_width=3) }}
     Searching all sources for {{ requirements|length }} part{{ "s" if requirements|length != 1 }}… This page will refresh automatically.
   </div>
   {% endif %}

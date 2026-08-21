@@ -11,9 +11,15 @@ single mechanism for rendering those UTC instants in a specific user's IANA time
     UTC datetime, defaulting to the current viewer zone but accepting an explicit zone
     (for server-side use like emails, where there is no request contextvar).
 
+``as_utc`` is the canonical naive→UTC coercion for stored datetimes (SQLite
+round-trips and legacy rows come back naive): it tags naive values as UTC, passes
+aware values and None through unchanged. Services/jobs import it instead of
+declaring private copies.
+
 Called by: app/template_env.py (the ``localtime``/``localdate`` Jinja filters and
     ``_task_due_state``), app/routers/htmx/settings.py (the timezone endpoint),
-    app/dependencies.py (populating the contextvar). Reusable by services/emails.
+    app/dependencies.py (populating the contextvar), services/jobs (``as_utc``).
+    Reusable by services/emails.
 Depends on: stdlib zoneinfo + app/request_context.py (pure stdlib).
 """
 
@@ -21,6 +27,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from functools import lru_cache
+from typing import overload
 from zoneinfo import ZoneInfo, available_timezones
 
 from ..request_context import current_user_display_tz_var
@@ -70,11 +77,22 @@ def current_display_zoneinfo() -> ZoneInfo:
     return resolve_zoneinfo(current_user_display_tz_var.get())
 
 
-def _as_utc(dt: datetime) -> datetime:
-    """Coerce a naive datetime to UTC-aware; pass aware datetimes through unchanged."""
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=UTC)
-    return dt
+@overload
+def as_utc(dt: datetime) -> datetime: ...
+
+
+@overload
+def as_utc(dt: None) -> None: ...
+
+
+def as_utc(dt: datetime | None) -> datetime | None:
+    """Coerce a naive datetime to UTC-aware; aware datetimes and None pass through.
+
+    Storage is UTC by convention — naive values are TAGGED as UTC, never converted.
+    """
+    if dt is None:
+        return None
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
 
 
 def to_display_tz(dt: datetime | None, tz: ZoneInfo | str | None = None) -> datetime | None:
@@ -88,7 +106,7 @@ def to_display_tz(dt: datetime | None, tz: ZoneInfo | str | None = None) -> date
         zone = resolve_zoneinfo(tz) if tz is not None else current_display_zoneinfo()
     else:
         zone = tz
-    return _as_utc(dt).astimezone(zone)
+    return as_utc(dt).astimezone(zone)
 
 
 def format_localtime(

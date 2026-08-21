@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
+from sqlalchemy import Select, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -115,10 +116,15 @@ class AlertSource(abc.ABC):
 
     # --- shared helpers ---------------------------------------------------
 
-    def seen_ref_ids(self, db: Session, user: User) -> set[int]:
-        """The set of ref_ids this user has already seen for this source's kind."""
-        rows = db.query(AlertSeen.ref_id).filter(AlertSeen.user_id == user.id, AlertSeen.alert_kind == self.kind).all()
-        return {r[0] for r in rows}
+    def seen_subquery(self, user: User) -> Select:
+        """SELECT of ref_ids this user has already seen for this source's kind.
+
+        For use as a SQL anti-join (``id_col.notin_(self.seen_subquery(user))``): the
+        seen history is permanent for FYI sources, so materializing it into Python and
+        shipping it back as an IN-list grew without bound on every badge poll. One
+        round trip, constant statement size, identical result set.
+        """
+        return select(AlertSeen.ref_id).where(AlertSeen.user_id == user.id, AlertSeen.alert_kind == self.kind)
 
     def recency_floor(self, now: datetime | None = None) -> datetime:
         """Convenience wrapper over the module-level :func:`recency_floor`."""

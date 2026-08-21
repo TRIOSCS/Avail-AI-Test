@@ -9,9 +9,10 @@
              RFQ dicts ({_is_rfq, raw, req}) mixed with ActivityLog objects,
              activities_truncated (bool), req_map (dict[int, Requisition]).
    Called by: company_tab route (tab=="activity") in htmx_views.py.
-   Depends on: HTMX, Alpine.js, Tailwind CSS, activity_row macro, now() Jinja global.
+   Depends on: HTMX, Alpine.js, Tailwind CSS, activity_row/activity_day_rows/
+               day_group_header macros, now() Jinja global.
 #}
-{% from "htmx/partials/shared/_macros.html" import activity_row, activity_icon %}
+{% from "htmx/partials/shared/_macros.html" import activity_row, activity_icon, activity_day_rows, day_group_header %}
 
 {# ── Section metadata: label, icon type, hidden-by-default flag ── #}
 {%- set _section_meta = [
@@ -80,22 +81,7 @@
       </div>
       {# ── Section body ─────────────────────────────────── #}
       <div class='px-4 py-2' x-show='!hideOther' x-cloak>
-        {%- set today = now()|localday -%}
-        {%- set ns = namespace(day=None) -%}
-        {% for a in section_items %}
-          {%- set ts = a.occurred_at or a.created_at -%}
-          {%- set ts_day = ts|localday -%}
-          {% if ts and ts_day != ns.day %}
-            {%- set ns.day = ts_day -%}
-            {%- set day_delta = (today - ts_day).days -%}
-            <p class='text-[11px] font-semibold text-gray-400 uppercase tracking-wider mt-4 mb-1 first:mt-1'>
-              {%- if day_delta == 0 %}Today
-              {%- elif day_delta == 1 %}Yesterday
-              {%- else %}{{ ts|localdate('%b %d, %Y') }}{% endif -%}
-            </p>
-          {% endif %}
-          {{ activity_row(a) }}
-        {% endfor %}
+        {{ activity_day_rows(section_items) }}
       </div>
     </div>
 
@@ -122,12 +108,7 @@
           {%- set ts_day = ts|localday -%}
           {% if ts and ts_day != ns.day %}
             {%- set ns.day = ts_day -%}
-            {%- set day_delta = (today - ts_day).days -%}
-            <p class='text-[11px] font-semibold text-gray-400 uppercase tracking-wider mt-4 mb-1 first:mt-1'>
-              {%- if day_delta == 0 %}Today
-              {%- elif day_delta == 1 %}Yesterday
-              {%- else %}{{ ts|localdate('%b %d, %Y') }}{% endif -%}
-            </p>
+            {{ day_group_header(ts, ts_day, today) }}
           {% endif %}
           {%- if item is mapping and item._is_rfq -%}
             {%- set c = item.raw -%}

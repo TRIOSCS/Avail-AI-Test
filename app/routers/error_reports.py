@@ -447,94 +447,21 @@ async def analyze_tickets(
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Batch AI analysis — group open tickets by root cause."""
-    from ..models.root_cause_group import RootCauseGroup
-    from ..utils.claude_client import claude_structured
-    from ..utils.claude_errors import ClaudeError, ClaudeUnavailableError
+    """Batch AI analysis — group open tickets by root cause.
 
-    tickets = (
-        db.query(TroubleTicket)
-        .filter(TroubleTicket.status.in_([TicketStatus.SUBMITTED, TicketStatus.IN_PROGRESS]))
-        .filter(TroubleTicket.source == TicketSource.REPORT_BUTTON)
-        .order_by(desc(TroubleTicket.created_at))
-        .limit(50)
-        .all()
-    )
+    The analysis + RootCauseGroup persistence lives in
+    services.ticket_diagnosis_service.analyze_open_tickets; this route delegates
+    and renders.
+    """
+    from ..services.ticket_diagnosis_service import analyze_open_tickets
 
-    if not tickets:
+    outcome = await analyze_open_tickets(db)
+    if outcome == "no_tickets":
         return HTMLResponse('<div class="text-center py-4 text-sm text-gray-500">No open tickets to analyze.</div>')
-
-    ticket_data = []
-    for t in tickets:
-        ticket_data.append(
-            {
-                "id": t.id,
-                "description": (t.description or "")[:300],
-                "page": t.current_page or "",
-                "js_errors": (t.console_errors or "")[:200],
-                "network": str(t.network_errors or "")[:200],
-            }
-        )
-
-    tool_schema = {
-        "type": "object",
-        "properties": {
-            "groups": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "title": {"type": "string"},
-                        "suggested_fix": {"type": "string"},
-                        "ticket_ids": {"type": "array", "items": {"type": "integer"}},
-                    },
-                    "required": ["title", "ticket_ids"],
-                },
-            }
-        },
-        "required": ["groups"],
-    }
-
-    try:
-        result = await claude_structured(
-            prompt=(
-                "Group these trouble tickets by root cause. For each group, provide a short title "
-                "and a suggested fix. Return JSON with a 'groups' array.\n\n"
-                f"Tickets:\n{json.dumps(ticket_data, indent=2)}"
-            ),
-            schema=tool_schema,
-            system="You are a bug triage assistant. Group related bug reports by their likely root cause.",
-            model_tier="fast",
-        )
-    except (ClaudeUnavailableError, ClaudeError) as e:
-        logger.warning("AI root cause analysis failed: {}", e)
-        result = None
-
-    if not result or "groups" not in result:
+    if outcome == "no_result":
         return HTMLResponse(
             '<div class="text-center py-4 text-sm text-amber-600">AI analysis returned no results. Try again later.</div>'
         )
-
-    ticket_map = {t.id: t for t in tickets}
-    for group_data in result["groups"]:
-        title = (group_data.get("title") or "Unknown")[:200]
-        fix = group_data.get("suggested_fix")
-        ticket_ids = group_data.get("ticket_ids", [])
-
-        group = db.query(RootCauseGroup).filter(RootCauseGroup.title == title).first()
-        if not group:
-            group = RootCauseGroup(title=title, suggested_fix=fix)
-            db.add(group)
-            db.flush()
-        elif fix and not group.suggested_fix:
-            group.suggested_fix = fix
-
-        for tid in ticket_ids:
-            if tid in ticket_map:
-                ticket_map[tid].root_cause_group_id = group.id
-
-    db.commit()
-    logger.info("AI analysis grouped {} tickets into {} groups", len(tickets), len(result["groups"]))
 
     # Render and return the freshly-grouped list partial so the innerHTML swap into
     # #ticket-list shows the new groupings. The "open" logical filter mirrors the

@@ -7,6 +7,7 @@
             companies (for the optional buyer-attribution select).
   Called by: resell.resell_offer_form.
 #}
+{% from "htmx/partials/shared/_macros.html" import close_modal_toast -%}
 {% set el = list %}
 <div class="p-5" x-data="{ scope: 'per_line' }">
   <h2 class="h2 mb-1">Submit offer</h2>
@@ -17,7 +18,7 @@
         hx-target="#tab-offers-{{ el.id }}"
         hx-swap="innerHTML"
         data-loading-disable
-        @htmx:after-request.camel="if(event.detail.successful){ $dispatch('close-modal'); $store.toast.message='Offer submitted'; $store.toast.type='success'; $store.toast.show=true; }"
+        {{ close_modal_toast('Offer submitted') }}
         class="space-y-4">
 
     {# Scope toggle #}

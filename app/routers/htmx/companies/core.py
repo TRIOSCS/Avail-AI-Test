@@ -48,7 +48,7 @@ from ....template_env import template_response
 from ....utils.column_limits import ensure_fits_column
 from ....utils.normalization_helpers import normalize_country, normalize_phone_e164, normalize_us_state
 from ....utils.search_builder import SearchBuilder
-from .._shared import _base_ctx
+from .._shared import _active_users, _base_ctx
 from . import router
 from ._registries import BULK_MAX_IDS as _BULK_MAX_IDS
 from ._registries import EDITABLE_ACCOUNT_FIELDS, apply_company_field
@@ -1153,7 +1153,7 @@ async def _collaborators_partial(
         .all()
     )
     can_manage_team = can_manage_account_team(user, company)
-    all_users = db.query(User).filter(User.is_active.is_(True)).order_by(User.name).all() if can_manage_team else []
+    all_users = _active_users(db) if can_manage_team else []
 
     ctx = _base_ctx(request, user, "customers")
     ctx.update(

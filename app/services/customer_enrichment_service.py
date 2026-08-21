@@ -240,6 +240,138 @@ async def enrich_customer_account(
     }
 
 
+async def run_company_enrichment(company_id: int, domain: str, name: str) -> None:
+    """Background worker: run the account enrichment waterfall for one company.
+
+    Scheduled by ``enrich_company`` (app/routers/crm/enrichment.py, HTMX path) so the
+    click never blocks on the ~20-40s of external-provider calls: firmographics
+    (``enrich_entity``: SAM.gov + Clay/Explorium/Lusha + Anthropic) then contact
+    discovery (``find_suggested_contacts_with_errors``: Hunter/Clay). Firmographics are
+    committed here; the transient result (which fields changed, discovered contacts,
+    errored providers) is recorded in ``company_enrich_runs`` so the enrich-status
+    poller can render the same ``_enrich_result.html`` panel the synchronous path
+    produced.
+
+    A firmographics failure marks the outcome ``blocked`` (the poller shows a "couldn't
+    complete" toast). A contact-discovery hiccup is NOT blocked — it degrades to the amber
+    "couldn't reach" banner via ``errored_providers``, mirroring the old inline behavior.
+
+    Opens its own session — FastAPI has already returned the response and closed the request
+    session by the time this runs. Must NEVER raise: it is a fire-and-forget task.
+    """
+    from ..database import SessionLocal
+    from .company_enrich_runs import CompanyEnrichOutcome, company_enrich_runs
+
+    db = SessionLocal()
+    blocked = False
+    updated: list[str] = []
+    suggested: list[dict] = []
+    errored: list[str] = []
+    company_missing = False
+    try:
+        company = db.get(Company, company_id)
+        if company is None:
+            # Company vanished between click and run — nothing to enrich; drop the guard.
+            company_missing = True
+        else:
+            # Firmographics — commit on success; a genuine outage marks the run blocked (toast).
+            try:
+                from ..enrichment_service import apply_enrichment_to_company, enrich_entity
+
+                enrichment = await enrich_entity(domain, name)
+                updated = apply_enrichment_to_company(company, enrichment)
+                db.commit()
+            except Exception as e:
+                logger.opt(exception=e).warning("Account enrichment firmographics failed for {}", company_id)
+                db.rollback()
+                blocked = True
+
+            # Contact discovery — degrade to the amber "couldn't reach" banner, never a toast.
+            try:
+                from ..enrichment_service import find_suggested_contacts_with_errors
+
+                suggested, errored = await find_suggested_contacts_with_errors(domain, name)
+            except Exception as e:
+                logger.opt(exception=e).warning("Account enrichment contact discovery failed for {}", company_id)
+                errored = ["all"]
+    except Exception:
+        logger.exception("Account enrichment task crashed for {}", company_id)
+        blocked = True
+    finally:
+        db.close()
+        if company_missing:
+            company_enrich_runs.clear(company_id)
+        else:
+            company_enrich_runs.finish(
+                company_id,
+                CompanyEnrichOutcome(
+                    blocked=blocked,
+                    updated_fields=updated,
+                    suggested=suggested,
+                    errored_providers=errored,
+                ),
+            )
+
+
+async def run_company_creation_enrichment(company_id: int, domain: str, name: str, user_id: int) -> None:
+    """Background worker: auto-enrich a just-created company.
+
+    Scheduled by ``create_company`` (app/routers/crm/companies.py) via
+    ``safe_background_task``: firmographics (``enrich_entity``) are applied and
+    committed, then the customer-enrichment waterfall runs for immediate contact
+    discovery, and the owner is notified over SSE. Opens its own session — the
+    request session is closed by the time this runs. Must NEVER raise: it is a
+    fire-and-forget task.
+    """
+    from ..database import SessionLocal
+    from .sse_broker import broker
+
+    try:
+        from ..enrichment_service import apply_enrichment_to_company, enrich_entity
+
+        enrichment = await enrich_entity(domain, name)
+        s = SessionLocal()
+        try:
+            if enrichment:
+                c = s.get(Company, company_id)
+                if c:
+                    apply_enrichment_to_company(c, enrichment)
+                    s.commit()
+
+            # Run customer enrichment waterfall for immediate contact discovery
+            if settings.customer_enrichment_enabled:  # pragma: no cover
+                try:
+                    waterfall = await enrich_customer_account(company_id, s, force=True)
+                    # Commit on ANY successful run so both the discovered contacts
+                    # and the enrichment_at/status stamp (the cooldown clock) persist
+                    # — even when the run added 0 contacts (providers degraded, or the
+                    # account was already covered). Previously only >0 committed, so a
+                    # degraded run left no cooldown and re-enriched on every trigger.
+                    if waterfall.get("ok"):
+                        s.commit()
+                        added = waterfall.get("contacts_added", 0)
+                        if added:
+                            logger.info(
+                                "Auto-enriched company {}: {} contacts via waterfall",
+                                company_id,
+                                added,
+                            )
+                except Exception as we:
+                    logger.warning("Waterfall auto-enrich error for company {}: {}", company_id, we)
+                    s.rollback()
+        finally:
+            s.close()
+
+        # Notify user via SSE that enrichment is done
+        await broker.publish(
+            f"user:{user_id}",
+            "enrichment_complete",
+            '{"entity_type": "company", "company_id": ' + str(company_id) + "}",
+        )
+    except Exception:
+        logger.exception("Background enrichment failed for company {}", company_id)
+
+
 def get_enrichment_gaps(db: Session, limit: int = 50) -> list[dict]:
     """Find customer accounts that need enrichment, prioritizing assigned accounts.
 

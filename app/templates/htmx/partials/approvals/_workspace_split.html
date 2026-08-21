@@ -13,20 +13,10 @@
 #}
 <div class="flex max-md:flex-col md:h-[calc(100vh-150px)]"
      x-data="{
-       splitRatio: parseFloat(localStorage.getItem('aw-split') || '0.42'),
-       dragging: false,
+       ...window.ratioSplitMixin('aw-split', 0.42, 0.25, 0.75),
        sel: null,
        paneUrl: null,
        advance: false,
-       startDrag(e) { this.dragging = true; e.preventDefault(); },
-       onDrag(e) {
-         if (!this.dragging) return;
-         const rect = this.$refs.container.getBoundingClientRect();
-         this.splitRatio = Math.max(0.25, Math.min(0.75, (e.clientX - rect.left) / rect.width));
-       },
-       stopDrag() {
-         if (this.dragging) { this.dragging = false; localStorage.setItem('aw-split', this.splitRatio.toFixed(3)); }
-       },
        select(key, url, auto) {
          this.sel = key; this.paneUrl = url;
          // Drive the URL through htmx (replace:) rather than a raw history.replaceState:

@@ -8,6 +8,7 @@ Called by: prospect_signals (batch enrichment), prospect_claim (on-claim enrichm
 Depends on: httpx (app.http_client), prospect_account model
 """
 
+import asyncio
 from datetime import UTC, datetime
 
 from defusedxml.ElementTree import fromstring as _safe_xml_fromstring
@@ -289,24 +290,28 @@ async def run_free_enrichment(prospect_id: int, db: Session | None = None) -> di
         ed = dict(prospect.enrichment_data or {})
         result = {"sam_gov": False, "news_count": 0}
 
-        # SAM.gov
+        # SAM.gov (skipped when already stored) + Google News are independent providers —
+        # fetch them concurrently so per-prospect latency is the max, not the sum.
         if not ed.get("sam_gov"):
-            sam_data = await enrich_from_sam_gov(prospect)
-            if sam_data:
-                ed["sam_gov"] = sam_data
-                result["sam_gov"] = True
+            sam_data, news = await asyncio.gather(enrich_from_sam_gov(prospect), enrich_from_google_news(prospect))
+        else:
+            sam_data, news = None, await enrich_from_google_news(prospect)
 
-                # Update NAICS code if we found one and prospect doesn't have it
-                if not prospect.naics_code and sam_data.get("naics_codes"):
-                    naics_codes = sam_data["naics_codes"]
-                    primary = next(
-                        (n for n in naics_codes if n.get("primary")),
-                        naics_codes[0],
-                    )
-                    prospect.naics_code = primary["code"]
+        # SAM.gov
+        if sam_data:
+            ed["sam_gov"] = sam_data
+            result["sam_gov"] = True
+
+            # Update NAICS code if we found one and prospect doesn't have it
+            if not prospect.naics_code and sam_data.get("naics_codes"):
+                naics_codes = sam_data["naics_codes"]
+                primary = next(
+                    (n for n in naics_codes if n.get("primary")),
+                    naics_codes[0],
+                )
+                prospect.naics_code = primary["code"]
 
         # Google News
-        news = await enrich_from_google_news(prospect)
         if news:
             ed["recent_news"] = news
             ed["news_retrieved_at"] = datetime.now(UTC).isoformat()
@@ -388,8 +393,11 @@ async def enrich_contacts_for_prospect(prospect: ProspectAccount, db: Session, *
             pass
 
     limit = _settings.prospect_enrich_contacts_per_account
-    company = await enrich_entity(prospect.domain, prospect.name or "")
-    contacts = await find_suggested_contacts(prospect.domain, prospect.name or "", limit=limit)
+    # Independent provider calls — run them concurrently.
+    company, contacts = await asyncio.gather(
+        enrich_entity(prospect.domain, prospect.name or ""),
+        find_suggested_contacts(prospect.domain, prospect.name or "", limit=limit),
+    )
     _apply_company_to_prospect(prospect, company)
     mapped = _apply_contacts_to_prospect(prospect, contacts, limit)
 

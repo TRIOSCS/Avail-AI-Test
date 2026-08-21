@@ -5,7 +5,7 @@ Covers:
   refresh failure returns None
 - refresh_user_token: successful refresh, no refresh_token, refresh failure
 - _refresh_access_token: success, HTTP error, network exception
-- _utc: None, naive datetime, aware datetime
+- as_utc (canonical coercion, app.utils.timezones): None, naive, aware
 - Backward compat: scheduler.py still exports the functions
 """
 
@@ -18,9 +18,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.utils.timezones import as_utc
 from app.utils.token_manager import (
     _refresh_access_token,
-    _utc,
     get_valid_token,
     refresh_user_token,
 )
@@ -28,16 +28,16 @@ from app.utils.token_manager import (
 
 class TestUtc:
     def test_none(self):
-        assert _utc(None) is None
+        assert as_utc(None) is None
 
     def test_naive_datetime(self):
         dt = datetime(2026, 1, 1, 12, 0, 0)
-        result = _utc(dt)
+        result = as_utc(dt)
         assert result.tzinfo == UTC
 
     def test_aware_datetime(self):
         dt = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
-        result = _utc(dt)
+        result = as_utc(dt)
         assert result is dt  # unchanged
 
 

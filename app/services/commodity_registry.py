@@ -147,7 +147,7 @@ COMMODITY_SPEC_SEEDS: dict[str, list[dict]] = _load_commodity_seeds()
 
 
 def get_batch_spec_schema() -> dict[str, dict]:
-    """Convert COMMODITY_SPEC_SEEDS to the format used by enrich_specs_batch.py.
+    """Convert COMMODITY_SPEC_SEEDS to the format used by spec_enrichment_service.py.
 
     Returns: {category: {"specs": [{"key", "label", "type", "values"?, "unit"?}, ...]}}
     """

@@ -1454,7 +1454,7 @@ def test_toggle_source_enable_with_credentials(sources_client: TestClient, db_se
     db_session.commit()
     db_session.refresh(src)
 
-    with patch("app.services.credential_service.credential_is_set", return_value=True):
+    with patch("app.services.credential_service.is_set_for", return_value=True):
         resp = sources_client.put(
             f"/api/sources/{src.id}/toggle",
             json={"status": "live"},

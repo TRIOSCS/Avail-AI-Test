@@ -1,6 +1,27 @@
 {# Trouble Ticket detail view #}
+{% from "htmx/partials/shared/_macros.html" import spinner -%}
 {% from "htmx/partials/tickets/_icons.html" import sparkle_icon, chevron_icon -%}
 {% from "htmx/partials/tickets/_context.html" import context_field -%}
+
+{# One fetch-PATCH-with-CSRF + toast expression for the inline field savers (the
+   status @change and the admin-notes @blur). `payload` is a JS object literal
+   (as a string); ok_msg / err_msg feed the toast store. Emits a single JS
+   expression, so the Alpine handler stays one expression. #}
+{% macro patch_ticket(payload, ok_msg, err_msg) -%}
+fetch('/api/trouble-tickets/' + {{ ticket.id }}, {
+                method: 'PATCH',
+                headers: {'Content-Type': 'application/json', 'X-CSRFToken': (document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '')},
+                body: JSON.stringify({{ payload }})
+              }).then(function(r){
+                var t = Alpine.store('toast');
+                if (r.ok) { t.message = '{{ ok_msg }}'; t.type = 'success'; }
+                else { t.message = '{{ err_msg }}'; t.type = 'error'; }
+                t.show = true;
+              }).catch(function(){
+                var t = Alpine.store('toast');
+                t.message = '{{ err_msg }}'; t.type = 'error'; t.show = true;
+              })
+{%- endmacro %}
 <div class="page-readable px-4 py-6">
   {# Back button — reloads the full-page console workspace #}
   <a hx-get="/v2/partials/trouble-tickets/workspace" hx-target="#main-content" hx-push-url="/v2/trouble-tickets"
@@ -30,19 +51,7 @@
     {# Status dropdown #}
     <div x-data="{ status: '{{ ticket.status }}' }">
       <select x-model="status"
-              @change="fetch('/api/trouble-tickets/' + {{ ticket.id }}, {
-                method: 'PATCH',
-                headers: {'Content-Type': 'application/json', 'X-CSRFToken': (document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '')},
-                body: JSON.stringify({status: status})
-              }).then(function(r){
-                var t = Alpine.store('toast');
-                if (r.ok) { t.message = 'Status updated'; t.type = 'success'; }
-                else { t.message = 'Could not update status'; t.type = 'error'; }
-                t.show = true;
-              }).catch(function(){
-                var t = Alpine.store('toast');
-                t.message = 'Could not update status'; t.type = 'error'; t.show = true;
-              })"
+              @change="{{ patch_ticket('{status: status}', 'Status updated', 'Could not update status') }}"
               class="input input-sm">
         <option value="submitted">Submitted</option>
         <option value="in_progress">In Progress</option>
@@ -84,17 +93,7 @@
     </label>
     <textarea id="ticket-admin-notes" name="admin_notes" rows="3"
               placeholder="Add context or direction for the prompt..."
-              @blur="fetch('/api/trouble-tickets/' + {{ ticket.id }}, {
-                method: 'PATCH',
-                headers: {'Content-Type': 'application/json', 'X-CSRFToken': (document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '')},
-                body: JSON.stringify({admin_notes: $el.value})
-              }).then(function(r){
-                var t = Alpine.store('toast');
-                if (r.ok) { t.message = 'Notes saved'; t.type = 'success'; } else { t.message = 'Could not save notes'; t.type = 'error'; }
-                t.show = true;
-              }).catch(function(){
-                var t = Alpine.store('toast'); t.message = 'Could not save notes'; t.type = 'error'; t.show = true;
-              })"
+              @blur="{{ patch_ticket('{admin_notes: $el.value}', 'Notes saved', 'Could not save notes') }}"
               class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm input-focus placeholder-gray-400">{{ ticket.admin_notes or '' }}</textarea>
 
     <div class="flex items-center gap-3 mt-3 mb-4">
@@ -106,10 +105,7 @@
               class="btn btn-primary gap-2">
         {{ sparkle_icon("w-4 h-4") }}
         {{ 'Re-create Prompt' if ticket.generated_prompt else 'Create Prompt' }}
-        <svg id="gp-spinner" class="htmx-indicator animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-        </svg>
+        {{ spinner('htmx-indicator animate-spin h-4 w-4', attrs='id="gp-spinner"') }}
       </button>
       <span class="text-xs text-gray-400">Builds a ready-to-paste Claude Code prompt from the captured context + your notes.</span>
     </div>
@@ -129,10 +125,7 @@
               class="btn btn-secondary gap-2">
         {{ sparkle_icon("w-4 h-4") }}
         {{ 'Re-diagnose with AI' if ticket.diagnosis else 'Diagnose with AI' }}
-        <svg id="diagnose-spinner" class="htmx-indicator animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-        </svg>
+        {{ spinner('htmx-indicator animate-spin h-4 w-4', attrs='id="diagnose-spinner"') }}
       </button>
     </div>
     {% include "htmx/partials/tickets/_diagnosis.html" %}

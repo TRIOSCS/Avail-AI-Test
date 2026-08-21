@@ -164,7 +164,7 @@ async def _send_email(
     caller's in-app ``ActivityLog`` row is written separately and is unaffected — only the
     email channel is suppressed.
     """
-    from ..utils.graph_client import GraphClient
+    from ..utils.graph_client import GraphClient, build_sendmail_payload
     from ..utils.token_manager import get_valid_token
 
     if pref_attr and not getattr(user, pref_attr, True):
@@ -178,14 +178,7 @@ async def _send_email(
         gc = GraphClient(token)
         await gc.post_json(
             "/me/sendMail",
-            {
-                "message": {
-                    "subject": subject,
-                    "body": {"contentType": "HTML", "content": html_body},
-                    "toRecipients": [{"emailAddress": {"address": user.email}}],
-                },
-                "saveToSentItems": "false",
-            },
+            build_sendmail_payload(subject, html_body, user.email, save_to_sent="false"),
         )
         logger.info("buy plan email sent to {}", user.email)
     except Exception as e:
@@ -596,8 +589,7 @@ async def notify_stock_sale_approved(plan: BuyPlan, db: Session):
     For stock sales that auto-complete, sends an email to the stock_sale_notify_emails
     list and creates an in-app notification for the submitter. Also posts to Teams.
     """
-    from ..utils.graph_client import GraphClient
-    from ..utils.token_manager import get_valid_token
+    from .admin_mailer import send_group_email_as_admin
 
     ctx = _plan_context(plan, db)
     table, total = _lines_table(plan)
@@ -616,32 +608,16 @@ async def notify_stock_sale_approved(plan: BuyPlan, db: Session):
     )
     html_body = _wrap_email("Stock Sale Approved — No PO Required", body)
 
-    # Send to stock_sale_notify_emails using an admin user's token
-    admin_users = db.query(User).filter(User.email.in_(settings.admin_emails)).all()
-    sender = next((a for a in admin_users if a.access_token), None)
-    if sender:
-        token = await get_valid_token(sender, db)
-        if token:
-            gc = GraphClient(token)
-
-            async def _send_stock_email(email_addr):
-                try:
-                    await gc.post_json(
-                        "/me/sendMail",
-                        {
-                            "message": {
-                                "subject": f"[AVAIL] Stock Sale Approved — Plan #{plan.id}",
-                                "body": {"contentType": "HTML", "content": html_body},
-                                "toRecipients": [{"emailAddress": {"address": email_addr}}],
-                            },
-                            "saveToSentItems": "false",
-                        },
-                    )
-                    logger.info("stock sale email sent to {}", email_addr)
-                except Exception as e:
-                    logger.error("Failed to send stock sale email to {}: {}", email_addr, e)
-
-            await asyncio.gather(*[_send_stock_email(e) for e in settings.stock_sale_notify_emails])
+    # Send to stock_sale_notify_emails using an admin user's token (shared
+    # borrow-an-admin policy in admin_mailer, same as prepayment notices).
+    await send_group_email_as_admin(
+        db,
+        list(settings.stock_sale_notify_emails),
+        f"[AVAIL] Stock Sale Approved — Plan #{plan.id}",
+        html_body,
+        admin_emails=settings.admin_emails,
+        log_label="Stock sale notice",
+    )
 
     # In-app notification to submitter
     if ctx["submitter"]:

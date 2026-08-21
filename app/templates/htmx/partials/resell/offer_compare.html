@@ -8,51 +8,14 @@
 #}
 {% set el = list %}
 
-{% macro _broker_label(offer) %}
-  {%- if offer.offerer_company -%}{{ offer.offerer_company.name }}
-  {%- elif offer.offerer_vendor_card -%}{{ offer.offerer_vendor_card.display_name }}
-  {%- else -%}Broker #{{ offer.id }}{%- endif -%}
-{% endmacro %}
-
-{#
-  Award action for a compare row (owner-only modal). Same 3-way as the Offers tab, but
-  every button ALSO closes this modal on success — the underlying Offers/Lines tabs and
-  header chips are refreshed out-of-band by the response, so once the pick lands the modal
-  has served its purpose. Targets #tab-offers-<id> (which lives outside the modal, so the
-  @htmx:after-request handler on the button survives the swap and fires reliably).
-#}
-{% macro _compare_action(el, item, offer) %}
-  {%- if offer.status == 'won' -%}
-  <div class="inline-flex items-center gap-1.5 whitespace-nowrap">
-    <span class="text-xs font-semibold text-emerald-700">Awarded ✓</span>
-    <button hx-post="/api/resell/{{ el.id }}/offers/{{ offer.id }}/unaward"
-            hx-target="#tab-offers-{{ el.id }}" hx-swap="innerHTML"
-            hx-confirm="Reverse this award? The line returns to the pool for offers."
-            @htmx:after-request.camel="if(event.detail.successful) $dispatch('close-modal')"
-            data-loading-disable
-            class="btn-ghost btn-sm text-rose-600 hover:text-rose-700">Unaward</button>
-  </div>
-  {%- elif item.status == 'awarded' -%}
-  <span class="text-secondary whitespace-nowrap">Not selected</span>
-  {%- elif offer.status in ['open', 'late'] -%}
-  <div class="inline-flex items-center gap-1.5 whitespace-nowrap">
-    <button hx-post="/api/resell/{{ el.id }}/offers/{{ offer.id }}/award"
-            hx-target="#tab-offers-{{ el.id }}" hx-swap="innerHTML"
-            hx-confirm="Award {{ _broker_label(offer) }} for {{ item.part_number }}? This marks the line sold."
-            @htmx:after-request.camel="if(event.detail.successful) $dispatch('close-modal')"
-            data-loading-disable
-            class="btn-primary btn-sm">Award</button>
-    <button hx-post="/api/resell/{{ el.id }}/offers/{{ offer.id }}/withdraw"
-            hx-target="#tab-offers-{{ el.id }}" hx-swap="innerHTML"
-            hx-confirm="Withdraw this offer? It drops out of the running."
-            @htmx:after-request.camel="if(event.detail.successful) $dispatch('close-modal')"
-            data-loading-disable
-            class="btn-ghost btn-sm text-gray-500 hover:text-gray-700">Withdraw</button>
-  </div>
-  {%- else -%}
-  <span class="text-xs text-gray-400">—</span>
-  {%- endif -%}
-{% endmacro %}
+{# broker_label + the 3-way award action live in resell/_macros.html (shared with
+   _offers.html). This owner-only modal calls offer_action with close_modal=true:
+   each button ALSO closes the modal on success — the underlying Offers/Lines tabs
+   and header chips are refreshed out-of-band by the response, so once the pick
+   lands the modal has served its purpose. Targets #tab-offers-<id> (which lives
+   outside the modal, so the @htmx:after-request handler on the button survives
+   the swap and fires reliably). #}
+{% from "htmx/partials/resell/_macros.html" import broker_label as _broker_label, offer_action %}
 
 <div class="p-5 max-w-3xl">
   <div class="flex items-center justify-between mb-4">
@@ -95,7 +58,7 @@
           <td class="px-3 py-2 text-sm text-right tabular-nums">{{ "{:,}".format(r.line.quantity) }}</td>
           <td class="px-3 py-2 text-sm text-gray-600">{{ (r.line.lead_time_days|string ~ 'd') if r.line.lead_time_days is not none else '—' }}</td>
           <td class="px-3 py-2 text-sm text-gray-600">{{ r.line.terms_text or '—' }}</td>
-          <td class="px-3 py-2 text-center">{{ _compare_action(el, item, r.offer) }}</td>
+          <td class="px-3 py-2 text-center">{{ offer_action(el, item, r.offer, close_modal=true) }}</td>
         </tr>
         {% endfor %}
       </tbody>

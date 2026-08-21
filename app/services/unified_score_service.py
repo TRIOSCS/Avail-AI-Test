@@ -275,8 +275,7 @@ def _generate_blurb(
     total: int,
 ) -> dict | None:
     """Call Claude to generate strength + improvement blurb."""
-    import asyncio
-
+    from ..utils.async_helpers import run_coro_blocking
     from ..utils.claude_client import claude_structured
 
     # Find best and worst categories
@@ -306,19 +305,10 @@ def _generate_blurb(
     }
 
     try:
-        try:
-            asyncio.get_running_loop()
-            # Already in async context — run in thread pool
-            import concurrent.futures
-
-            with concurrent.futures.ThreadPoolExecutor() as pool:
-                future = pool.submit(
-                    asyncio.run,
-                    claude_structured(user_msg, schema, system=system, model_tier="fast", max_tokens=256),
-                )
-                return future.result(timeout=30)
-        except RuntimeError:
-            return asyncio.run(claude_structured(user_msg, schema, system=system, model_tier="fast", max_tokens=256))
+        return run_coro_blocking(
+            claude_structured(user_msg, schema, system=system, model_tier="fast", max_tokens=256),
+            timeout=30,
+        )
     except Exception as e:
         logger.warning(f"Claude blurb call failed: {e}")
         return None

@@ -20,7 +20,7 @@ async def test_parse_freeform_rfq_returns_brand_and_condition():
         ],
     }
     with patch(
-        "app.services.freeform_parser_service.routed_structured",
+        "app.services.freeform_parser_service.claude_structured",
         new_callable=AsyncMock,
         return_value=mock_result,
     ):
@@ -103,7 +103,7 @@ async def test_parse_freeform_rfq_normalizes_condition():
         ],
     }
     with patch(
-        "app.services.freeform_parser_service.routed_structured",
+        "app.services.freeform_parser_service.claude_structured",
         new_callable=AsyncMock,
         return_value=mock_result,
     ):

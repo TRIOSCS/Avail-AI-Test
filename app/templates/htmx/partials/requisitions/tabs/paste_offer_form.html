@@ -3,6 +3,7 @@
    Called by: GET /v2/partials/requisitions/{id}/paste-offer-form.
    Depends on: HTMX, Alpine.js.
 #}
+{% from "htmx/partials/shared/_macros.html" import spinner -%}
 <div class="bg-white rounded-lg border border-gray-200 p-4" x-data="{ parsing: false }">
   <div class="flex items-center justify-between mb-3">
     <h3 class="text-sm font-semibold text-gray-900">Paste Vendor Offer</h3>
@@ -28,10 +29,7 @@
     <div class="flex items-center gap-2">
       <button type="submit" :disabled="parsing"
               class="btn-primary btn-sm">
-        <svg x-show="parsing" x-cloak class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
-          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-        </svg>
+        {{ spinner('h-4 w-4 animate-spin', attrs='x-show="parsing" x-cloak') }}
         <span x-text="parsing ? 'Parsing...' : 'Parse Offers'"></span>
       </button>
       <button type="button" @click="$el.closest('#parse-area').innerHTML = ''"

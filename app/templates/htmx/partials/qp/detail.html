@@ -13,9 +13,11 @@
             fru_rows (list of {"pin": QpFruLookup, "links": [FruLink]}),
             buy_plan_gate / prepayment_gate (ApprovalRequest|None).
   Called by: routers/quality_plans.py qp_detail / _qp_detail_response.
-  Depends on: HTMX, Alpine.js, Tailwind CSS, shared/_macros.html, the qp/_section_*.html partials.
+  Depends on: HTMX, Alpine.js, Tailwind CSS, shared/_macros.html,
+              buy_plans/_macros.html collapse_chevron, the qp/_section_*.html partials.
 #}
 {% from "htmx/partials/shared/_macros.html" import status_badge, badge %}
+{% from "htmx/partials/buy_plans/_macros.html" import collapse_chevron %}
 
 <title hx-swap-oob="true">Quality Plan #{{ qp.id }} — AvailAI</title>
 
@@ -30,6 +32,30 @@
     'reviewed': 'bg-emerald-50 text-emerald-700 border-emerald-200',
     'not_reviewed': 'bg-slate-50 text-slate-500 border-slate-200'
   }) }}
+{% endmacro %}
+
+{# ── Collapsible section shell ─────────────────────────────────────────────────
+   The one shell for all five sections: role=button header (click / Enter toggles
+   the `open_var` Alpine boolean) with the title + chip markup + rotating chevron,
+   and the body wrapped in x-collapse. `chip` is pre-rendered markup captured with
+   a set-block at the call site; the body arrives via the call block. pad=false
+   drops the body padding (the Buy Plan section's table manages its own). #}
+{% macro qp_section(open_var, title, chip, pad=true) %}
+  <div class="mb-3 rounded-lg border border-gray-200 bg-white">
+    <div role="button" tabindex="0"
+         @click="{{ open_var }} = !{{ open_var }}"
+         @keydown.enter="{{ open_var }} = !{{ open_var }}"
+         class="flex w-full cursor-pointer items-center justify-between px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50">
+      <div class="flex items-center gap-2">
+        <span>{{ title }}</span>
+        {{ chip }}
+      </div>
+      {{ collapse_chevron(open_var) }}
+    </div>
+    <div x-show="{{ open_var }}" x-collapse class="border-t border-gray-100{{ ' px-4 py-3' if pad else '' }}">
+      {{ caller() }}
+    </div>
+  </div>
 {% endmacro %}
 
 {# ── Derive header fields from the buy plan (bp may be None on orphaned data) ── #}
@@ -104,66 +130,27 @@
   {# ═══ 3. COLLAPSIBLE SECTIONS ═══ #}
 
   {# ── Section: Sales (QP_SALES gate) ── #}
-  <div class="mb-3 rounded-lg border border-gray-200 bg-white">
-    <div role="button" tabindex="0"
-         @click="showSales = !showSales"
-         @keydown.enter="showSales = !showSales"
-         class="flex w-full cursor-pointer items-center justify-between px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50">
-      <div class="flex items-center gap-2">
-        <span>Sales</span>
-        {{ review_chip(qp.sales_section_reviewed_at) }}
-      </div>
-      <svg class="h-4 w-4 text-gray-400 transition-transform" :class="showSales ? 'rotate-180' : ''"
-           fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
-      </svg>
-    </div>
-    <div x-show="showSales" x-collapse class="border-t border-gray-100 px-4 py-3">
+  {% set sales_chip %}{{ review_chip(qp.sales_section_reviewed_at) }}{% endset %}
+  {% call qp_section('showSales', 'Sales', sales_chip) %}
       {% include "htmx/partials/qp/_section_sales.html" %}
-    </div>
-  </div>
+  {% endcall %}
 
   {# ── Section: Purchasing (QP_PURCHASING gate) ── #}
-  <div class="mb-3 rounded-lg border border-gray-200 bg-white">
-    <div role="button" tabindex="0"
-         @click="showPurchasing = !showPurchasing"
-         @keydown.enter="showPurchasing = !showPurchasing"
-         class="flex w-full cursor-pointer items-center justify-between px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50">
-      <div class="flex items-center gap-2">
-        <span>Purchasing</span>
-        {{ review_chip(qp.purchasing_section_reviewed_at) }}
-      </div>
-      <svg class="h-4 w-4 text-gray-400 transition-transform" :class="showPurchasing ? 'rotate-180' : ''"
-           fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
-      </svg>
-    </div>
-    <div x-show="showPurchasing" x-collapse class="border-t border-gray-100 px-4 py-3">
+  {% set purchasing_chip %}{{ review_chip(qp.purchasing_section_reviewed_at) }}{% endset %}
+  {% call qp_section('showPurchasing', 'Purchasing', purchasing_chip) %}
       {% include "htmx/partials/qp/_section_purchasing.html" %}
-    </div>
-  </div>
+  {% endcall %}
 
   {# ── Section: Buy Plan (populated) ── #}
-  <div class="mb-3 rounded-lg border border-gray-200 bg-white">
-    <div role="button" tabindex="0"
-         @click="showBuyPlan = !showBuyPlan"
-         @keydown.enter="showBuyPlan = !showBuyPlan"
-         class="flex w-full cursor-pointer items-center justify-between px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50">
-      <div class="flex items-center gap-2">
-        <span>Buy Plan</span>
+  {% set buyplan_chip %}
         {% if bp %}
         {{ status_badge(bp.status, status_map=QP_STATUS) }}
         {% else %}
         <span class="badge bg-gray-50 text-gray-400 border-gray-200">unavailable</span>
         {% endif %}
         <span class="text-xs text-gray-400 font-normal">{{ bp_lines|length }} line{{ 's' if bp_lines|length != 1 }}</span>
-      </div>
-      <svg class="h-4 w-4 text-gray-400 transition-transform" :class="showBuyPlan ? 'rotate-180' : ''"
-           fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
-      </svg>
-    </div>
-    <div x-show="showBuyPlan" x-collapse class="border-t border-gray-100">
+  {% endset %}
+  {% call qp_section('showBuyPlan', 'Buy Plan', buyplan_chip, pad=false) %}
       {# Line items table #}
       {% if bp_lines %}
       <div class="overflow-x-auto">
@@ -225,47 +212,18 @@
         {% endif %}
       </div>
       {% endif %}
-    </div>
-  </div>
+  {% endcall %}
 
   {# ── Section: Serial Numbers ── #}
-  <div class="mb-3 rounded-lg border border-gray-200 bg-white">
-    <div role="button" tabindex="0"
-         @click="showSerial = !showSerial"
-         @keydown.enter="showSerial = !showSerial"
-         class="flex w-full cursor-pointer items-center justify-between px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50">
-      <div class="flex items-center gap-2">
-        <span>Serial Numbers</span>
-        <span class="text-xs text-gray-400 font-normal">{{ qp.serial_entries|length }} entr{{ 'ies' if qp.serial_entries|length != 1 else 'y' }}</span>
-      </div>
-      <svg class="h-4 w-4 text-gray-400 transition-transform" :class="showSerial ? 'rotate-180' : ''"
-           fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
-      </svg>
-    </div>
-    <div x-show="showSerial" x-collapse class="border-t border-gray-100 px-4 py-3">
+  {% set serial_chip %}<span id="qp-serial-chip" class="text-xs text-gray-400 font-normal">{{ qp.serial_entries|length }} entr{{ 'ies' if qp.serial_entries|length != 1 else 'y' }}</span>{% endset %}
+  {% call qp_section('showSerial', 'Serial Numbers', serial_chip) %}
       {% include "htmx/partials/qp/_section_serial.html" %}
-    </div>
-  </div>
+  {% endcall %}
 
   {# ── Section: FRU Crosswalk ── #}
-  <div class="mb-3 rounded-lg border border-gray-200 bg-white">
-    <div role="button" tabindex="0"
-         @click="showFru = !showFru"
-         @keydown.enter="showFru = !showFru"
-         class="flex w-full cursor-pointer items-center justify-between px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50">
-      <div class="flex items-center gap-2">
-        <span>FRU Crosswalk</span>
-        <span class="text-xs text-gray-400 font-normal">{{ fru_rows|length }} pinned</span>
-      </div>
-      <svg class="h-4 w-4 text-gray-400 transition-transform" :class="showFru ? 'rotate-180' : ''"
-           fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
-      </svg>
-    </div>
-    <div x-show="showFru" x-collapse class="border-t border-gray-100 px-4 py-3">
+  {% set fru_chip %}<span class="text-xs text-gray-400 font-normal">{{ fru_rows|length }} pinned</span>{% endset %}
+  {% call qp_section('showFru', 'FRU Crosswalk', fru_chip) %}
       {% include "htmx/partials/qp/_section_fru.html" %}
-    </div>
-  </div>
+  {% endcall %}
 
 </div>

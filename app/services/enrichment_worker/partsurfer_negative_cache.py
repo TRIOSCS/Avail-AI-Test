@@ -35,6 +35,7 @@ from typing import Literal
 from sqlalchemy.orm import Session
 
 from app.models import PartsurferDescNegative
+from app.utils.timezones import as_utc
 
 # Long window: a genuine no-result (PartSurfer catalogs no description for the spare) --
 # matches oem_crosswalk no_match (uncataloged service parts rarely become cataloged).
@@ -47,11 +48,6 @@ _RETRY_DAYS_BY_REASON: dict[str, int] = {
     "no_result": PARTSURFER_NO_RESULT_RETRY_DAYS,
     "ungrammatical": PARTSURFER_UNGRAMMATICAL_RETRY_DAYS,
 }
-
-
-def _aware(dt: datetime) -> datetime:
-    """Coerce a naive UTC timestamp (SQLite round-trip) to aware for comparison."""
-    return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
 
 
 def blocked_spare_norms(
@@ -75,7 +71,7 @@ def blocked_spare_norms(
         .filter(PartsurferDescNegative.spare_norm.in_(norms))
         .all()
     )
-    return {norm for norm, retry_after in rows if retry_after is not None and _aware(retry_after) > now}
+    return {norm for norm, retry_after in rows if retry_after is not None and as_utc(retry_after) > now}
 
 
 def record_negative(

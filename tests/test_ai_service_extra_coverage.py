@@ -176,14 +176,14 @@ class TestCompanyIntelErrorPaths:
 class TestDraftRfqUserDraftPath:
     """Cover lines 276-290 — user_draft cleanup path."""
 
-    async def test_user_draft_calls_routed_text_fast(self):
-        """user_draft path calls routed_text with 'fast' tier (lines 276-290)."""
+    async def test_user_draft_calls_claude_text_fast(self):
+        """user_draft path calls claude_text with 'fast' tier (lines 276-290)."""
         parts = [{"mpn": "LM317T", "qty": 100, "target_price": 0.50}]
         user_draft = "Please provide pricing for our list."
 
         mock_text = "Cleaned up RFQ email body."
         with patch(
-            "app.utils.llm_router.routed_text",
+            "app.services.ai_service.claude_text",
             new=AsyncMock(return_value=mock_text),
         ):
             result = await draft_rfq(
@@ -205,7 +205,7 @@ class TestDraftRfqUserDraftPath:
             captured_prompt.append(prompt)
             return "ok"
 
-        with patch("app.utils.llm_router.routed_text", new=_capture):
+        with patch("app.services.ai_service.claude_text", new=_capture):
             await draft_rfq("Acme", parts=parts, user_draft="draft text here")
 
         assert len(captured_prompt) == 1
@@ -221,7 +221,7 @@ class TestDraftRfqUserDraftPath:
             "best_price": 0.45,
         }
         with patch(
-            "app.services.ai_service.routed_text",
+            "app.services.ai_service.claude_text",
             new=AsyncMock(return_value="generated rfq body"),
         ):
             result = await draft_rfq(

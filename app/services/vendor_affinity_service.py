@@ -32,11 +32,20 @@ def _vendor_results_from_rows(rows, db: Session, manufacturer: str | None, level
     rows.
 
     Shared by L1 and L3, which produce identical result shapes apart from the level.
+    All VendorCards are fetched in ONE ``in_()`` query (normalized_name is unique)
+    instead of one query per row — this runs on the search fan-out path.
     """
+    norms = {row.vendor_name_normalized or row.vendor_name.lower() for row in rows}
+    vc_by_norm: dict[str, VendorCard] = {}
+    if norms:
+        vc_by_norm = {
+            vc.normalized_name: vc for vc in db.query(VendorCard).filter(VendorCard.normalized_name.in_(norms))
+        }
+
     results = []
     for row in rows:
         vendor_norm = row.vendor_name_normalized or row.vendor_name.lower()
-        vc = db.query(VendorCard).filter(VendorCard.normalized_name == vendor_norm).first()
+        vc = vc_by_norm.get(vendor_norm)
         results.append(
             {
                 "vendor_name": row.vendor_name,
@@ -146,9 +155,15 @@ def find_affinity_vendors_l2(mpn: str, db: Session, exclude_vendors: set[str] | 
         .all()
     )
 
+    # One batch fetch for every matched vendor card instead of a query per row.
+    entity_ids = [row.entity_id for row in other_vendors]
+    vc_by_id: dict[int, VendorCard] = {}
+    if entity_ids:
+        vc_by_id = {vc.id: vc for vc in db.query(VendorCard).filter(VendorCard.id.in_(entity_ids))}
+
     results = []
     for row in other_vendors:
-        vc = db.query(VendorCard).filter(VendorCard.id == row.entity_id).first()
+        vc = vc_by_id.get(row.entity_id)
         if not vc:
             continue
         if vc.normalized_name in exclude:

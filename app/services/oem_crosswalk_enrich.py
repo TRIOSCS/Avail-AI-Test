@@ -72,6 +72,7 @@ from app.services.mpn_decoder import decode_mpn
 from app.services.spec_tiers import set_category
 from app.services.spec_write_service import load_schema_cache, record_spec
 from app.utils.normalization import normalize_mpn_key
+from app.utils.timezones import as_utc
 
 if TYPE_CHECKING:
     from app.services.enrichment_worker.oem_crosswalk_resolver import OemResolveResult
@@ -122,16 +123,11 @@ def pending_resolution(
         if any(r.status == OemCrosswalkStatus.RESOLVED for r in existing):
             continue  # permanent positive cache
         no_matches = [r for r in existing if r.status == OemCrosswalkStatus.NO_MATCH]
-        fresh = [r for r in no_matches if r.looked_up_at is not None and _aware(r.looked_up_at) > cutoff]
+        fresh = [r for r in no_matches if r.looked_up_at is not None and as_utc(r.looked_up_at) > cutoff]
         if fresh:
             continue  # fresh negative cache — blocked for 90 days
         pending[norm] = min(no_matches, key=lambda r: r.id) if no_matches else None
     return pending
-
-
-def _aware(dt: datetime) -> datetime:
-    """Coerce a naive UTC timestamp (SQLite round-trip) to aware for comparison."""
-    return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
 
 
 def apply_resolution(
@@ -382,7 +378,7 @@ def oem_crosswalk_and_record_specs(db: Session, card_ids: list[int]) -> Counter:
                                 "canonical_mpn": row.canonical_mpn_raw,
                                 "source_url": row.source_url,
                                 "confidence": row.confidence,
-                                "fetched_at": _aware(row.looked_up_at).isoformat() if row.looked_up_at else None,
+                                "fetched_at": as_utc(row.looked_up_at).isoformat() if row.looked_up_at else None,
                             }
                             card.enrichment_provenance = prov
                             status_upgraded = 1

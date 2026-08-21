@@ -24,6 +24,8 @@ from dataclasses import dataclass, field
 
 from loguru import logger
 
+from ..search_worker_base.parsing import parse_quantity
+
 
 @dataclass
 class PriceBreak:
@@ -52,20 +54,6 @@ class NcSighting:
     price_breaks: list[PriceBreak] = field(default_factory=list)
     currency: str | None = None
     supplier_product_url: str = ""
-
-
-def parse_quantity(text: str) -> int | None:
-    """Parse NC quantity string to int.
-
-    Handles commas, '+' suffix, empty.
-    """
-    if not text:
-        return None
-    cleaned = text.strip().rstrip("+").replace(",", "")
-    try:
-        return int(cleaned)
-    except (ValueError, TypeError):
-        return None
 
 
 def parse_price_breaks(element) -> tuple[list[PriceBreak], str | None]:

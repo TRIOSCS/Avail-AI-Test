@@ -14,23 +14,19 @@ count only when the request is decided / cancelled. Hence ``count_for_user`` ==
 
 Called by: services/alerts/sources/__init__.py (registered centrally under the "approvals"
            tab).
-Depends on: services/alerts/base.AlertSource, models/approvals.{ApprovalRequest,
-            ApprovalStep,ApprovalStepRecipient}, constants.{AlertKind,
-            ApprovalRequestStatus,ApprovalRecipientStatus}.
+Depends on: services/alerts/base.AlertSource, services/approvals/queue
+            (_actionable_request_ids — the ONE owner of the awaiting-me join, shared
+            with the queue view-model and mirroring service.decide's recipient check),
+            constants.AlertKind.
 """
 
 from __future__ import annotations
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.constants import (
-    AlertKind,
-    ApprovalRecipientStatus,
-    ApprovalRequestStatus,
-)
-from app.models.approvals import ApprovalRequest, ApprovalStep, ApprovalStepRecipient
+from app.constants import AlertKind
 from app.models.auth import User
+from app.services.approvals.queue import _actionable_request_ids
 
 from ..base import AlertItem, AlertSource, Temperament
 
@@ -47,24 +43,12 @@ class ApprovalRequestActionSource(AlertSource):
 
         ACTION semantics: the single source of truth for both public methods (count = len);
         never consults seen_ref_ids. Each item anchors to its request row (``ar-{id}``) and
-        carries the request id as ref_id.
+        carries the request id as ref_id. The eligibility join itself is owned by
+        ``services/approvals/queue._actionable_request_ids`` so the nav badge can never
+        desynchronize from the queue's can_act flags.
         """
-        rows = (
-            db.execute(
-                select(ApprovalRequest.id)
-                .join(ApprovalStep, ApprovalStep.request_id == ApprovalRequest.id)
-                .join(ApprovalStepRecipient, ApprovalStepRecipient.step_id == ApprovalStep.id)
-                .where(
-                    ApprovalRequest.status == ApprovalRequestStatus.REQUESTED,
-                    ApprovalStepRecipient.user_id == user.id,
-                    ApprovalStepRecipient.status == ApprovalRecipientStatus.PENDING,
-                )
-                .distinct()
-            )
-            .scalars()
-            .all()
-        )
-        return [AlertItem(ref_id=req_id, anchor=f"ar-{req_id}") for req_id in rows]
+        ids = _actionable_request_ids(db, user)
+        return [AlertItem(ref_id=req_id, anchor=f"ar-{req_id}") for req_id in sorted(ids)]
 
     def count_for_user(self, db: Session, user: User) -> int:
         return len(self._actionable_items(db, user))

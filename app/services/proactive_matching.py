@@ -356,12 +356,30 @@ def find_matches_for_offer(offer_id: int, db: Session) -> list[ProactiveMatch]:
     query can't see them — the accumulated companies ride ``skip_company_ids``
     so the same customer never gets two matches in one call.
     """
+    from .part_equivalence import class_keys_and_spellings
+
     offer = db.get(Offer, offer_id)
     part = part_key(offer.mpn) if offer else None
     if not offer or not part:
         return []
     our_cost = float(offer.unit_price) if offer.unit_price else None
-    req_matches = _find_requirement_matches(db, part=part, source_offer=offer)
+
+    # Shared per-part derivations, computed ONCE and passed into all three passes —
+    # each pass used to re-derive byte-identical values (rollup twice, equivalence/
+    # spellings and the active-match set three times) per scanned offer.
+    class_keys, class_spellings = class_keys_and_spellings(db, part)
+    rollup = compute_offer_rollup(db, part=part)
+    existing = _existing_match_company_ids(db, class_spellings)
+
+    req_matches = _find_requirement_matches(
+        db,
+        part=part,
+        source_offer=offer,
+        class_keys=class_keys,
+        class_spellings=class_spellings,
+        rollup=rollup,
+        existing_company_ids=existing,
+    )
     skip = {m.company_id for m in req_matches if m.company_id}
     part_hot_matches = _find_part_hotlist_matches(
         db,
@@ -369,6 +387,10 @@ def find_matches_for_offer(offer_id: int, db: Session) -> list[ProactiveMatch]:
         our_cost=our_cost,
         source_offer=offer,
         skip_company_ids=skip,
+        class_keys=class_keys,
+        class_spellings=class_spellings,
+        rollup=rollup,
+        existing_company_ids=existing,
     )
     skip = skip | {m.company_id for m in part_hot_matches if m.company_id}
     hot_matches = _find_hotlist_matches(
@@ -377,6 +399,9 @@ def find_matches_for_offer(offer_id: int, db: Session) -> list[ProactiveMatch]:
         our_cost=our_cost,
         source_offer=offer,
         skip_company_ids=skip,
+        class_keys=class_keys,
+        class_spellings=class_spellings,
+        existing_company_ids=existing,
     )
     return req_matches + part_hot_matches + hot_matches
 
@@ -402,6 +427,10 @@ def _find_requirement_matches(
     *,
     part: str,
     source_offer: Offer,
+    class_keys: set[str] | None = None,
+    class_spellings: set[str] | None = None,
+    rollup: dict | None = None,
+    existing_company_ids: set[int | None] | None = None,
 ) -> list[ProactiveMatch]:
     """Core seeding: one match per customer that asked for this part inside the window.
 
@@ -412,13 +441,18 @@ def _find_requirement_matches(
     are excluded here because _find_hotlist_matches owns them. Requirements with
     no customer account become back-order lines routed to the requisition owner
     (company_id NULL, deduped per owner).
+
+    ``class_keys``/``class_spellings``/``rollup``/``existing_company_ids`` let
+    ``find_matches_for_offer`` hand over its once-computed per-part derivations;
+    each is recomputed here when omitted.
     """
     # Lazy import (avoids an import-time cycle with activity_service); resolved once per call.
     from .activity_service import _update_last_activity
-    from .part_equivalence import expand_part, observed_spellings
+    from .part_equivalence import class_keys_and_spellings
     from .pricing_history import last_quote_for_part, last_win_for_part
 
-    rollup = compute_offer_rollup(db, part=part)
+    if rollup is None:
+        rollup = compute_offer_rollup(db, part=part)
     if not rollup["offer_count"]:
         return []
     our_cost = rollup["low_cost"] or (float(source_offer.unit_price) if source_offer.unit_price else None)
@@ -426,9 +460,8 @@ def _find_requirement_matches(
     # Equivalence class: pooled keys for demand joins + every observed spelling
     # for suppression/dedup (throttle, do-not-offer, active-match) so a variant
     # spelling can never sidestep a suppression.
-    eq = expand_part(db, part)
-    class_keys = set(eq["keys"])
-    class_spellings = {part} | {s for group in observed_spellings(db, class_keys).values() for s in group}
+    if class_keys is None or class_spellings is None:
+        class_keys, class_spellings = class_keys_and_spellings(db, part)
 
     # Price anchors (D5): computed once per part; spread vs today's low cost feeds
     # the score, same-customer wins resolved per company inside the loop.
@@ -505,7 +538,13 @@ def _find_requirement_matches(
     throttled_site_ids = (
         build_batch_throttle_set_multi(db, class_spellings, {s.id for s in sites.values()}) if sites else set()
     )
-    existing = _existing_match_company_ids(db, class_spellings)
+    # Local copy — this pass mutates it as matches land; cross-pass dedup rides
+    # skip_company_ids exactly as before.
+    existing = (
+        set(existing_company_ids)
+        if existing_company_ids is not None
+        else _existing_match_company_ids(db, class_spellings)
+    )
 
     # CPH context (purchase history as a signal, not the seed).
     card_ids = {source_offer.material_card_id} | {g["newest_req"].material_card_id for g in groups.values()}
@@ -635,6 +674,9 @@ def _find_hotlist_matches(
     our_cost: float | None,
     source_offer: Offer | None,
     skip_company_ids: set[int] | None = None,
+    class_keys: set[str] | None = None,
+    class_spellings: set[str] | None = None,
+    existing_company_ids: set[int | None] | None = None,
 ) -> list[ProactiveMatch]:
     """Seed ProactiveMatch rows from active HOTLIST requisitions for this part.
 
@@ -646,17 +688,18 @@ def _find_hotlist_matches(
     ``skip_company_ids`` carries the company_ids the requirement pass already
     produced in THIS call (their ``db.add()``s are uncommitted, so a fresh DB
     query won't see them) — union them into the existing-match set so dedup
-    holds across both passes.
+    holds across both passes. ``class_keys``/``class_spellings``/
+    ``existing_company_ids`` carry ``find_matches_for_offer``'s once-computed
+    derivations; each is recomputed here when omitted.
     """
-    from .part_equivalence import expand_part, observed_spellings
+    from .part_equivalence import class_keys_and_spellings
 
     fallback_offer_id = source_offer.id if source_offer else None
     if not fallback_offer_id:
         return []
 
-    eq = expand_part(db, part)
-    class_keys = set(eq["keys"])
-    class_spellings = {part} | {s for group in observed_spellings(db, class_keys).values() for s in group}
+    if class_keys is None or class_spellings is None:
+        class_keys, class_spellings = class_keys_and_spellings(db, part)
 
     rows = (
         db.query(Requisition, CustomerSite, Company)
@@ -673,7 +716,11 @@ def _find_hotlist_matches(
     if not rows:
         return []
 
-    existing = _existing_match_company_ids(db, class_spellings)
+    existing = (
+        set(existing_company_ids)
+        if existing_company_ids is not None
+        else _existing_match_company_ids(db, class_spellings)
+    )
     existing |= skip_company_ids or set()
 
     dno = build_batch_dno_set_multi(db, class_spellings, {c.id for _, _, c in rows})
@@ -725,6 +772,10 @@ def _find_part_hotlist_matches(
     our_cost: float | None,
     source_offer: Offer | None,
     skip_company_ids: set[int] | None = None,
+    class_keys: set[str] | None = None,
+    class_spellings: set[str] | None = None,
+    rollup: dict | None = None,
+    existing_company_ids: set[int | None] | None = None,
 ) -> list[ProactiveMatch]:
     """Seed ProactiveMatch rows from HOTLIST *parts* (Requirement.sourcing_status,
     migration 210) for this part.
@@ -744,20 +795,23 @@ def _find_part_hotlist_matches(
     ``skip_company_ids`` carries companies already matched by the requirement
     pass in THIS call (their ``db.add()``s are uncommitted and invisible to a
     fresh query) so one customer never gets two matches per scan.
+    ``class_keys``/``class_spellings``/``rollup``/``existing_company_ids`` carry
+    ``find_matches_for_offer``'s once-computed derivations; each is recomputed
+    here when omitted (trigger_rematch_on_part_hotlist calls without them).
     """
-    from .part_equivalence import expand_part, observed_spellings
+    from .part_equivalence import class_keys_and_spellings
 
     fallback_offer_id = source_offer.id if source_offer else None
     if not fallback_offer_id:
         return []
 
-    rollup = compute_offer_rollup(db, part=part)
+    if rollup is None:
+        rollup = compute_offer_rollup(db, part=part)
     if not rollup["offer_count"]:
         return []
 
-    eq = expand_part(db, part)
-    class_keys = set(eq["keys"])
-    class_spellings = {part} | {s for group in observed_spellings(db, class_keys).values() for s in group}
+    if class_keys is None or class_spellings is None:
+        class_keys, class_spellings = class_keys_and_spellings(db, part)
 
     rows = (
         db.query(Requirement, Requisition, CustomerSite)
@@ -808,7 +862,11 @@ def _find_part_hotlist_matches(
     ):
         sites.setdefault(s.company_id, s)
 
-    existing = _existing_match_company_ids(db, class_spellings)
+    existing = (
+        set(existing_company_ids)
+        if existing_company_ids is not None
+        else _existing_match_company_ids(db, class_spellings)
+    )
     existing |= skip_company_ids or set()
     dno = build_batch_dno_set_multi(db, class_spellings, company_ids)
 

@@ -22,6 +22,7 @@ Depends on: app.services.quality_plan_service (validate_complete, validate_secti
             app.template_env (template_response).
 """
 
+import json
 from datetime import date
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
@@ -38,6 +39,7 @@ from ..models.crm import CustomerSite
 from ..models.fru_link import FruLink
 from ..models.quality_plan import QpFruLookup, QpSerialEntry, QualityPlan
 from ..models.quotes import Quote
+from ..services.qp_serial_paste_service import parse_serial_paste
 from ..services.quality_plan_service import (
     IncompleteQPError,
     create_qp,
@@ -200,15 +202,19 @@ def _fru_rows(db: Session, qp: QualityPlan) -> list[dict]:
     (model / carrier / series context). A FRU with no crosswalk match still appears
     (empty links) so the user sees the pin and can unpin it.
     """
-    rows: list[dict] = []
-    for pin in qp.fru_lookups:
-        links = (
-            db.execute(select(FruLink).where(FruLink.fru_norm == pin.fru_norm).order_by(FruLink.id).limit(50))
-            .scalars()
-            .all()
-        )
-        rows.append({"pin": pin, "links": links})
-    return rows
+    pins = list(qp.fru_lookups)
+    if not pins:
+        return []
+    # One query for every pinned norm (was one per pin), grouped in Python; each
+    # pin keeps at most 50 links, ordered by FruLink.id, as before.
+    links_by_norm: dict[str, list[FruLink]] = {}
+    for link in (
+        db.execute(select(FruLink).where(FruLink.fru_norm.in_({p.fru_norm for p in pins})).order_by(FruLink.id))
+        .scalars()
+        .all()
+    ):
+        links_by_norm.setdefault(link.fru_norm, []).append(link)
+    return [{"pin": pin, "links": links_by_norm.get(pin.fru_norm, [])[:50]} for pin in pins]
 
 
 def _require_qp_access(db: Session, user, qp: QualityPlan) -> None:
@@ -434,10 +440,15 @@ def _render_purchasing_section(request: Request, db: Session, qp: QualityPlan, u
 
 
 def _render_serial_section(request: Request, qp: QualityPlan, user) -> HTMLResponse:
-    """Render the refreshed Serial section partial."""
+    """Render the refreshed Serial section partial.
+
+    oob_chip makes the partial append an hx-swap-oob twin of the collapsed header's "N
+    entries" chip so it can't go stale after an add/delete/bulk refresh; the full detail
+    render omits the flag (no duplicate span).
+    """
     return template_response(
         "htmx/partials/qp/_section_serial.html",
-        {"request": request, "user": user, "qp": qp},
+        {"request": request, "user": user, "qp": qp, "oob_chip": True},
     )
 
 
@@ -538,6 +549,82 @@ def qp_add_serial(
         ops_received=_coerce("bool", ops_received),
     )
     db.add(entry)
+    db.commit()
+    qp = _load_qp_for_edit(db, qp_id, user)
+    return _render_serial_section(request, qp, user)
+
+
+@router.post("/v2/qp/{qp_id}/serial/parse", response_class=HTMLResponse)
+async def qp_parse_serial_paste(
+    request: Request,
+    qp_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+    pasted_text: str = Form(""),
+) -> HTMLResponse:
+    """AI-parse pasted packing-list text → serial-row preview partial (no DB write).
+
+    The preview renders per-row checkboxes and a confirm form posting to /serial/bulk;
+    only that confirmed POST writes rows.
+    """
+    qp = _load_qp_for_edit(db, qp_id, user)
+    text = (pasted_text or "").strip()
+    rows = await parse_serial_paste(text) if text else []
+    return template_response(
+        "htmx/partials/qp/_serial_paste_preview.html",
+        {
+            "request": request,
+            "user": user,
+            "qp": qp,
+            "rows": rows,
+            "rows_json": json.dumps(rows) if rows else None,
+            "empty_paste": not text,
+        },
+    )
+
+
+# Bound above the AI parser's own row cap so a tampered rows_json can't bulk-insert
+# an unbounded payload.
+_SERIAL_BULK_MAX_ROWS = 300
+
+
+@router.post("/v2/qp/{qp_id}/serial/bulk", response_class=HTMLResponse)
+def qp_add_serial_bulk(
+    request: Request,
+    qp_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+    rows_json: str = Form(""),
+    include: list[str] = Form(default=[]),
+) -> HTMLResponse:
+    """Insert the checked preview rows as Serial entries → refreshed Serial section.
+
+    ``include`` carries the checked row indices into ``rows_json``; unchecked, junk,
+    and out-of-range indices are ignored. Values go through the same coercion as the
+    single-row add and submitted_by defaults to the acting user.
+    """
+    qp = _load_qp_for_edit(db, qp_id, user)
+    try:
+        # RecursionError: a deeply-nested array bomb escapes the C scanner as
+        # RecursionError (a RuntimeError, not a ValueError) — same 400 as bad JSON.
+        rows = json.loads(rows_json or "[]")
+    except (json.JSONDecodeError, RecursionError):
+        raise HTTPException(status_code=400, detail="Malformed rows payload") from None
+    if not isinstance(rows, list) or len(rows) > _SERIAL_BULK_MAX_ROWS:
+        raise HTTPException(status_code=400, detail="Invalid rows payload")
+
+    # isascii() + the length bound keep int() total: isdigit() alone admits Unicode
+    # digit forms ("²") and unbounded digit strings that make int() raise.
+    picked = sorted({int(i) for i in include if i.isascii() and i.isdigit() and len(i) <= 4})
+    for idx in picked:
+        if idx >= len(rows) or not isinstance(rows[idx], dict):
+            continue
+        raw = rows[idx]
+        values = {
+            field: _coerce("str", str(raw[field])[:255] if raw.get(field) is not None else None)
+            for field in ("purchase_order", "part_number", "serial_number", "seagate_sn", "tso", "customer_po")
+        }
+        db.add(QpSerialEntry(qp_id=qp.id, submitted_by_id=user.id if user else None, **values))
     db.commit()
     qp = _load_qp_for_edit(db, qp_id, user)
     return _render_serial_section(request, qp, user)

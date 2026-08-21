@@ -633,3 +633,59 @@ def _save_quote_from_builder_core(
         "quote_number": quote.quote_number,
         "revision": quote.revision,
     }
+
+
+def recalc_quote_totals(db: Session, quote) -> None:
+    """Recompute quote header totals (subtotal/cost/margin) from its QuoteLine rows.
+
+    The detail header (quotes/detail.html) and the sent-email/PDF total (quote_send.py)
+    all read quote.subtotal / total_cost / total_margin_pct, so every line mutation (add
+    / edit / delete / add-offer / apply-markup / create-from-offers) must refresh them or
+    the stored totals drift from the visible lines and the customer is emailed a stale
+    subtotal (OQ-12). Single arbitration point — every mutation caller (routers/htmx/
+    quotes.py line handlers, routers/htmx/offers/crud.py create_quote_from_offers) calls
+    this before commit.
+
+    Rebuilds quote.line_items (the JSON the sent email + PDF render their ROWS from —
+    quote_send.py, save_built_quote above) from the QuoteLine rows, so an edited /
+    added / deleted line stays consistent with the recomputed total. Without this the
+    OQ-12 fix only corrected the header total: the email rows still showed stale prices
+    and no longer summed to the stated total (edit-then-send self-contradiction). The
+    display-only fields (condition/date_code/…) live on the linked Offer, not QuoteLine.
+    """
+    from app.models import Offer, QuoteLine
+
+    db.flush()
+    lines = db.query(QuoteLine).filter(QuoteLine.quote_id == quote.id).order_by(QuoteLine.id).all()
+    subtotal = sum(float(ln.sell_price or 0) * (ln.qty or 1) for ln in lines)
+    total_cost = sum(float(ln.cost_price or 0) * (ln.qty or 1) for ln in lines)
+    quote.subtotal = subtotal
+    quote.total_cost = total_cost
+    quote.total_margin_pct = ((subtotal - total_cost) / subtotal * 100) if subtotal else 0
+
+    # One IN query for the linked offers (not one db.get per line — this runs on every
+    # line mutation, and apply-markup touches all lines).
+    linked_offer_ids = [ln.offer_id for ln in lines if ln.offer_id]
+    offers_by_id = (
+        {o.id: o for o in db.query(Offer).filter(Offer.id.in_(linked_offer_ids)).all()} if linked_offer_ids else {}
+    )
+    new_line_items = []
+    for ln in lines:
+        offer = offers_by_id.get(ln.offer_id) if ln.offer_id else None
+        new_line_items.append(
+            {
+                "mpn": ln.mpn or "",
+                "manufacturer": ln.manufacturer or "",
+                "qty": ln.qty or 1,
+                "cost_price": float(ln.cost_price or 0),
+                "sell_price": float(ln.sell_price or 0),
+                "margin_pct": float(ln.margin_pct or 0),
+                "lead_time": offer.lead_time if offer else None,
+                "date_code": offer.date_code if offer else None,
+                "condition": offer.condition if offer else None,
+                "packaging": offer.packaging if offer else None,
+                "moq": offer.moq if offer else None,
+                "offer_id": ln.offer_id,
+            }
+        )
+    quote.line_items = new_line_items

@@ -20,7 +20,6 @@ from pydantic import ValidationError
 from app.schemas.ai_responses import VendorResponseParsed
 from app.utils.claude_client import claude_structured
 from app.utils.claude_errors import ClaudeError, ClaudeUnavailableError
-from app.utils.llm_router import routed_structured
 from app.utils.normalization import (
     detect_currency,
     fuzzy_mpn_match,
@@ -146,7 +145,7 @@ async def parse_vendor_response(
     prompt = f"Vendor: {vendor_name}\nSubject: {email_subject}\n{context_str}\n\nVendor reply:\n{body_truncated}"
 
     try:
-        result = await routed_structured(
+        result = await claude_structured(
             prompt=prompt,
             schema=RESPONSE_PARSE_SCHEMA,
             system=SYSTEM_PROMPT,

@@ -290,61 +290,7 @@ class TestMPNNormalizer:
 # Monitoring tests (search_worker_base version — already parameterized)
 # ---------------------------------------------------------------------------
 class TestMonitoring:
-    """Test monitoring module health check and reporting functions."""
-
-    def test_html_structure_hash_empty(self):
-        from app.services.search_worker_base.monitoring import check_html_structure_hash
-
-        result = check_html_structure_hash("", "TEST-MPN")
-        assert result == ""
-
-    def test_html_structure_hash_deterministic(self):
-        from app.services.search_worker_base.monitoring import check_html_structure_hash
-
-        html = "<div><table><tr><td>data</td></tr></table></div>"
-        h1 = check_html_structure_hash(html, "MPN1", component_name="TEST_DETERM")
-        h2 = check_html_structure_hash(html, "MPN2", component_name="TEST_DETERM")
-        assert h1 == h2
-        assert len(h1) == 16  # sha256 hex truncated to 16 chars
-
-    def test_html_structure_hash_differs_on_structure_change(self):
-        from app.services.search_worker_base.monitoring import check_html_structure_hash
-
-        html1 = "<div><table><tr><td>data</td></tr></table></div>"
-        html2 = "<div><ul><li>data</li></ul></div>"
-        h1 = check_html_structure_hash(html1, "MPN1", component_name="TEST_DIFF1")
-        h2 = check_html_structure_hash(html2, "MPN2", component_name="TEST_DIFF2")
-        assert h1 != h2
-
-    def test_html_structure_hash_same_structure_different_content(self):
-        from app.services.search_worker_base.monitoring import check_html_structure_hash
-
-        html1 = "<div><span>hello</span></div>"
-        html2 = "<div><span>world</span></div>"
-        h1 = check_html_structure_hash(html1, "MPN1", component_name="TEST_SAME1")
-        h2 = check_html_structure_hash(html2, "MPN2", component_name="TEST_SAME2")
-        assert h1 == h2
-
-    def test_log_daily_report_does_not_raise(self):
-        from app.services.search_worker_base.monitoring import log_daily_report
-
-        # Should not raise
-        log_daily_report(
-            searches_completed=10,
-            sightings_created=50,
-            parts_gated_out=5,
-            parts_deduped=3,
-            failed_searches=1,
-            queue_remaining=20,
-            circuit_breaker_status="closed",
-            component_name="TEST",
-        )
-
-    def test_capture_sentry_error_without_sdk(self):
-        from app.services.search_worker_base.monitoring import capture_sentry_error
-
-        # Should not raise even without sentry_sdk
-        capture_sentry_error(ValueError("test"), context={"key": "val"}, component_name="TEST")
+    """Test monitoring module Sentry message capture."""
 
     def test_capture_sentry_message_without_sdk(self):
         from app.services.search_worker_base.monitoring import capture_sentry_message

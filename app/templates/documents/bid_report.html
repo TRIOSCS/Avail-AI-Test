@@ -4,22 +4,10 @@
 <meta charset="utf-8">
 <title>Bid {{ bid_number }}</title>
 <style>
-  @page { size: letter; margin: 1in 0.75in; }
-  body { font-family: Arial, Helvetica, sans-serif; font-size: 11pt; color: #222; line-height: 1.4; }
-  h1 { font-size: 18pt; color: #1a365d; margin-bottom: 4px; }
-  h2 { font-size: 13pt; color: #2d3748; border-bottom: 2px solid #e2e8f0; padding-bottom: 4px; margin-top: 20px; }
-  .subtitle { color: #718096; font-size: 10pt; margin-bottom: 16px; }
-  table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 10pt; }
-  th { background: #edf2f7; color: #2d3748; text-align: left; padding: 6px 8px; border-bottom: 2px solid #cbd5e0; }
-  td { padding: 5px 8px; border-bottom: 1px solid #e2e8f0; }
-  tr:nth-child(even) td { background: #f7fafc; }
-  .meta-table { width: auto; margin-bottom: 16px; }
-  .meta-table td { border: none; padding: 2px 12px 2px 0; }
-  .meta-label { font-weight: bold; color: #4a5568; }
+{% include "documents/_doc_style.html" %}
   .totals { margin-top: 16px; text-align: right; }
   .totals td { border: none; padding: 3px 8px; }
   .totals .total-label { font-weight: bold; }
-  .footer { margin-top: 24px; font-size: 9pt; color: #a0aec0; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 8px; }
 </style>
 </head>
 <body>
@@ -57,7 +45,7 @@
         <td>{{ (li.condition or '—') | e }}</td>
         <td>{{ '{:,}'.format(li.quantity or 0) }}</td>
         <td>{% if li.unit_price is not none %}${{ '{:,.4f}'.format(li.unit_price|float) }}{% else %}—{% endif %}</td>
-        <td>{% if li.extended_price is not none %}${{ '{:,.2f}'.format(li.extended_price|float) }}{% else %}—{% endif %}</td>
+        <td>{% if li.extended_price is not none %}${{ li.extended_price|float|money }}{% else %}—{% endif %}</td>
       </tr>
     {% endfor %}
     </tbody>
@@ -66,7 +54,7 @@
 
   <table class="totals">
     {% if subtotal %}
-    <tr><td class="total-label">Total Bid:</td><td>${{ '{:,.2f}'.format(subtotal|float) }}</td></tr>
+    <tr><td class="total-label">Total Bid:</td><td>${{ subtotal|float|money }}</td></tr>
     {% endif %}
   </table>
 

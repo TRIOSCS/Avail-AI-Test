@@ -6,6 +6,7 @@
    Context vars: lead (SourcingLead), lead_sighting_data (dict keyed by lead.id),
                  selected_lead_id (int|None) — currently selected lead for highlight #}
 
+{% import "htmx/partials/prospecting/_macros.html" as score %}
 {% set sighting = lead_sighting_data.get(lead.id, {}) %}
 {% set is_selected = (selected_lead_id|default(0)|int == lead.id) %}
 
@@ -42,19 +43,14 @@
     </span>
     {% endif %}
 
-    {# Confidence: percentage + thin bar #}
+    {# Confidence: percentage + thin bar — >=70/>=40 tiers via the shared
+       score color macros (prospecting/_macros.html) #}
     <div class="flex items-center gap-1 flex-shrink-0 w-[72px]">
-      <span class="text-[11px] font-semibold tabular-nums
-        {% if lead.confidence_score >= 70 %}text-emerald-600
-        {% elif lead.confidence_score >= 40 %}text-amber-600
-        {% else %}text-rose-600{% endif %}">
+      <span class="text-[11px] font-semibold tabular-nums {{ score.score_text_color(lead.confidence_score) }}">
         {{ '%.0f'|format(lead.confidence_score) }}%
       </span>
       <div class="w-10 bg-gray-200 rounded-full h-1">
-        <div class="h-1 rounded-full
-          {% if lead.confidence_score >= 70 %}bg-emerald-500
-          {% elif lead.confidence_score >= 40 %}bg-amber-500
-          {% else %}bg-rose-500{% endif %}"
+        <div class="h-1 rounded-full {{ score.score_bar_color(lead.confidence_score) }}"
              style="width: {{ [lead.confidence_score, 100]|min }}%"></div>
       </div>
     </div>

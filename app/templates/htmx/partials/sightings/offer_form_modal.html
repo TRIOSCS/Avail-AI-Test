@@ -2,6 +2,7 @@
    global open-modal handler. The base modal renders its own ✕ / backdrop / Escape.
    Receives: requirement, prefill (dict|None), offer (Offer|None for edit).
    On success: re-renders #sightings-offers-panel and closes the modal. #}
+{% from "htmx/partials/shared/_macros.html" import close_modal_on_success -%}
 <div class="p-4">
   <h3 class="text-sm font-semibold text-gray-900 mb-3">
     {% if offer %}Edit Offer
@@ -13,7 +14,7 @@
         {% if offer %}hx-post="/v2/partials/sightings/{{ requirement.id }}/offers/{{ offer.id }}"
         {% else %}hx-post="/v2/partials/sightings/{{ requirement.id }}/offers"{% endif %}
         hx-target="#sightings-offers-panel" hx-swap="innerHTML"
-        hx-on::after-request="if(event.detail.successful) this.dispatchEvent(new CustomEvent('close-modal', {bubbles: true}))"
+        {{ close_modal_on_success() }}
         data-loading-disable class="space-y-3">
 
     {% if errors %}

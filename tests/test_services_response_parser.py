@@ -195,31 +195,24 @@ class TestCrossValidate:
 
 
 async def _run_retry_flow(first_result, retry_result, *, email_body, vendor_name):
-    """Drive parse_vendor_response with routed_structured -> first_result and the
-    extended- thinking retry (claude_structured) -> retry_result.
+    """Drive parse_vendor_response with claude_structured -> first_result on the first
+    call and retry_result on the extended-thinking retry call.
 
-    Returns (result, mock_retry).
+    Returns (result, mock_claude).
     """
     from app.services.response_parser import parse_vendor_response
 
-    with (
-        patch(
-            "app.services.response_parser.routed_structured",
-            new_callable=AsyncMock,
-            return_value=first_result,
-        ),
-        patch(
-            "app.services.response_parser.claude_structured",
-            new_callable=AsyncMock,
-            return_value=retry_result,
-        ) as mock_retry,
-    ):
+    with patch(
+        "app.services.response_parser.claude_structured",
+        new_callable=AsyncMock,
+        side_effect=[first_result, retry_result],
+    ) as mock_claude:
         result = await parse_vendor_response(
             email_body=email_body,
             email_subject="RE: RFQ",
             vendor_name=vendor_name,
         )
-    return result, mock_retry
+    return result, mock_claude
 
 
 class TestParseVendorResponse:
@@ -245,7 +238,7 @@ class TestParseVendorResponse:
         }
 
         with patch(
-            "app.services.response_parser.routed_structured",
+            "app.services.response_parser.claude_structured",
             new_callable=AsyncMock,
             return_value=mock_claude_result,
         ):
@@ -265,7 +258,7 @@ class TestParseVendorResponse:
         from app.services.response_parser import parse_vendor_response
 
         with patch(
-            "app.services.response_parser.routed_structured",
+            "app.services.response_parser.claude_structured",
             new_callable=AsyncMock,
             return_value=None,
         ):
@@ -288,7 +281,7 @@ class TestParseVendorResponse:
         }
 
         with patch(
-            "app.services.response_parser.routed_structured",
+            "app.services.response_parser.claude_structured",
             new_callable=AsyncMock,
             return_value=mock_result,
         ):
@@ -314,7 +307,7 @@ class TestParseVendorResponse:
         }
 
         with patch(
-            "app.services.response_parser.routed_structured",
+            "app.services.response_parser.claude_structured",
             new_callable=AsyncMock,
             return_value=mock_result,
         ) as mock_claude:
@@ -351,11 +344,11 @@ class TestParseVendorResponse:
             "parts": [{"mpn": "LM317T", "status": "quoted", "unit_price": 0.75}],
         }
 
-        result, mock_retry = await _run_retry_flow(
+        result, mock_claude = await _run_retry_flow(
             first_result, retry_result, email_body="We can offer LM317T", vendor_name="Arrow"
         )
 
-        mock_retry.assert_called_once()  # Extended thinking retry called
+        assert mock_claude.call_count == 2  # Primary parse + extended-thinking retry
         assert result["confidence"] == 0.88  # Retry result used
         assert result["overall_classification"] == "quote_provided"
 
@@ -375,11 +368,11 @@ class TestParseVendorResponse:
             "parts": [{"mpn": "X", "status": "follow_up"}],
         }
 
-        result, mock_retry = await _run_retry_flow(
+        result, mock_claude = await _run_retry_flow(
             first_result, retry_result, email_body="Unclear response", vendor_name="Vendor"
         )
 
-        mock_retry.assert_called_once()
+        assert mock_claude.call_count == 2  # Primary parse + extended-thinking retry
         assert result["confidence"] == 0.65  # Original kept
 
     @pytest.mark.asyncio
@@ -392,9 +385,9 @@ class TestParseVendorResponse:
             "parts": [],
         }
 
-        result, mock_retry = await _run_retry_flow(first_result, None, email_body="Hmm", vendor_name="V")
+        result, mock_claude = await _run_retry_flow(first_result, None, email_body="Hmm", vendor_name="V")
 
-        mock_retry.assert_called_once()
+        assert mock_claude.call_count == 2  # Primary parse + extended-thinking retry
         assert result["confidence"] == 0.6
 
 

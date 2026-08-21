@@ -17,12 +17,12 @@ Depends on: worker_status models, services.teams_notifications, cache.intel_cach
 """
 
 from datetime import UTC, datetime, timedelta
-from typing import overload
 
 from apscheduler.triggers.interval import IntervalTrigger
 from loguru import logger
 
 from ..scheduler import _traced_job
+from ..utils.timezones import as_utc
 
 
 def register_worker_liveness_jobs(scheduler, settings):
@@ -32,24 +32,6 @@ def register_worker_liveness_jobs(scheduler, settings):
         id="worker_liveness_check",
         name="Monitor worker heartbeats and alert on stalls",
     )
-
-
-@overload
-def _as_utc(dt: datetime) -> datetime: ...
-
-
-@overload
-def _as_utc(dt: None) -> None: ...
-
-
-def _as_utc(dt: datetime | None) -> datetime | None:
-    """Coerce a (possibly naive) datetime to UTC-aware — ICS stores naive, NC aware.
-
-    None passes through (overloads keep the None-ness visible to callers).
-    """
-    if dt is None:
-        return None
-    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
 # ── Pure decision logic (no DB / scheduler / IO — unit-testable) ─────────
@@ -71,7 +53,7 @@ def heartbeat_is_stale(
         return False
     if last_heartbeat is None:
         return True
-    return _as_utc(last_heartbeat) < now - timedelta(minutes=stale_after_minutes)
+    return as_utc(last_heartbeat) < now - timedelta(minutes=stale_after_minutes)
 
 
 def should_alert_stale_heartbeat(
@@ -159,7 +141,7 @@ async def _job_monitor_worker_heartbeats():
                 stale_after_minutes=stale_minutes,
                 already_alerted=_already_alerted(label),
             ):
-                hb_utc = _as_utc(hb)
+                hb_utc = as_utc(hb)
                 age = "unknown" if hb_utc is None else f"{int((now - hb_utc).total_seconds() // 60)}m"
                 await _emit_alert(
                     label,

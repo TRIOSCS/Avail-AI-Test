@@ -30,6 +30,8 @@ from dataclasses import dataclass
 
 from loguru import logger
 
+from ..search_worker_base.parsing import parse_quantity
+
 # Currency symbol -> ISO code. TBF is a European marketplace (EUR/USD/GBP).
 _CURRENCY_SYMBOLS = {"€": "EUR", "$": "USD", "£": "GBP"}
 
@@ -71,20 +73,6 @@ def _is_phone_like(text: str) -> bool:
         return False
     stripped = text.translate(str.maketrans("", "", "+-/() "))
     return stripped.isdigit()
-
-
-def parse_quantity(text: str) -> int | None:
-    """Parse a TBF quantity string to int.
-
-    Handles commas, '+' suffix, empty.
-    """
-    if not text:
-        return None
-    cleaned = text.strip().rstrip("+").replace(",", "")
-    try:
-        return int(cleaned)
-    except (ValueError, TypeError):
-        return None
 
 
 def _parse_price(text: str) -> tuple[str, str]:

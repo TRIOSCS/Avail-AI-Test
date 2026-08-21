@@ -5,6 +5,7 @@
   Called by: htmx_views.py proactive_prepare_page endpoint.
   Depends on: HTMX, Alpine.js, Tailwind CSS.
 #}
+{% from "htmx/partials/shared/_macros.html" import spinner -%}
 {%- from "htmx/partials/proactive/_macros.html" import margin_badge %}
 
 <div class="page-readable"
@@ -62,8 +63,8 @@
         </thead>
         <tbody>
           {% for m in matches %}
-          {# Compute suggested sell price: cost * 1.3, rounded to 4dp #}
-          {% set suggested_sell = "%.4f"|format((m.unit_price * 1.3) if m.unit_price else 0) %}
+          {# Suggested sell price is computed by the prepare route (the service's one markup rule) #}
+          {% set suggested_sell = m.suggested_sell %}
           <tr class="hover:bg-gray-50" x-data='{ sell: {{ suggested_sell }} }'>
             <td>
               <span class="text-sm font-medium text-gray-900 font-mono">{{ m.mpn }}</span>
@@ -202,10 +203,7 @@
             <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
           </svg>
           Generate AI Draft
-          <svg id="draft-spinner" class="htmx-indicator animate-spin h-3.5 w-3.5 text-gray-400" fill="none" viewBox="0 0 24 24">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-          </svg>
+          {{ spinner('htmx-indicator animate-spin h-3.5 w-3.5 text-gray-400', attrs='id="draft-spinner"') }}
         </button>
       </div>
     </div>

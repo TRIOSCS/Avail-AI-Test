@@ -43,19 +43,26 @@ def register_inventory_jobs(scheduler, settings):
 @_traced_job
 async def _job_po_verification():
     """Verify PO sent status for active buy plans with pending_verify lines."""
+    from sqlalchemy.orm import selectinload
+
     from ..database import SessionLocal
-    from ..models.buy_plan import BuyPlan, BuyPlanLineStatus, BuyPlanStatus
+    from ..models.buy_plan import BuyPlan, BuyPlanLine, BuyPlanLineStatus, BuyPlanStatus
 
     db = SessionLocal()
     try:
         from ..services.buyplan_workflow import verify_po_sent
 
-        # Find active plans that have lines in pending_verify status
-        plans = db.query(BuyPlan).filter(BuyPlan.status == BuyPlanStatus.ACTIVE.value).all()
-        # Filter to plans with at least one pending_verify line
-        plans_to_verify = [
-            p for p in plans if any(line.status == BuyPlanLineStatus.PENDING_VERIFY.value for line in p.lines)
-        ]
+        # Active plans with at least one pending_verify line, filtered in SQL and
+        # eager-loading lines in one shot (2 queries instead of 1+N lazy loads).
+        plans_to_verify = (
+            db.query(BuyPlan)
+            .filter(
+                BuyPlan.status == BuyPlanStatus.ACTIVE.value,
+                BuyPlan.lines.any(BuyPlanLine.status == BuyPlanLineStatus.PENDING_VERIFY.value),
+            )
+            .options(selectinload(BuyPlan.lines))
+            .all()
+        )
 
         async def _safe_verify(plan):
             try:

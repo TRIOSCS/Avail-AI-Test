@@ -36,11 +36,15 @@ class _FyiSource(AlertSource):
     temperament = Temperament.FYI
     _candidates = {1, 2, 3}
 
+    def _seen(self, db, user):
+        """Materialize the seen ref_ids via the base seen_subquery helper."""
+        return set(db.execute(self.seen_subquery(user)).scalars())
+
     def count_for_user(self, db, user):
-        return len(self._candidates - self.seen_ref_ids(db, user))
+        return len(self._candidates - self._seen(db, user))
 
     def new_items_for_user(self, db, user):
-        unseen = self._candidates - self.seen_ref_ids(db, user)
+        unseen = self._candidates - self._seen(db, user)
         return [AlertItem(ref_id=r) for r in sorted(unseen)]
 
 
@@ -88,12 +92,13 @@ def test_record_seen_idempotent(db_session: Session, test_user: User):
     assert n == 1
 
 
-def test_seen_ref_ids_scoped_by_kind_and_user(db_session: Session, test_user: User, sales_user: User):
+def test_seen_subquery_scoped_by_kind_and_user(db_session: Session, test_user: User, sales_user: User):
     record_seen(db_session, test_user, AlertKind.OFFER_CONFIRMED, 1)
     record_seen(db_session, test_user, AlertKind.INBOUND_CUSTOMER, 2)
     record_seen(db_session, sales_user, AlertKind.OFFER_CONFIRMED, 99)
 
-    assert _FyiSource().seen_ref_ids(db_session, test_user) == {1}  # this user, this kind only
+    src = _FyiSource()
+    assert set(db_session.execute(src.seen_subquery(test_user)).scalars()) == {1}  # this user, this kind only
 
 
 def test_recency_floor_uses_rolling_window(monkeypatch):

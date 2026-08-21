@@ -314,20 +314,10 @@
 
 </div>
 
-{# ── Initialize left panel scroll sync + Alpine components ── #}
+{# ── Alpine components (scroll sync for #left-top-scroll comes from the generic
+   initScrollSync() in parts/workspace.html — it re-wires every .top-scroll-bar
+   on the htmx:afterSwap/afterSettle that inserts this partial) ── #}
 <script>
-  requestAnimationFrame(function() {
-    var bar = document.getElementById('left-top-scroll');
-    var content = document.getElementById('left-table-content');
-    if (!bar || !content) return;
-    var table = content.querySelector('table');
-    if (table) {
-      bar.querySelector('.scroll-spacer').style.width = table.scrollWidth + 'px';
-    }
-    bar.onscroll = function() { content.scrollLeft = bar.scrollLeft; };
-    content.onscroll = function() { bar.scrollLeft = content.scrollLeft; };
-  });
-
   /* Parts list multi-select + bulk actions */
   function partsListSelection() {
     return {

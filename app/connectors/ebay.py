@@ -24,11 +24,6 @@ class EbayConnector(BaseConnector):
         self.client_id = client_id
         self.client_secret = client_secret
 
-    def _token_cache_key(self) -> tuple[str, str]:
-        # Process-wide OAuth cache key (see sources._get_cached_token). A blank
-        # client_id never reaches minting — `_do_search` returns early on it.
-        return (type(self).__name__, self.client_id)
-
     async def _get_token(self) -> str:
         async def _mint() -> tuple[str, int]:
             creds = base64.b64encode(f"{self.client_id}:{self.client_secret}".encode()).decode()

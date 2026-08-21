@@ -126,17 +126,25 @@ async def log_phone_call(
     return await requisition_tab(request=request, req_id=req_id, tab="activity", user=user, db=db)
 
 
-@router.post("/v2/partials/requisitions/{req_id}/responses/{response_id}/review", response_class=HTMLResponse)
-async def review_response_htmx(
+async def _apply_response_status(
     request: Request,
     req_id: int,
     response_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Mark a vendor response as reviewed or rejected.
+    user: User,
+    db: Session,
+    *,
+    status_by_action: dict,
+    invalid_detail: str,
+    log_template: str,
+    strip_action: bool = False,
+) -> HTMLResponse:
+    """Scoped VendorResponse lookup + status write + response-card re-render.
 
-    Returns updated card.
+    Shared skeleton for review_response_htmx and update_response_status — each passes
+    its own accepted-status vocabulary (``status_by_action``), its 400 wording
+    (``invalid_detail``), and its audit-log line (``log_template``, formatted with
+    response_id / new status / user email). ``strip_action`` preserves the PATCH
+    endpoint's whitespace-tolerant form parsing.
     """
     from . import template_response
 
@@ -153,26 +161,53 @@ async def review_response_htmx(
         raise HTTPException(404, "Response not found")
 
     form = await request.form()
-    status_by_action = {
-        VendorResponseStatus.REVIEWED.value: VendorResponseStatus.REVIEWED,
-        VendorResponseStatus.REJECTED.value: VendorResponseStatus.REJECTED,
-    }
-    new_status = status_by_action.get(form.get("status", ""))
+    action = form.get("status", "")
+    if strip_action:
+        action = action.strip()
+    new_status = status_by_action.get(action)
     if new_status is None:
-        raise HTTPException(
-            400,
-            f"Status must be '{VendorResponseStatus.REVIEWED.value}' or '{VendorResponseStatus.REJECTED.value}'",
-        )
+        raise HTTPException(400, invalid_detail)
 
     vr.status = new_status
     db.commit()
-    logger.info("Response {} marked as {} by {}", response_id, new_status, user.email)
+    logger.info(log_template, response_id, new_status, user.email)
 
+    # Return the refreshed response card so the status control + badge update in place.
+    # The card's hx-target swaps #response-{id}.
     req = db.query(Requisition).filter(Requisition.id == req_id).first()
     ctx = _base_ctx(request, user, "requisitions")
     ctx["r"] = vr
     ctx["req"] = req
     return template_response("htmx/partials/requisitions/tabs/response_card.html", ctx)
+
+
+@router.post("/v2/partials/requisitions/{req_id}/responses/{response_id}/review", response_class=HTMLResponse)
+async def review_response_htmx(
+    request: Request,
+    req_id: int,
+    response_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Mark a vendor response as reviewed or rejected.
+
+    Returns updated card.
+    """
+    return await _apply_response_status(
+        request,
+        req_id,
+        response_id,
+        user,
+        db,
+        status_by_action={
+            VendorResponseStatus.REVIEWED.value: VendorResponseStatus.REVIEWED,
+            VendorResponseStatus.REJECTED.value: VendorResponseStatus.REJECTED,
+        },
+        invalid_detail=(
+            f"Status must be '{VendorResponseStatus.REVIEWED.value}' or '{VendorResponseStatus.REJECTED.value}'"
+        ),
+        log_template="Response {} marked as {} by {}",
+    )
 
 
 @router.post(
@@ -291,17 +326,16 @@ async def send_reply_htmx(
 
             token = await require_fresh_token(request, db)
 
-            from ....utils.graph_client import GraphClient
+            from ....utils.graph_client import GraphClient, build_sendmail_payload
 
             gc = GraphClient(token)
-            payload = {
-                "message": {
-                    "subject": subject,
-                    "body": {"contentType": "Text", "content": body},
-                    "toRecipients": [{"emailAddress": {"address": vr.vendor_email}}],
-                },
-                "saveToSentItems": "true",
-            }
+            payload = build_sendmail_payload(
+                subject,
+                body,
+                vr.vendor_email,
+                save_to_sent="true",
+                content_type="Text",
+            )
             await gc.post_json("/me/sendMail", payload)
             email_sent = True
         except Exception as exc:
@@ -335,22 +369,6 @@ async def update_response_status(
     db: Session = Depends(get_db),
 ):
     """Update vendor response status (reviewed/rejected/flagged)."""
-    from . import template_response
-
-    require_requisition_access(db, req_id, user)
-    vr = (
-        db.query(VendorResponse)
-        .filter(
-            VendorResponse.id == response_id,
-            VendorResponse.requisition_id == req_id,
-        )
-        .first()
-    )
-    if not vr:
-        raise HTTPException(404, "Response not found")
-
-    form = await request.form()
-    action = form.get("status", "").strip()
     # Map accepted action strings to in-vocabulary VendorResponseStatus members so
     # the persisted status always matches enum-based filters/reports.
     status_by_action = {
@@ -359,21 +377,14 @@ async def update_response_status(
         VendorResponseStatus.REJECTED.value: VendorResponseStatus.REJECTED,
         VendorResponseStatus.FLAGGED.value: VendorResponseStatus.FLAGGED,
     }
-    new_status = status_by_action.get(action)
-    if new_status is None:
-        raise HTTPException(
-            400,
-            f"Invalid status. Must be one of: {', '.join(status_by_action)}",
-        )
-
-    vr.status = new_status
-    db.commit()
-    logger.info("Response {} status → {} by {}", response_id, new_status, user.email)
-
-    # Return the refreshed response card so the status control + badge update in place
-    # (mirrors review_response_htmx). The card's hx-target swaps #response-{id}.
-    req = db.query(Requisition).filter(Requisition.id == req_id).first()
-    ctx = _base_ctx(request, user, "requisitions")
-    ctx["r"] = vr
-    ctx["req"] = req
-    return template_response("htmx/partials/requisitions/tabs/response_card.html", ctx)
+    return await _apply_response_status(
+        request,
+        req_id,
+        response_id,
+        user,
+        db,
+        status_by_action=status_by_action,
+        invalid_detail=f"Invalid status. Must be one of: {', '.join(status_by_action)}",
+        log_template="Response {} status → {} by {}",
+        strip_action=True,
+    )

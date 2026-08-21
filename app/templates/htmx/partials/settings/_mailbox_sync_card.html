@@ -1,6 +1,7 @@
 {# _mailbox_sync_card.html — inbox-sync health for Settings → Profile.
    Receives: inbox_status (dict from get_inbox_sync_status).
    Friendly copy + a real disconnected empty state; m365 errors shown as plain text. #}
+{% from "htmx/partials/shared/_macros.html" import spinner -%}
 {% set dot = {'ok': 'bg-emerald-500', 'warning': 'bg-amber-500', 'error': 'bg-rose-500'} %}
 <div id="mailbox-sync-card" class="bg-white border border-line-base rounded-lg p-4">
   <div class="flex items-center justify-between">
@@ -15,7 +16,7 @@
             class="px-3 py-1.5 text-xs font-medium text-accent-600 bg-accent-50 border border-accent-200 rounded-lg hover:bg-accent-100 inline-flex items-center gap-1.5">
       Scan now
       <span id="mailbox-scan-spinner" class="htmx-indicator">
-        <svg class="animate-spin h-3 w-3 text-accent-500" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+        {{ spinner('animate-spin h-3 w-3 text-accent-500') }}
       </span>
     </button>
     {% endif %}

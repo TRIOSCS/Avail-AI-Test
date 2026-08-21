@@ -6,10 +6,10 @@ Purpose:
   AI cleans and structures it into editable templates. User reviews, edits, and saves.
 
 Called by: routers/htmx/requisitions.py, routers/htmx/offers/crud.py (freeform paste parsing)
-Depends on: utils/claude_client, utils/llm_router
+Depends on: utils/claude_client
 """
 
-from app.utils.llm_router import routed_structured
+from app.utils.claude_client import claude_structured
 from app.utils.normalization import (
     detect_currency,
     normalize_condition,
@@ -145,7 +145,7 @@ async def parse_freeform_rfq(raw_text: str) -> dict | None:
     text = (raw_text or "").strip()[:6000]
     if not text:
         return None
-    result = await routed_structured(
+    result = await claude_structured(
         prompt=f"Customer/vendor text:\n\n{text}",
         schema=RFQ_PARSE_SCHEMA,
         system=RFQ_SYSTEM,
@@ -178,7 +178,7 @@ async def parse_freeform_offer(raw_text: str, rfq_context: list | None = None) -
     if rfq_context:
         parts = ", ".join(f"{p.get('mpn', '?')} x{p.get('qty', 1)}" for p in rfq_context[:10])
         ctx_str = f"\nParts we asked about: {parts}\n"
-    result = await routed_structured(
+    result = await claude_structured(
         prompt=f"{ctx_str}Vendor text:\n\n{text}",
         schema=OFFER_PARSE_SCHEMA,
         system=OFFER_SYSTEM,

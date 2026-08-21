@@ -24,7 +24,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship, validates
 
 from ..database import UTCDateTime
-from .base import Base
+from .base import Base, validate_enum_member
 
 
 class TroubleTicket(Base):
@@ -99,19 +99,13 @@ class TroubleTicket(Base):
     def _validate_status(self, _key, value):
         from ..constants import TicketStatus
 
-        valid = {e.value for e in TicketStatus}
-        if value and value not in valid:
-            raise ValueError(f"Invalid ticket status: {value!r}. Valid: {valid}")
-        return value
+        return validate_enum_member(TicketStatus, value, "ticket status")
 
     @validates("ticket_type")
     def _validate_ticket_type(self, _key, value):
         from ..constants import TicketType
 
-        valid = {e.value for e in TicketType}
-        if value and value not in valid:
-            raise ValueError(f"Invalid ticket type: {value!r}. Valid: {valid}")
-        return value
+        return validate_enum_member(TicketType, value, "ticket type")
 
     submitter = relationship("User", foreign_keys=[submitted_by])
     resolved_by = relationship("User", foreign_keys=[resolved_by_id])

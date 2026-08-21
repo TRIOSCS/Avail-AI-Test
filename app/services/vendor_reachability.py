@@ -12,15 +12,42 @@ these gates is always genuinely offerable. Advisory only where noted — the
 authoritative skip always stays in the send path itself (TOCTOU guard: a contact can be
 flagged DNC after these gates run).
 
+A third, single-recipient gate shares the same rule:
+
+- ``dnc_contact_for_email`` — the SiteContact (if any) that makes one (site, email)
+  recipient Do-Not-Contact.
+
 Called by: app.routers.sightings (vendor coverage modal, RFQ preview/send),
-    app.services.buyer_affinity_service (resell who-to-offer ranking)
+    app.services.buyer_affinity_service (resell who-to-offer ranking),
+    app.services.quote_send / app.services.quote_preflight (customer-quote DNC checks)
 Depends on: app.models.vendors (VendorContact), app.models.crm (SiteContact)
 """
 
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
 
+from ..models.crm import SiteContact
 from ..models.vendors import VendorContact
+
+
+def dnc_contact_for_email(db: Session, site_id: int | None, email: str) -> SiteContact | None:
+    """The SiteContact that flags (*site_id*, *email*) as Do-Not-Contact, else None.
+
+    Canonical contact-level DNC rule: a SiteContact on *site_id* whose email matches
+    *email* case-insensitively and whose ``do_not_contact`` flag is set. Site-level DNC
+    (``CustomerSite.do_not_contact``) is a separate check the callers keep, so surfaces
+    that report the two distinctly (quote_preflight) can. Used by quote_send's hard
+    block and quote_preflight's advisory warning.
+    """
+    return (
+        db.query(SiteContact)
+        .filter(
+            SiteContact.customer_site_id == site_id,
+            sqlfunc.lower(SiteContact.email) == (email or "").lower(),
+            SiteContact.do_not_contact.is_(True),
+        )
+        .first()
+    )
 
 
 def cards_with_resolvable_email(db: Session, card_ids: list[int]) -> set[int]:
@@ -64,8 +91,6 @@ def dnc_emails_for_cards(db: Session, card_ids: list[int]) -> set[str]:
     """
     if not card_ids:
         return set()
-
-    from ..models.crm import SiteContact
 
     rows = (
         db.query(VendorContact.email)

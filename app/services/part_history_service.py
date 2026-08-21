@@ -215,14 +215,9 @@ def _count(db: Session, model: type, *conditions) -> int:
 
 
 def _resolve_card(db: Session, normalized_key: str) -> MaterialCard | None:
-    if not normalized_key:
-        return None
-    return (
-        db.query(MaterialCard)
-        .filter(MaterialCard.normalized_mpn == normalized_key)
-        .filter(MaterialCard.deleted_at.is_(None))
-        .first()
-    )
+    from .material_card_service import get_live_card_by_key
+
+    return get_live_card_by_key(db, normalized_key)
 
 
 def get_part_history(db: Session, normalized_key: str) -> PartHistory:

@@ -14,6 +14,30 @@
 #}
 {% set locked = qp.sales_section_reviewed_at is not none %}
 
+{# One field roster drives BOTH branches (editable form + read-only grid).
+   Each entry: (name, kind, label, ro_label) — kind picks the edit widget
+   (txt / num / area / yn; yn renders ro_bool when locked); ro_label overrides
+   the label in the locked view where its wording intentionally differs. #}
+{% set sales_fields = [
+  ('sales_condition', 'txt', 'Condition', none),
+  ('sales_quantity', 'num', 'Quantity', none),
+  ('sales_product_commodity', 'txt', 'Product Commodity', none),
+  ('sales_fw_hw_rev', 'area', 'FW / HW / REV / Date & Week Codes', 'FW / HW / REV / Date Codes'),
+  ('sales_testing_required', 'yn', 'Testing Required', none),
+  ('sales_testing_option', 'txt', 'Testing Option', none),
+  ('sales_testing_specifics', 'area', 'Testing Specifics', none),
+  ('sales_test_location', 'txt', 'Test Location', none),
+  ('sales_serial_preapproval_required', 'yn', 'Serial Preapproval Required', none),
+  ('sales_authorized_ship_early', 'yn', 'Authorized to Ship Early', none),
+  ('sales_authorized_ship_partial', 'yn', 'Authorized to Ship Partial', none),
+  ('sales_routing_prescreening_whs', 'txt', 'Routing / Prescreening WHS', none),
+  ('sales_vendor_rating', 'txt', 'Vendor Rating', none),
+  ('sales_third_party_pkg_ok', 'yn', 'Third-party Packaging OK', none),
+  ('sales_pkg_requirements', 'area', 'List Packaging Requirements', 'Packaging Requirements'),
+  ('sales_bom_matrix_links', 'area', 'BOM / Matrix Links / Acceptable SUBS / TSO', 'BOM / Matrix Links / SUBS'),
+  ('sales_notes', 'area', 'Notes', none),
+] %}
+
 <div id="qp-section-sales">
   {% if locked %}
   {# ── Read-only display grid ── #}
@@ -31,23 +55,10 @@
     </div>
     {% endmacro %}
     {{ ro('Sales Order #', qp.buy_plan.sales_order_number if qp.buy_plan else none) }}
-    {{ ro('Condition', qp.sales_condition) }}
-    {{ ro('Quantity', qp.sales_quantity) }}
-    {{ ro('FW / HW / REV / Date Codes', qp.sales_fw_hw_rev) }}
-    {{ ro('Product Commodity', qp.sales_product_commodity) }}
-    {{ ro_bool('Testing Required', qp.sales_testing_required) }}
-    {{ ro('Testing Option', qp.sales_testing_option) }}
-    {{ ro('Testing Specifics', qp.sales_testing_specifics) }}
-    {{ ro('Test Location', qp.sales_test_location) }}
-    {{ ro_bool('Serial Preapproval Required', qp.sales_serial_preapproval_required) }}
-    {{ ro_bool('Authorized to Ship Early', qp.sales_authorized_ship_early) }}
-    {{ ro_bool('Authorized to Ship Partial', qp.sales_authorized_ship_partial) }}
-    {{ ro('Routing / Prescreening WHS', qp.sales_routing_prescreening_whs) }}
-    {{ ro('Vendor Rating', qp.sales_vendor_rating) }}
-    {{ ro_bool('Third-party Packaging OK', qp.sales_third_party_pkg_ok) }}
-    {{ ro('Packaging Requirements', qp.sales_pkg_requirements) }}
-    {{ ro('BOM / Matrix Links / SUBS', qp.sales_bom_matrix_links) }}
-    {{ ro('Notes', qp.sales_notes) }}
+    {% for name, kind, label, ro_label in sales_fields %}
+    {% if kind == 'yn' %}{{ ro_bool(ro_label or label, qp|attr(name)) }}
+    {% else %}{{ ro(ro_label or label, qp|attr(name)) }}{% endif %}
+    {% endfor %}
   </dl>
   <div class="mt-3 flex flex-wrap items-center gap-3">
     <p class="text-xs text-emerald-700">
@@ -100,23 +111,12 @@
       </select>
     </label>
     {% endmacro %}
-    {{ txt('sales_condition', 'Condition', qp.sales_condition) }}
-    {{ num('sales_quantity', 'Quantity', qp.sales_quantity) }}
-    {{ txt('sales_product_commodity', 'Product Commodity', qp.sales_product_commodity) }}
-    {{ area('sales_fw_hw_rev', 'FW / HW / REV / Date & Week Codes', qp.sales_fw_hw_rev) }}
-    {{ yn('sales_testing_required', 'Testing Required', qp.sales_testing_required) }}
-    {{ txt('sales_testing_option', 'Testing Option', qp.sales_testing_option) }}
-    {{ area('sales_testing_specifics', 'Testing Specifics', qp.sales_testing_specifics) }}
-    {{ txt('sales_test_location', 'Test Location', qp.sales_test_location) }}
-    {{ yn('sales_serial_preapproval_required', 'Serial Preapproval Required', qp.sales_serial_preapproval_required) }}
-    {{ yn('sales_authorized_ship_early', 'Authorized to Ship Early', qp.sales_authorized_ship_early) }}
-    {{ yn('sales_authorized_ship_partial', 'Authorized to Ship Partial', qp.sales_authorized_ship_partial) }}
-    {{ txt('sales_routing_prescreening_whs', 'Routing / Prescreening WHS', qp.sales_routing_prescreening_whs) }}
-    {{ txt('sales_vendor_rating', 'Vendor Rating', qp.sales_vendor_rating) }}
-    {{ yn('sales_third_party_pkg_ok', 'Third-party Packaging OK', qp.sales_third_party_pkg_ok) }}
-    {{ area('sales_pkg_requirements', 'List Packaging Requirements', qp.sales_pkg_requirements) }}
-    {{ area('sales_bom_matrix_links', 'BOM / Matrix Links / Acceptable SUBS / TSO', qp.sales_bom_matrix_links) }}
-    {{ area('sales_notes', 'Notes', qp.sales_notes) }}
+    {% for name, kind, label, _ro_label in sales_fields %}
+    {% if kind == 'yn' %}{{ yn(name, label, qp|attr(name)) }}
+    {% elif kind == 'num' %}{{ num(name, label, qp|attr(name)) }}
+    {% elif kind == 'area' %}{{ area(name, label, qp|attr(name)) }}
+    {% else %}{{ txt(name, label, qp|attr(name)) }}{% endif %}
+    {% endfor %}
   </form>
 
   {# ── Completeness gate + Mark Reviewed ── #}

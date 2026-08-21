@@ -8,6 +8,7 @@
              /api/user/toggle-buyplan-email, /api/user/toggle-new-offer-alert.
   All mutations return empty 200 + HX-Trigger:showToast — use hx-swap="none".
 #}
+{% from "htmx/partials/settings/_macros.html" import toggle_switch %}
 
 <div class="max-w-2xl">
   {# Identity + click-to-call card. Alpine holds name/extension so each save
@@ -248,25 +249,14 @@
         <h3 class="text-sm font-semibold text-gray-900">Turn click-to-call on</h3>
         <p class="text-xs text-gray-600 mt-0.5">When on, clicking a phone number anywhere in the app rings it through 8x8.</p>
       </div>
-      <label class="relative inline-flex items-center cursor-pointer ml-4">
-        <input type="checkbox" x-model="enabled"
-               class="sr-only peer"
-               hx-post="/api/user/toggle-8x8"
-               hx-swap="none"
-               data-loading-disable>
-        <div class="w-11 h-6 bg-gray-200 peer-focus:ring-2 peer-focus:ring-accent-300 rounded-full
-                    peer peer-checked:after:translate-x-full peer-checked:after:border-white
-                    after:content-[''] after:absolute after:top-[2px] after:left-[2px]
-                    after:bg-white after:border-gray-300 after:border after:rounded-full
-                    after:h-5 after:w-5 after:transition-all peer-checked:bg-accent-500"></div>
-      </label>
+      {{ toggle_switch('      ', '/api/user/toggle-8x8') }}
     </div>
     <div x-show="enabled" x-cloak class="mt-3 p-3 bg-accent-50 rounded-lg">
       <p class="text-xs text-accent-600">Click-to-call is active. Phone numbers across the app will dial through 8x8.</p>
     </div>
   </div>
 
-  {# Notifications card — two toggles cloned from the 8x8 toggle markup #}
+  {# Notifications card — three toggle_switch rows (shared macro with the 8x8 toggle) #}
   <div class="bg-white border border-line-base rounded-lg p-4 mb-6">
     <h3 class="text-sm font-semibold text-gray-900 mb-4">Notifications</h3>
     <div class="space-y-4">
@@ -277,18 +267,7 @@
           <p class="text-sm font-medium text-gray-900">Email me about buy-plan updates</p>
           <p class="text-xs text-gray-600 mt-0.5">Get an email when a buy plan you own changes.</p>
         </div>
-        <label class="relative inline-flex items-center cursor-pointer ml-4">
-          <input type="checkbox" x-model="enabled"
-                 class="sr-only peer"
-                 hx-post="/api/user/toggle-buyplan-email"
-                 hx-swap="none"
-                 data-loading-disable>
-          <div class="w-11 h-6 bg-gray-200 peer-focus:ring-2 peer-focus:ring-accent-300 rounded-full
-                      peer peer-checked:after:translate-x-full peer-checked:after:border-white
-                      after:content-[''] after:absolute after:top-[2px] after:left-[2px]
-                      after:bg-white after:border-gray-300 after:border after:rounded-full
-                      after:h-5 after:w-5 after:transition-all peer-checked:bg-accent-500"></div>
-        </label>
+        {{ toggle_switch('        ', '/api/user/toggle-buyplan-email') }}
       </div>
 
       {# New approved-offer alerts #}
@@ -298,18 +277,7 @@
           <p class="text-sm font-medium text-gray-900">Alert me about new approved offers</p>
           <p class="text-xs text-gray-600 mt-0.5">Get a heads-up when a new offer is approved on your requisitions.</p>
         </div>
-        <label class="relative inline-flex items-center cursor-pointer ml-4">
-          <input type="checkbox" x-model="enabled"
-                 class="sr-only peer"
-                 hx-post="/api/user/toggle-new-offer-alert"
-                 hx-swap="none"
-                 data-loading-disable>
-          <div class="w-11 h-6 bg-gray-200 peer-focus:ring-2 peer-focus:ring-accent-300 rounded-full
-                      peer peer-checked:after:translate-x-full peer-checked:after:border-white
-                      after:content-[''] after:absolute after:top-[2px] after:left-[2px]
-                      after:bg-white after:border-gray-300 after:border after:rounded-full
-                      after:h-5 after:w-5 after:transition-all peer-checked:bg-accent-500"></div>
-        </label>
+        {{ toggle_switch('        ', '/api/user/toggle-new-offer-alert') }}
       </div>
 
       {# Urgent re-source backfill alerts (email + Teams DM) #}
@@ -319,18 +287,7 @@
           <p class="text-sm font-medium text-gray-900">Alert me when a deal needs re-sourcing</p>
           <p class="text-xs text-gray-600 mt-0.5">Urgent email + Teams DM when a cancelled PO needs backfilling. (The in-app alert always shows.)</p>
         </div>
-        <label class="relative inline-flex items-center cursor-pointer ml-4">
-          <input type="checkbox" x-model="enabled"
-                 class="sr-only peer"
-                 hx-post="/api/user/toggle-resource-alert"
-                 hx-swap="none"
-                 data-loading-disable>
-          <div class="w-11 h-6 bg-gray-200 peer-focus:ring-2 peer-focus:ring-accent-300 rounded-full
-                      peer peer-checked:after:translate-x-full peer-checked:after:border-white
-                      after:content-[''] after:absolute after:top-[2px] after:left-[2px]
-                      after:bg-white after:border-gray-300 after:border after:rounded-full
-                      after:h-5 after:w-5 after:transition-all peer-checked:bg-accent-500"></div>
-        </label>
+        {{ toggle_switch('        ', '/api/user/toggle-resource-alert') }}
       </div>
     </div>
   </div>

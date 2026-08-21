@@ -24,7 +24,6 @@ from decimal import Decimal
 from fastapi import HTTPException
 from loguru import logger
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..constants import CustomerBidStatus
@@ -38,26 +37,17 @@ from ..models.excess import (
     ExcessOfferLine,
 )
 
+# One commit→IntegrityError→409 policy across the requisition + resell modules. Here it
+# is a backstop: a dangling provenance pointer (e.g. a corrupt ``best_offer_id``) is
+# sanitized before it reaches a real FK column, so any OTHER conflicting write surfaces
+# as a clean 409 rather than a 500 out of the global handler.
+from .excess_service import parse_money
+from .requisition_service import safe_commit as _safe_commit
+
 # Terminal CustomerBid statuses: the seller has answered, so the revision is frozen
 # history. Re-assembling off one forks a NEW immutable revision (D3) rather than mutating
 # the answered row. A non-terminal (draft/sent) latest still bumps in place.
 _TERMINAL_BID_STATUSES = (CustomerBidStatus.ACCEPTED, CustomerBidStatus.REJECTED)
-
-
-def _safe_commit(db: Session, *, entity: str = "record") -> None:
-    """Commit the session, mapping IntegrityError to HTTP 409 instead of an unhandled
-    500.
-
-    A dangling provenance pointer (e.g. a corrupt ``best_offer_id``) is sanitized before it
-    reaches a real FK column, so this is a backstop: any OTHER conflicting write surfaces as
-    a clean 409 rather than a 500 out of the global handler.
-    """
-    try:
-        db.commit()
-    except IntegrityError as exc:
-        db.rollback()
-        logger.warning("IntegrityError on {}: {}", entity, exc)
-        raise HTTPException(409, f"Duplicate or conflicting {entity}") from exc
 
 
 def build_bid_back(
@@ -226,7 +216,8 @@ def build_bid_back(
 
 
 def _bid_number(bid: CustomerBid) -> str:
-    """The customer-facing bid number (matches ``bid_back_export_context``)."""
+    """The customer-facing bid number — the ONE format shared by the emailed
+    subject/body and ``bid_back_export_context``'s exported header."""
     return f"BID-{bid.id}"
 
 
@@ -518,7 +509,7 @@ def bid_back_export_context(bid: CustomerBid, *, status_override: CustomerBidSta
         )
 
     return {
-        "bid_number": f"BID-{bid.id}",
+        "bid_number": _bid_number(bid),
         "revision": bid.revision or 1,
         "status": status_override if status_override is not None else bid.status,
         "notes": bid.notes,
@@ -529,10 +520,9 @@ def bid_back_export_context(bid: CustomerBid, *, status_override: CustomerBidSta
 
 
 def _to_decimal(value) -> Decimal | None:
-    """Coerce an override price to Decimal, or None when blank/invalid."""
-    if value is None or str(value).strip() == "":
-        return None
-    try:
-        return Decimal(str(value).strip().lstrip("$").replace(",", ""))
-    except (ArithmeticError, ValueError):
-        return None
+    """Coerce an override price to Decimal, or None when blank/invalid.
+
+    Delegates to the shared ``excess_service.parse_money`` (sign-policy-free — an
+    override may be any Decimal here).
+    """
+    return parse_money(value)

@@ -549,7 +549,7 @@ def test_import_stock_no_file(client, monkeypatch):
 def test_import_stock_success(client, db_session, monkeypatch):
     """POST /api/materials/import-stock with valid CSV imports rows."""
     monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close())
-    monkeypatch.setattr("app.routers.materials.get_credential_cached", lambda *a, **kw: None)
+    monkeypatch.setattr("app.services.credential_service.get_credential_cached", lambda *a, **kw: None)
 
     csv_content = b"mpn,qty,price,manufacturer\nLM555CN,1000,0.25,Texas Instruments\nNE556N,500,0.30,Signetics"
     resp = client.post(
@@ -566,7 +566,7 @@ def test_import_stock_success(client, db_session, monkeypatch):
 def test_import_stock_with_website(client, db_session, monkeypatch):
     """POST /api/materials/import-stock with vendor_website sets domain."""
     monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close())
-    monkeypatch.setattr("app.routers.materials.get_credential_cached", lambda *a, **kw: None)
+    monkeypatch.setattr("app.services.credential_service.get_credential_cached", lambda *a, **kw: None)
 
     csv_content = b"mpn,qty,price\nABC123,100,1.50"
     resp = client.post(
@@ -595,7 +595,7 @@ def test_import_stock_too_large(client, db_session, monkeypatch):
 def test_import_stock_existing_vendor(client, db_session, monkeypatch):
     """POST /api/materials/import-stock with existing vendor updates sighting_count."""
     monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close())
-    monkeypatch.setattr("app.routers.materials.get_credential_cached", lambda *a, **kw: None)
+    monkeypatch.setattr("app.services.credential_service.get_credential_cached", lambda *a, **kw: None)
 
     from app.vendor_utils import normalize_vendor_name
 
@@ -620,7 +620,7 @@ def test_import_stock_existing_vendor(client, db_session, monkeypatch):
 def test_import_stock_update_existing_mvh(client, db_session, monkeypatch):
     """POST /api/materials/import-stock updates existing MaterialVendorHistory."""
     monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close())
-    monkeypatch.setattr("app.routers.materials.get_credential_cached", lambda *a, **kw: None)
+    monkeypatch.setattr("app.services.credential_service.get_credential_cached", lambda *a, **kw: None)
 
     from app.utils.normalization import normalize_mpn_key
     from app.vendor_utils import normalize_vendor_name
@@ -668,9 +668,10 @@ def test_import_stock_enrichment_triggered(client, db_session, monkeypatch):
     domain."""
     task_created = []
     monkeypatch.setattr(
-        "app.routers.materials.safe_background_task", AsyncMock(side_effect=lambda *a, **kw: task_created.append(True))
+        "app.utils.async_helpers.safe_background_task",
+        AsyncMock(side_effect=lambda *a, **kw: task_created.append(True)),
     )
-    monkeypatch.setattr("app.routers.materials.get_credential_cached", lambda *a, **kw: "fake-key")
+    monkeypatch.setattr("app.services.credential_service.get_credential_cached", lambda *a, **kw: "fake-key")
 
     csv_content = b"mpn,qty,price\nENRICH-001,100,0.50"
     resp = client.post(
@@ -686,7 +687,7 @@ def test_import_stock_enrichment_triggered(client, db_session, monkeypatch):
 def test_import_stock_skips_bad_rows(client, db_session, monkeypatch):
     """POST /api/materials/import-stock skips rows that normalize_stock_row rejects."""
     monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close())
-    monkeypatch.setattr("app.routers.materials.get_credential_cached", lambda *a, **kw: None)
+    monkeypatch.setattr("app.services.credential_service.get_credential_cached", lambda *a, **kw: None)
 
     csv_content = b"mpn,qty,price\n,100,0.50\nVALID001,200,0.75"
     resp = client.post(

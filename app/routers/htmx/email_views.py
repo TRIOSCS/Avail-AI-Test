@@ -91,18 +91,11 @@ async def send_email_reply(
 
         token = await _rft(request, db)
         from ...email_service import _build_html_body
-        from ...utils.graph_client import GraphClient
+        from ...utils.graph_client import GraphClient, build_sendmail_payload
 
         gc = GraphClient(token)
         html_body = _build_html_body(body)
-        mail_payload = {
-            "message": {
-                "subject": subject or "Re:",
-                "body": {"contentType": "HTML", "content": html_body},
-                "toRecipients": [{"emailAddress": {"address": to}}],
-            },
-            "saveToSentItems": "true",
-        }
+        mail_payload = build_sendmail_payload(subject or "Re:", html_body, to, save_to_sent="true")
         result = await gc.post_json("/me/sendMail", mail_payload, raise_on_error=False)
         if "error" in result:
             error = f"Send failed: {result.get('detail', 'Unknown error')}"

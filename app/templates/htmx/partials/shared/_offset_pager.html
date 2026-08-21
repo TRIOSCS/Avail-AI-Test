@@ -1,0 +1,34 @@
+{# _offset_pager.html — Shared offset-based Prev/Next pager for list partials.
+   The ONE source for the "{offset+1}–{min(offset+limit, total)} of {total}"
+   count strip used by the offset-paged lists (page-based lists keep using
+   shared/pagination.html).
+   Called by: customers/contacts_list.html, requisitions/list.html,
+              vendors/contacts_list.html, vendors/list.html, materials/list.html.
+   Args:
+     offset / limit / total: the list window (renders nothing when total <= limit).
+     prev_attrs / next_attrs: the Prev/Next control's own attributes (hx-get /
+       hx-vals / @click / preload …) as a raw string — build with a
+       {% set _x %}…{% endset %} block so quotes pass through verbatim.
+     btn_class: class string for both controls (callers keep their existing
+       chrome — px-3 bordered pill vs btn-secondary — untouched).
+     tag: element tag for the controls ('a' default; materials passes 'button').
+#}
+{% macro offset_pager(offset, limit, total, prev_attrs, next_attrs,
+                      btn_class='px-3 py-1.5 text-sm bg-white border border-gray-200 rounded-lg hover:bg-brand-50 cursor-pointer',
+                      tag='a') %}
+{% if total > limit %}
+<div class="mt-4 flex justify-center">
+  <nav class="flex gap-1 items-center">
+    {% if offset > 0 %}
+    <{{ tag }} {{ prev_attrs }}
+       class="{{ btn_class }}">Prev</{{ tag }}>
+    {% endif %}
+    <span class="px-3 py-1.5 text-sm text-gray-600">{{ offset + 1 }}&ndash;{{ [offset + limit, total]|min }} of {{ total }}</span>
+    {% if offset + limit < total %}
+    <{{ tag }} {{ next_attrs }}
+       class="{{ btn_class }}">Next</{{ tag }}>
+    {% endif %}
+  </nav>
+</div>
+{% endif %}
+{% endmacro %}

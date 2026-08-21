@@ -926,19 +926,6 @@ env-var presence, which diverged from what searches actually resolve). Logic in
 `connectors.html`. Tests: `tests/test_connector_service.py`, `tests/test_connector_status.py`,
 `tests/test_connectors_settings.py`.
 
-**HTML structure-hash drift alert (2026-07-04, Phase 2).** Each browser worker
-fingerprints the results HTML it parses via
-`search_worker_base.monitoring.check_html_structure_hash` and warns (Loguru + Sentry)
-when a page's structure is one it has not seen — an early signal that a supplier
-changed its markup and the parser may need updating. The fingerprint hashes only the
-sequence of tag NAMES (open/close), never attributes: attribute values (`class`, `id`,
-`data-*`, inline `style`) vary per row and per part, so folding them in made almost
-every page read as a "layout change" — spamming Sentry and growing the stored
-per-component hash set without bound. Genuine layout changes (a table becoming a list,
-a wrapper appearing) still alter the tag sequence and are still caught. The stored set
-is additionally capped at `_MAX_STRUCTURE_HASHES` (evict-arbitrary-at-cap) as a hard
-bound. Tests: `tests/test_search_worker_monitoring.py`.
-
 ### Removed (2026-05-14)
 
 - Daily 3 AM `_job_refresh_stale_requisitions` cron — no background refresh
@@ -1192,6 +1179,11 @@ policy behavior for free — in its OWN session, right where the rows are create
 1. `app/search_service.py` — after the fresh-Sighting construction loop that
    follows the connector-aware delete (inside search's separate write session).
 2. `app/services/ics_worker/sighting_writer.py` — async ICS browser-worker save loop.
+   (Simplify sweep: the save skeleton — requirement fetch, vendor/mpn/qty dedup set,
+   unavailability re-application before commit, commit, vendor-summary rebuild — is ONE
+   shared implementation in `app/services/search_worker_base/sighting_writer.py`; each
+   worker's module supplies only its marketplace-specific Sighting field mapping. Small
+   shared parse helpers, e.g. `parse_quantity`, live in `search_worker_base/parsing.py`.)
 3. `app/services/nc_worker/sighting_writer.py` — same, NetComponents worker.
    `app/services/tbf_worker/sighting_writer.py` — same, The Broker Forum worker (ACTIVE: logs in with member creds and captures the real seller `vendor_name` + `vendor_phone` from the authenticated listing — logged-out, TBF anonymizes the seller to "TBS Member"). The session/circuit-breaker key on a POSITIVE, fail-safe logged-in marker (the "Sign out" control present, `session_manager.LOGGED_IN_MARKER`); never on "TBS Member" text, which is the logged-OUT anonymized company label.
 4. `app/routers/sources.py` — email-attachment import (ALSO the HUMAN_DIRECT/O3
@@ -1689,6 +1681,14 @@ Build-Quote tab (no schema change):
   omission. `document_service.generate_quote_report_pdf` now renders
   `quote_report.html` from this context, so the customer PDF cannot leak a
   vendor name.
+
+The quote header-totals re-roll after a line mutation also lives here:
+`recalc_quote_totals(db, quote)` (simplify sweep — moved out of
+`routers/htmx/quotes.py`) recomputes `quote.subtotal`/`total_cost`/
+`total_margin_pct` from the QuoteLine rows AND rebuilds `quote.line_items` (the
+JSON the sent email/PDF render rows from) so the OQ-12 fix holds; called before
+commit by every line-mutation route (`htmx/quotes.py` line handlers,
+`htmx/offers/crud.py::create_quote_from_offers`).
 
 **Build-Quote tab (in-workspace single-stage assembly — Chunk B).** The sales
 quote-builder modal is reshaped into a **Build Quote** tab on the requisition
@@ -2661,6 +2661,14 @@ the Profile-tab toggle. Suppression is at the firing site only: the calling `not
 function still writes the recipient's in-app `activity_log` row, so nothing is lost
 in-app — only the email channel is silenced for that user.
 
+**External sends as a borrowed admin mailbox (`services/admin_mailer.py`, simplify
+sweep).** The sends that go to an external/group address rather than a logged-in
+user (`buyplan_notifications.notify_stock_sale_approved`,
+`prepayment_notifications._send_group_email`) share one home for the "borrow an
+admin with a live delegated Graph token" policy: who qualifies as sender, the token
+refresh, skip-and-log when no admin token is live, and `saveToSentItems="false"` —
+there is NO app-token sendMail path.
+
 **Reporting fold.** The retired `/v2/reporting` page's analytics now live where the work
 happens: the **Supervise** lens strip (open value / avg margin / approvals / halted /
 overdue / flagged counts), the **Sales Hub** pipeline chip (`forecast_service.pipeline_summary`
@@ -3133,7 +3141,7 @@ not requisition-scoped.
 Settings → Profile lets a user edit their own display name, 8x8 extension, and
 notification preferences. All three handlers live in `htmx_views.py`, take
 `require_user` (the current user, NOT admin-only), commit, and emit a `showToast`
-HX-Trigger via the shared `settings_toast()` helper.
+HX-Trigger via the shared `set_toast()` helper (`routers/htmx/_shared.py`).
 
 ```
 POST /api/user/profile            (form: name, extension)
@@ -3141,7 +3149,7 @@ POST /api/user/profile            (form: name, extension)
     +---> name.strip(): empty OR >255 chars -> 400 JSON {error, status_code, request_id}
     +---> extension.strip(): >20 chars       -> 400 JSON {error, ...}
     +---> sets user.name + user.eight_by_eight_extension (empty extension clears it)
-    +---> db.commit(); settings_toast("Profile updated.") -> 200 (empty body + HX-Trigger)
+    +---> db.commit(); set_toast("Profile updated.") -> 200 (empty body + HX-Trigger)
 
 POST /api/user/toggle-buyplan-email
     htmx_views.toggle_buyplan_email()
@@ -3157,7 +3165,7 @@ POST /api/user/toggle-new-offer-alert
 ```
 
 These clone the existing `toggle_8x8` (`POST /api/user/toggle-8x8`) pattern but route
-their toast through `settings_toast()`.
+their toast through `set_toast()`.
 
 ---
 
@@ -3276,7 +3284,7 @@ extension — not a standard form POST). On success the card re-fetches via
 
 **Feedback & safety polish (Task 5):**
 - **Success toasts** — `activate` and `credentials` handlers attach a `showToast`
-  HX-Trigger via `htmx_views.settings_toast` (lazy import to avoid a circular import):
+  HX-Trigger via the shared `htmx/_shared.set_toast`:
   "Key saved." / "Credentials saved." / "<name> enabled/disabled." Clay `disconnect`
   (router `clay_oauth.py`) sets the same HX-Trigger on its 302 ("Clay disconnected.").
 - **Destructive confirms** (`hx-confirm`, client-side) — Clay **Disconnect** ("Disconnect
@@ -3764,7 +3772,7 @@ merges different-`account_owner_id` accounts) are reused AS-IS.
   names never render as twin buttons). Both merge endpoints now re-render the whole
   Data Ops partial via `_render_data_ops` into `#settings-content` (so pairs referencing
   the just-merged entity drop without a manual refresh) and surface the kept-name /
-  failure message via a `settings_toast` `HX-Trigger` rather than swapping a `<p>` into
+  failure message via a `set_toast` `HX-Trigger` rather than swapping a `<p>` into
   the row.
 - **Click-merge bug fix (root cause):** the merge buttons used to be wrapped in a dead
   `x-data="{ merged: false }"` + `<template x-if="!merged" x-cloak>` guard. `merged` was
@@ -4178,11 +4186,13 @@ reload/share/Back — never a `/v2/partials/...` fragment URL.**
       no-ops; origination Cancel pushes nothing; best-match cards render link
       attrs only when the URL map + id resolve (bm_dead guard).
 
-6. Mobile shell: bottom nav = 4 primary (Sales Hub, Approvals, Search,
-    Tasks) + More sheet holding the rest (same hx/access/badge wiring); the
-    workspace ↑ List chip is mounted once in _workspace_split.html outside
-    #aw-pane (sticky top-12 under the topbar) so every pane type has it; one
-    breakpoint (768 = Tailwind md) shared by CSS and JS.
+6. Mobile shell: the bottom bar is THE primary navigation and holds every
+    module tab (Sales Hub, Sightings, Materials, Search, Approvals, Resell,
+    CRM, Proactive, Prospect, Tasks) + a More menu (Settings / Sign out only).
+    Modules are never demoted into More — owner directive 2026-08-20, pinned by
+    tests/test_nav_wayfinding.py::test_bottom_bar_holds_all_primary_modules.
+    The workspace ↑ List chip is mounted once in _workspace_split.html outside
+    #aw-pane (sticky top-12 under the topbar) so every pane type has it.
 
 7. Identity: topbar renders a current-view label kept fresh from
     htmx:pushed-into-history / htmx:replaced-in-history via a URL-prefix map;
@@ -6036,7 +6046,7 @@ per-caller constants. Pure data/lookup module, no I/O.
   correction: T6 (manual buyer entry) moved from −10 to +3 — a human-verified manual
   entry now outranks T3 (anonymous marketplace scrape).
 - Source-type category sets (`AUTHORIZED_SOURCES`/`API_SOURCES`/`MARKETPLACE_SOURCES`/
-  `EMAIL_SOURCES`/`MANUAL_SOURCES`/`HISTORY_SOURCES`) so `evidence_tiers.py` (tier
+  `EMAIL_SOURCES`/`HISTORY_SOURCES`) so `evidence_tiers.py` (tier
   assignment) and `services/sourcing_leads.py` (`_source_reliability` = base + tier
   bonus) share one membership list instead of drifting copies.
 - `VENDOR_RELIABILITY_UNKNOWN` (25.0) / `VENDOR_RELIABILITY_KNOWN_NO_SCORE` (50.0) —
@@ -6558,11 +6568,14 @@ next click clears).
 
 The registry API is uniform: `begin` (claim / double-enqueue guard), `finish`
 (record terminal outcome), `is_running`, `consume_outcome` (pop-once), `clear`.
+The mechanics live in ONE shared class, `app/utils/run_registry.py::RunRegistry`
+(generic over the outcome type); each feature module below just instantiates its
+own module-level singleton(s) and keeps its outcome dataclass / string constants.
 The registries in use:
 
 | Registry module | Singleton(s) | Action / trigger |
 |-----------------|--------------|------------------|
-| `material_enrich_runs.py` | `enrich_runs` **+** `crosses_runs` (two `_RunRegistry` singletons) | Material-card "Enrich" and "Find Crosses"/"Refresh" (`materials.py`) |
+| `material_enrich_runs.py` | `enrich_runs` **+** `crosses_runs` (two `RunRegistry` singletons; keeps the historical `finish(id, *, blocked=)` signature) | Material-card "Enrich" and "Find Crosses"/"Refresh" (`materials.py`) |
 | `company_enrich_runs.py` | `company_enrich_runs` | Account (Company) "Enrich" (`routers/crm/enrichment.py`) |
 | `contact_discovery_runs.py` | `contact_discovery_runs` | Account "Find Contacts" contact discovery (`routers/htmx/companies/contacts.py`) — deliberately separate from `company_enrich_runs` |
 | `vendor_contact_runs.py` | `vendor_contact_runs` | Vendor "Find Contacts" (`routers/htmx/vendors.py`) |
@@ -6593,7 +6606,7 @@ registry.)
 | Tags | 4 | List, entity tags |
 | Activity | 14 | Log calls, timeline, dashboards |
 | Admin | 15 | Users, config, diagnostics, maintenance |
-| Tickets | 12 | Error reports, trouble tickets, AI analysis; **admin-gated triage vs. open submission**: the maintainer triage console (`GET /v2/partials/trouble-tickets/workspace`, `.../list`, `.../{id}` and screenshot `GET /api/trouble-tickets/{id}/screenshot`) is `require_admin` (also hidden behind `{% if is_admin %}` Tickets tab in settings/index.html — non-admins can't see or reach it, closing the cross-user report leak), while the floating "Report a Problem" submission flow stays open to any login: `GET /api/trouble-tickets/form`, `POST /api/trouble-tickets/submit`, `POST /api/trouble-tickets` + `POST /api/error-reports` remain `require_user`. **In-shell triage wiring**: the Tickets console lives inside the Settings shell — `_build_ticket_list_context(db, status)` (in htmx_views) is the single list query+grouping helper shared by `GET .../list` and `POST /api/trouble-tickets/analyze` (analyze renders+returns the freshly-grouped `list.html` so the `innerHTML` swap into `#ticket-list` shows results — no more empty body + dead `HX-Trigger: ticketsUpdated`). The logical `status="open"` filter expands to `(submitted, in_progress)` so in-progress tickets stay under the workspace's "Open" pill. Drill-in rows/detail target `#settings-content` (no `#main-content`, no `hx-push-url`); the legacy full-page `GET /v2/trouble-tickets` route redirects 303 → `/v2/settings?tab=tickets` (registered before the generic `v2_page` catch-all; `v2_page` threads `?tab=` through for settings and `settings/index.html` maps the active tab to its first-paint content URL so `tab=tickets` lazy-loads the workspace, not a non-existent `/settings/tickets`). The detail status `<select>` gates its "Status updated" toast on `r.ok` (+`.catch`) so a failed PATCH shows an error toast |
+| Tickets | 12 | Error reports, trouble tickets, AI analysis; **admin-gated triage vs. open submission**: the maintainer triage console (`GET /v2/partials/trouble-tickets/workspace`, `.../list`, `.../{id}` and screenshot `GET /api/trouble-tickets/{id}/screenshot`) is `require_admin` (also hidden behind `{% if is_admin %}` Tickets tab in settings/index.html — non-admins can't see or reach it, closing the cross-user report leak), while the floating "Report a Problem" submission flow stays open to any login: `GET /api/trouble-tickets/form`, `POST /api/trouble-tickets/submit`, `POST /api/trouble-tickets` + `POST /api/error-reports` remain `require_user`. **In-shell triage wiring**: the Tickets console lives inside the Settings shell — `_build_ticket_list_context(db, status)` (in `htmx/archive.py`) is the single list query+grouping helper shared by `GET .../list` and `POST /api/trouble-tickets/analyze` (analyze renders+returns the freshly-grouped `list.html` so the `innerHTML` swap into `#ticket-list` shows results — no more empty body + dead `HX-Trigger: ticketsUpdated`). The logical `status="open"` filter expands to `(submitted, in_progress)` so in-progress tickets stay under the workspace's "Open" pill. Drill-in rows/detail target `#settings-content` (no `#main-content`, no `hx-push-url`); the legacy full-page `GET /v2/trouble-tickets` route redirects 303 → `/v2/settings?tab=tickets` (registered before the generic `v2_page` catch-all; `v2_page` threads `?tab=` through for settings and `settings/index.html` maps the active tab to its first-paint content URL so `tab=tickets` lazy-loads the workspace, not a non-existent `/settings/tickets`). The detail status `<select>` gates its "Status updated" toast on `r.ok` (+`.catch`) so a failed PATCH shows an error toast |
 | Documents | 2 | Requisition PDF, quote PDF |
 | Quote Builder | 5 | Draft, save, send, signature |
 | Events | 1 | SSE stream |
@@ -7160,7 +7173,9 @@ Admin console (require_admin):  Settings → Tickets  (tab admin-gated)
        the two filters compose without client state — mirrors sightings/table.html).
        _row.html carries a bug/feature badge.
   GET  /api/trouble-tickets/{id}/screenshot                 (require_admin — closes IDOR)
-  POST /api/trouble-tickets/analyze          → claude_structured groups into RootCauseGroup
+  POST /api/trouble-tickets/analyze          → ticket_diagnosis_service.analyze_open_tickets
+       (claude_structured groups into RootCauseGroup + upserts the rows; moved out of
+       the router — error_reports.analyze_tickets just delegates and re-renders list.html)
   POST /api/trouble-tickets/{id}/diagnose    → ticket_diagnosis_service.diagnose_ticket
        (bugs only in the UI); returns _diagnosis.html + OOB _generated_prompt.html
   POST /api/trouble-tickets/{id}/generate-prompt → ticket_prompt_service.generate_ticket_prompt
@@ -7345,6 +7360,16 @@ section partials — `qp/_section_sales.html`, `_section_purchasing.html`, `_sec
   `sales_section_approved_at`/`purchasing_section_approved_at` on approve (cleared on reject).
 - *Serial CRUD:* `POST /v2/qp/{id}/serial` adds a `QpSerialEntry` (submitted_by = acting user),
   `DELETE …/serial/{entry_id}` removes it (404 if it belongs to another QP). Cascade with the QP.
+- *Serial paste import (AI):* the Serial section carries a collapsed "Paste packing list…" panel.
+  `POST /v2/qp/{id}/serial/parse` runs `qp_serial_paste_service.parse_serial_paste` (one
+  `claude_structured` fast-tier call, interactive `max_attempts=1`; verbatim-only prompt; rows
+  sanitized to the six `String(255)` fields, capped at 300) and renders
+  `qp/_serial_paste_preview.html` into `#qp-serial-paste-preview` — per-row checked checkboxes +
+  a hidden `rows_json`, NO db write. Confirm `POST`s `/v2/qp/{id}/serial/bulk`, which re-validates
+  `rows_json` server-side (400 on malformed/oversized), inserts only the checked indices via the
+  same `_coerce` as the single add (submitted_by = acting user), and swaps the refreshed
+  `#qp-section-serial` back (the preview disappears with it). AI failure renders an inline error
+  state with no confirm form; an empty paste never calls the AI.
 - *FRU pin/unpin:* `POST /v2/qp/{id}/fru` resolves `fru_norm` via `normalize_mpn_key`, checks the
   `(qp_id, fru_norm)` unique constraint (re-pin = no-op), and the section live-joins `FruLink` by
   `fru_norm` (`_fru_rows`) to show the related model/carrier/series edges; `DELETE …/fru/{lookup_id}`

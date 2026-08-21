@@ -180,8 +180,12 @@ def _find_mirror(db: Session, excess_line_item_id: int) -> Sighting | None:
     )
 
 
-def mirror_line(db: Session, line: ExcessLineItem) -> Sighting | None:
+def mirror_line(db: Session, line: ExcessLineItem, *, existing: Sighting | None = None) -> Sighting | None:
     """Upsert the mirrored Sighting for one ``ExcessLineItem``.
+
+    ``existing`` lets a caller that already ran :func:`_find_mirror` (sync_list_mirror's
+    revive check) hand over the row instead of paying a second identical lookup; when
+    omitted (or None — no mirror yet) the lookup runs here.
 
     Builds the row via ``sighting_from_row`` (the dict→ORM single source of truth) then
     sets the excess-specific fields the contract requires:
@@ -229,7 +233,8 @@ def mirror_line(db: Session, line: ExcessLineItem) -> Sighting | None:
         "date_code": line.date_code,
     }
 
-    existing = _find_mirror(db, line.id)
+    if existing is None:
+        existing = _find_mirror(db, line.id)
     if existing is None:
         sighting = sighting_from_row(requirement.id, row)
     else:
@@ -475,7 +480,7 @@ def sync_list_mirror(db: Session, excess_list: ExcessList) -> dict:
             # not (routine syncs must not fan out rebuilds; see docstring).
             prior = _find_mirror(db, line.id)
             was_live = prior is not None and not prior.is_unavailable
-            if mirror_line(db, line) is not None:
+            if mirror_line(db, line, existing=prior) is not None:
                 mirrored += 1
                 if not was_live:
                     revived_card_ids.add(line.material_card_id)

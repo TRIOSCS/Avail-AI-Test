@@ -18,9 +18,7 @@ Depends on: vendor_merge_service, company_merge_service, company_utils, claude_c
     vendor_utils.fuzzy_score_vendor (shared fuzzy scorer — never inline fuzzy)
 """
 
-import asyncio
 from collections.abc import Coroutine
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from loguru import logger
@@ -28,18 +26,16 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..models import VendorCard
+from ..utils.async_helpers import run_coro_blocking
 
 
 def _run_coro_sync[T](coro: Coroutine[Any, Any, T]) -> T:
-    """Run an async coroutine from sync code, even if an event loop is active."""
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(coro)
+    """Run an async coroutine from sync code, even if an event loop is active.
 
-    # Scheduler jobs run in an active loop; execute coroutine in a worker thread.
-    with ThreadPoolExecutor(max_workers=1) as ex:
-        return ex.submit(lambda: asyncio.run(coro)).result()
+    Thin delegate over the shared ``run_coro_blocking`` (scheduler jobs run in an
+    active loop; the coroutine executes in a worker thread there).
+    """
+    return run_coro_blocking(coro)
 
 
 def run_auto_dedup(db: Session) -> dict:
@@ -117,7 +113,17 @@ def _dedup_vendors(db: Session) -> int:
                     keep.display_name,
                 )
             elif score >= 92:
-                should_merge = _ai_confirm_vendor_merge(a.display_name, b.display_name, score)
+                if settings.auto_dedup_merge_enabled:
+                    should_merge = _ai_confirm_vendor_merge(a.display_name, b.display_name, score)
+                else:
+                    # Gated OFF: skip the paid Claude confirmation entirely — surface
+                    # the borderline candidate for human review instead.
+                    logger.info(
+                        "Auto-dedup gated: unconfirmed vendor candidate '{}' ~ '{}' (score={}) — review in Data Ops",
+                        remove.display_name,
+                        keep.display_name,
+                        score,
+                    )
 
             if should_merge and not settings.auto_dedup_merge_enabled:
                 # QC 2026-08-10 P0-3: irreversible merge is gated OFF by default —
@@ -183,7 +189,17 @@ def _dedup_companies(db: Session) -> int:
                 keep.name,
             )
         elif score >= 92:
-            should_merge = _ai_confirm_company_merge(keep.name, remove.name, keep.domain, remove.domain, score)
+            if settings.auto_dedup_merge_enabled:
+                should_merge = _ai_confirm_company_merge(keep.name, remove.name, keep.domain, remove.domain, score)
+            else:
+                # Gated OFF: skip the paid Claude confirmation entirely — surface the
+                # borderline candidate for human review instead.
+                logger.info(
+                    "Auto-dedup gated: unconfirmed company candidate '{}' ~ '{}' (score={}) — review in Data Ops",
+                    remove.name,
+                    keep.name,
+                    score,
+                )
 
         if should_merge and not settings.auto_dedup_merge_enabled:
             logger.info(

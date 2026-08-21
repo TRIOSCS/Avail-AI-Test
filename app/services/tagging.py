@@ -169,14 +169,15 @@ def classify_material_card(normalized_mpn: str, manufacturer: str | None, catego
     return result
 
 
-def get_or_create_brand_tag(manufacturer_name: str, db: Session) -> Tag:
-    """Find or create a brand Tag. Race-safe via savepoint retry.
+def _get_or_create_tag(name: str, tag_type: str, db: Session) -> Tag:
+    """Find or create a Tag of *tag_type*. Race-safe via savepoint retry.
 
     Case-insensitive dedup via func.lower(). Uses begin_nested() + IntegrityError catch
-    to handle concurrent inserts without TOCTOU race.
+    to handle concurrent inserts without TOCTOU race. The single implementation behind
+    ``get_or_create_brand_tag`` and ``get_or_create_segment_tag``.
     """
-    normalized = manufacturer_name.strip()
-    by_name = select(Tag).where(func.lower(Tag.name) == normalized.lower(), Tag.tag_type == "brand")
+    normalized = name.strip()
+    by_name = select(Tag).where(func.lower(Tag.name) == normalized.lower(), Tag.tag_type == tag_type)
 
     tag = db.execute(by_name).scalar_one_or_none()
     if tag:
@@ -184,13 +185,18 @@ def get_or_create_brand_tag(manufacturer_name: str, db: Session) -> Tag:
 
     try:
         with db.begin_nested():
-            tag = Tag(name=normalized, tag_type="brand", created_at=datetime.now(UTC))
+            tag = Tag(name=normalized, tag_type=tag_type, created_at=datetime.now(UTC))
             db.add(tag)
             db.flush()
         return tag
     except IntegrityError:
         # Concurrent insert won — savepoint rolled back, re-fetch
         return db.execute(by_name).scalar_one()
+
+
+def get_or_create_brand_tag(manufacturer_name: str, db: Session) -> Tag:
+    """Find or create a brand Tag (race-safe — see ``_get_or_create_tag``)."""
+    return _get_or_create_tag(manufacturer_name, "brand", db)
 
 
 def get_or_create_commodity_tag(commodity_name: str, db: Session) -> Tag | None:
@@ -328,26 +334,12 @@ def propagate_tags_to_entity(
 
 
 def get_or_create_segment_tag(name: str, db: Session) -> Tag:
-    """Find or create a Tag with tag_type='segment'. Case-insensitive dedup.
+    """Find or create a Tag with tag_type='segment' (race-safe — see
+    ``_get_or_create_tag``).
 
     Segment tags are created on-demand by reps (e.g. "OEM", "At-risk", "Key-target").
-    Race-safe via savepoint + IntegrityError retry.
     """
-    normalized = name.strip()
-    by_name = select(Tag).where(func.lower(Tag.name) == normalized.lower(), Tag.tag_type == "segment")
-
-    tag = db.execute(by_name).scalar_one_or_none()
-    if tag:
-        return tag
-
-    try:
-        with db.begin_nested():
-            tag = Tag(name=normalized, tag_type="segment", created_at=datetime.now(UTC))
-            db.add(tag)
-            db.flush()
-        return tag
-    except IntegrityError:
-        return db.execute(by_name).scalar_one()
+    return _get_or_create_tag(name, "segment", db)
 
 
 def assign_segment_tag(company_id: int, tag_id: int, db: Session) -> EntityTag:

@@ -22,7 +22,7 @@ NOT_NONE = object()
 
 
 def _patch_routed(result, captured=None):
-    """Patch routed_structured with an async stub returning ``result``.
+    """Patch claude_structured with an async stub returning ``result``.
 
     If ``captured`` (a list) is given, each call's prompt is appended to it.
     """
@@ -32,7 +32,7 @@ def _patch_routed(result, captured=None):
             captured.append(prompt)
         return result
 
-    return patch("app.services.freeform_parser_service.routed_structured", new=_stub)
+    return patch("app.services.freeform_parser_service.claude_structured", new=_stub)
 
 
 def _assert_field(actual, expected):

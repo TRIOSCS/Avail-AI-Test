@@ -3,6 +3,7 @@
    Called by: POST /v2/partials/requisitions/{id}/parse-offer.
    Depends on: HTMX, Alpine.js.
 #}
+{% from "htmx/partials/shared/_macros.html" import spinner -%}
 <div class="space-y-4">
 
   {# Summary banner #}
@@ -94,10 +95,7 @@
               @htmx:before-request="saving = true"
               @htmx:after-request="saving = false"
               class="btn-primary btn-sm">
-        <svg x-show="saving" x-cloak class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
-          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-        </svg>
+        {{ spinner('h-4 w-4 animate-spin', attrs='x-show="saving" x-cloak') }}
         <span x-text="saving ? 'Saving...' : 'Save ' + cards + ' Offer' + (cards !== 1 ? 's' : '')"></span>
       </button>
       <button type="button" @click="$el.closest('#parse-area').innerHTML = ''"

@@ -15,7 +15,7 @@ from ..http_client import http
 from ..utils import safe_float
 from ._core_attrs import clean_str, generic_attribute, map_lifecycle, safe_pin_count
 from .errors import ConnectorAuthError, ConnectorRateLimitError
-from .sources import BaseConnector
+from .sources import BaseConnector, best_price_break
 
 # Body markers meaning a 403 is a transient rate cap (e.g. "Maximum calls per minute
 # exceeded"), not a credential rejection. Mouser returns HTTP 403 for BOTH.
@@ -128,20 +128,8 @@ class MouserConnector(BaseConnector):
 
             # Price breaks
             price = None
-            price_breaks = part.get("PriceBreaks", [])
-            if price_breaks:
-                # Coalesce a present-but-null break quantity (None < int → TypeError,
-                # erroring the whole PN) to a large sentinel so a null row sorts last.
-                best = min(
-                    price_breaks,
-                    key=lambda p: (
-                        p.get("Quantity")
-                        or p.get("BreakQuantity")
-                        or p.get("breakQuantity")
-                        or p.get("quantity")
-                        or 999999
-                    ),
-                )
+            best = best_price_break(part.get("PriceBreaks", []))
+            if best is not None:
                 price_str = best.get("Price", "")
                 if price_str:
                     price = safe_float(price_str.replace("$", "").replace(",", ""))

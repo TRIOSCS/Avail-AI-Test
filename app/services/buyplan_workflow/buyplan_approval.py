@@ -892,9 +892,8 @@ def _is_manager_or_admin(user: User) -> bool:
     """True for MANAGER/ADMIN (mirrors dependencies.is_manager_or_admin; inlined to
     avoid a service→dependencies import cycle).
 
-    Duplicated (not imported) from ``buyplan_lines._is_manager_or_admin`` — both are the
-    same one-line role check and importing across for a single boolean predicate is not
-    worth a cross-module edge; keep in sync if the role set ever changes.
+    The package's single copy of this predicate — ``buyplan_lines`` imports it from
+    here alongside the other approval helpers it already depends on.
     """
     return user.role in (UserRole.MANAGER, UserRole.ADMIN)
 

@@ -1,15 +1,20 @@
-{# _custom_fields.html — "Additional details" key:value pairs for a company or contact.
+{# _custom_fields.html — "Additional details" key:value pairs for a company, contact, or vendor.
    Renders existing label:value rows with × remove, plus an "Add field" affordance.
    All mutations HTMX-swap this container outerHTML.
 
-   Receives: entity ("company"|"contact"), obj (Company|SiteContact), company_id (int).
-   Called by: customers/detail.html (company) and _contact_macros.html (contact).
-   Depends on: htmx_views.py custom-fields routes.
+   Receives: entity ("company"|"contact"|"vendor"), obj (Company|SiteContact|VendorCard),
+             company_id (int; company/contact entities only).
+   Called by: customers/detail.html (company), _contact_macros.html (contact),
+              vendors/overview_tab.html (vendor).
+   Depends on: htmx_views.py + vendors.py custom-fields routes.
 #}
 
 {% if entity == 'contact' %}
   {% set _post_url = '/v2/partials/customers/' ~ company_id ~ '/contacts/' ~ obj.id ~ '/custom-fields' %}
   {% set _del_base = '/v2/partials/customers/' ~ company_id ~ '/contacts/' ~ obj.id ~ '/custom-fields/' %}
+{% elif entity == 'vendor' %}
+  {% set _post_url = '/v2/partials/vendors/' ~ obj.id ~ '/custom-fields' %}
+  {% set _del_base = '/v2/partials/vendors/' ~ obj.id ~ '/custom-fields/' %}
 {% else %}
   {% set _post_url = '/v2/partials/customers/' ~ company_id ~ '/custom-fields' %}
   {% set _del_base = '/v2/partials/customers/' ~ company_id ~ '/custom-fields/' %}

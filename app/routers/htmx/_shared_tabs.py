@@ -30,7 +30,6 @@ Depends on: app.models, app.dependencies, app.database, app.services.quote_requi
 from datetime import UTC, datetime
 
 from fastapi import Depends, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload, selectinload
 
@@ -52,7 +51,37 @@ from ...models.vendors import VendorContact
 from ...services.quote_requisitions import quotes_for_requisition
 from ...template_env import template_response
 from .._lookup_helpers import get_requisition_or_404, get_vendor_card_or_404
-from ._shared import _DASH, _base_ctx
+from ._shared import _base_ctx
+
+# Activity type→section buckets shared by the company AND vendor Activity tabs —
+# single source so the two tabs can never desynchronize (ISS-030 parity).
+_CALLS = frozenset({ActivityType.CALL_LOGGED})
+_EMAILS = frozenset({ActivityType.EMAIL_SENT, ActivityType.EMAIL_RECEIVED})
+_MEETINGS = frozenset({ActivityType.TEAMS_MESSAGE, ActivityType.WECHAT_MESSAGE, ActivityType.MEETING})
+_NOTES = frozenset({ActivityType.NOTE, ActivityType.SALES_NOTE, ActivityType.CONTACT_NOTE})
+
+
+def _bucket_activities(activities) -> dict[str, list]:
+    """Bucket ActivityLog rows into the type sections both Activity tabs render.
+
+    Returns {"Calls": [...], "Emails": [...], "Meetings": [...], "Notes": [...],
+    "Other": [...]} preserving input order. The company tab prepends its RFQ-contact
+    dicts to the Emails section after calling this (account-only merge).
+    """
+    sections: dict[str, list] = {"Calls": [], "Emails": [], "Meetings": [], "Notes": [], "Other": []}
+    for a in activities:
+        at = a.activity_type
+        if at in _CALLS:
+            sections["Calls"].append(a)
+        elif at in _EMAILS:
+            sections["Emails"].append(a)
+        elif at in _MEETINGS:
+            sections["Meetings"].append(a)
+        elif at in _NOTES:
+            sections["Notes"].append(a)
+        else:
+            sections["Other"].append(a)
+    return sections
 
 
 async def requisition_tab(
@@ -176,8 +205,6 @@ async def company_tab(
     avoid a load-time cycle with companies.py (which imports this function to register
     its route).
     """
-    import html as html_mod
-
     from ...dependencies import can_manage_account
     from ...models import Company, CustomerSite, Requisition
     from ...models.offers import Contact as RfqContact
@@ -190,6 +217,7 @@ async def company_tab(
         _company_buy_plans_query,
         _company_quotes_query,
     )
+    from .companies.detail import _company_requisition_clause
 
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
@@ -238,47 +266,17 @@ async def company_tab(
         return template_response("htmx/partials/customers/tabs/contacts_tab.html", ctx)
 
     elif tab == "requisitions":
-        from sqlalchemy import or_
-
         reqs = (
             db.query(Requisition)
-            .filter(
-                or_(
-                    Requisition.company_id == company.id,
-                    sqlfunc.lower(sqlfunc.trim(Requisition.customer_name)) == company.name.lower().strip(),
-                )
-            )
+            .filter(_company_requisition_clause(company))
             .order_by(Requisition.created_at.desc().nullslast())
             .limit(50)
             .all()
         )
-        rows = []
-        for r in reqs:
-            date_str = r.created_at.strftime("%b %d, %Y") if r.created_at else "—"
-            rows.append(f"""<tr class="hover:bg-brand-50 cursor-pointer"
-                hx-get="/v2/partials/requisitions/{r.id}"
-                hx-target="#main-content"
-                hx-push-url="/v2/requisitions/{r.id}">
-              <td class="px-4 py-2 text-sm font-medium text-brand-500">{html_mod.escape(r.name or "")}</td>
-              <td class="px-4 py-2 text-sm text-gray-500">{html_mod.escape(r.status or _DASH)}</td>
-              <td class="px-4 py-2 text-sm text-gray-500">{date_str}</td>
-            </tr>""")
-        if rows:
-            html = f"""<div class="overflow-x-auto">
-              <table class="min-w-full divide-y divide-gray-200">
-                <thead class="bg-gray-50">
-                  <tr>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Created</th>
-                  </tr>
-                </thead>
-                <tbody class="divide-y divide-gray-200">{"".join(rows)}</tbody>
-              </table>
-            </div>"""
-        else:
-            html = '<div class="p-8 text-center"><p class="text-sm text-gray-500">No requisitions for this company.</p></div>'
-        return HTMLResponse(html)
+        return template_response(
+            "htmx/partials/customers/tabs/requisitions_tab.html",
+            {"request": request, "reqs": reqs},
+        )
 
     elif tab == "quotes":
         cq = _company_quotes_query(db, company)
@@ -313,20 +311,8 @@ async def company_tab(
         return template_response("htmx/partials/customers/tabs/history_tab.html", ctx)
 
     else:  # activity
-        from sqlalchemy import or_ as or_clause
-
         # Find all requisition IDs linked to this company (via FK or name match)
-        req_ids = [
-            r.id
-            for r in db.query(Requisition.id)
-            .filter(
-                or_clause(
-                    Requisition.company_id == company.id,
-                    sqlfunc.lower(sqlfunc.trim(Requisition.customer_name)) == company.name.lower().strip(),
-                )
-            )
-            .all()
-        ]
+        req_ids = [r.id for r in db.query(Requisition.id).filter(_company_requisition_clause(company)).all()]
 
         # RFQ contacts across company's requisitions (canonical RFQ source)
         rfq_contacts: list = []
@@ -364,29 +350,13 @@ async def company_tab(
         # Bucket activities into type-sections (template renders by section).
         # Emails section also carries RFQ contact items (tagged with _is_rfq=True);
         # they are merged and sorted newest-first in the template.
-        _CALLS = frozenset({ActivityType.CALL_LOGGED})
-        _EMAILS = frozenset({ActivityType.EMAIL_SENT, ActivityType.EMAIL_RECEIVED})
-        _MEETINGS = frozenset({ActivityType.TEAMS_MESSAGE, ActivityType.WECHAT_MESSAGE, ActivityType.MEETING})
-        _NOTES = frozenset({ActivityType.NOTE, ActivityType.SALES_NOTE, ActivityType.CONTACT_NOTE})
+        sections = _bucket_activities(activities)
 
-        sections: dict[str, list] = {"Calls": [], "Emails": [], "Meetings": [], "Notes": [], "Other": []}
-
-        # Wrap RFQ contacts as tagged dicts so the template can branch on _is_rfq
-        for c in rfq_contacts:
-            sections["Emails"].append({"_is_rfq": True, "raw": c, "req": req_map.get(c.requisition_id)})
-
-        for a in activities:
-            at = a.activity_type
-            if at in _CALLS:
-                sections["Calls"].append(a)
-            elif at in _EMAILS:
-                sections["Emails"].append(a)
-            elif at in _MEETINGS:
-                sections["Meetings"].append(a)
-            elif at in _NOTES:
-                sections["Notes"].append(a)
-            else:
-                sections["Other"].append(a)
+        # Wrap RFQ contacts as tagged dicts so the template can branch on _is_rfq —
+        # prepended so their pre-sort order matches the original assembly exactly.
+        sections["Emails"] = [
+            {"_is_rfq": True, "raw": c, "req": req_map.get(c.requisition_id)} for c in rfq_contacts
+        ] + sections["Emails"]
 
         # Sort Emails section: RFQ dicts use raw.created_at; ActivityLog uses created_at
         import datetime as _dt_mod
@@ -418,6 +388,61 @@ async def company_tab(
         return template_response("htmx/partials/customers/tabs/activity_tab.html", ctx)
 
 
+def _vendor_overview_data(db: Session, vendor, mpn: str) -> dict:
+    """Assemble the vendor overview data shared by the vendor detail header
+    (vendors.vendor_detail_partial) and vendor_tab's overview branch.
+
+    Returns recent_sightings (mpn-filterable, latest 10), contacts (top 20 by
+    interaction count), the safety_* fields populated from the newest SourcingLead when
+    one exists, and mpn_filter. vendor_detail_partial overrides
+    safety_score/safety_available (the detail header shows band/summary/flags only).
+    """
+    from ...utils.normalization import normalize_mpn
+
+    sightings_query = db.query(Sighting).filter(Sighting.vendor_name_normalized == vendor.normalized_name)
+    if mpn.strip():
+        norm = normalize_mpn(mpn)
+        if norm:
+            sightings_query = sightings_query.filter(Sighting.normalized_mpn == norm)
+    recent_sightings = sightings_query.order_by(Sighting.created_at.desc().nullslast()).limit(10).all()
+
+    # Safety data from the most recent SourcingLead
+    safety_band = None
+    safety_summary = None
+    safety_flags = None
+    safety_score = None
+    safety_available = False
+    lead = (
+        db.query(SourcingLead)
+        .filter(SourcingLead.vendor_name_normalized == vendor.normalized_name)
+        .order_by(SourcingLead.created_at.desc())
+        .first()
+    )
+    if lead:
+        safety_band = lead.vendor_safety_band
+        safety_summary = lead.vendor_safety_summary
+        safety_flags = lead.vendor_safety_flags
+        safety_score = lead.vendor_safety_score
+        safety_available = True
+    contacts = (
+        db.query(VendorContact)
+        .filter(VendorContact.vendor_card_id == vendor.id)
+        .order_by(VendorContact.interaction_count.desc().nullslast())
+        .limit(20)
+        .all()
+    )
+    return {
+        "recent_sightings": recent_sightings,
+        "contacts": contacts,
+        "safety_band": safety_band,
+        "safety_summary": safety_summary,
+        "safety_flags": safety_flags,
+        "safety_score": safety_score,
+        "safety_available": safety_available,
+        "mpn_filter": mpn.strip().upper() if mpn.strip() else None,
+    }
+
+
 async def vendor_tab(
     request: Request,
     vendor_id: int,
@@ -433,12 +458,9 @@ async def vendor_tab(
     a load-time cycle with vendors.py (which imports this function to register its
     route).
     """
-    import html as html_mod
-
     from ...models.offers import Contact as RfqContact
     from ...models.offers import VendorResponse
     from ...services.task_service import get_open_tasks_for_vendor_card
-    from ...utils.normalization import normalize_mpn
     from .vendors import vendor_reviews
 
     vendor = get_vendor_card_or_404(db, vendor_id)
@@ -462,50 +484,7 @@ async def vendor_tab(
     ctx["vendor"] = vendor
 
     if tab == "overview":
-        sightings_query = db.query(Sighting).filter(Sighting.vendor_name_normalized == vendor.normalized_name)
-        if mpn.strip():
-            norm = normalize_mpn(mpn)
-            if norm:
-                sightings_query = sightings_query.filter(Sighting.normalized_mpn == norm)
-
-        recent_sightings = sightings_query.order_by(Sighting.created_at.desc().nullslast()).limit(10).all()
-        # Safety data
-        safety_band = None
-        safety_summary = None
-        safety_flags = None
-        safety_score = None
-        safety_available = False
-        lead = (
-            db.query(SourcingLead)
-            .filter(SourcingLead.vendor_name_normalized == vendor.normalized_name)
-            .order_by(SourcingLead.created_at.desc())
-            .first()
-        )
-        if lead:
-            safety_band = lead.vendor_safety_band
-            safety_summary = lead.vendor_safety_summary
-            safety_flags = lead.vendor_safety_flags
-            safety_score = lead.vendor_safety_score
-            safety_available = True
-        contacts = (
-            db.query(VendorContact)
-            .filter(VendorContact.vendor_card_id == vendor_id)
-            .order_by(VendorContact.interaction_count.desc().nullslast())
-            .limit(20)
-            .all()
-        )
-        ctx.update(
-            {
-                "recent_sightings": recent_sightings,
-                "contacts": contacts,
-                "safety_band": safety_band,
-                "safety_summary": safety_summary,
-                "safety_flags": safety_flags,
-                "safety_score": safety_score,
-                "safety_available": safety_available,
-                "mpn_filter": mpn.strip().upper() if mpn.strip() else None,
-            }
-        )
+        ctx.update(_vendor_overview_data(db, vendor, mpn))
         # Re-use the inline overview from the detail template
         # by rendering just the overview portion
         return template_response("htmx/partials/vendors/overview_tab.html", ctx)
@@ -562,36 +541,10 @@ async def vendor_tab(
         return template_response("htmx/partials/vendors/emails_tab.html", ctx)
 
     elif tab == "analytics":
-        html = f"""<div class="space-y-6">
-          <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
-            <div class="bg-white rounded-lg border border-gray-200 p-4 text-center">
-              <p class="text-2xl font-bold text-brand-500">{f"{(vendor.overall_win_rate or 0) * 100:.0f}%"}</p>
-              <p class="text-xs text-gray-500 mt-1">Win Rate</p>
-            </div>
-            <div class="bg-white rounded-lg border border-gray-200 p-4 text-center">
-              <p class="text-2xl font-bold text-brand-500">{f"{(vendor.response_rate or 0) * 100:.0f}%"}</p>
-              <p class="text-xs text-gray-500 mt-1">Response Rate</p>
-            </div>
-            <div class="bg-white rounded-lg border border-gray-200 p-4 text-center">
-              <p class="text-2xl font-bold text-brand-500">{f"{vendor.vendor_score or 0:.0f}"}</p>
-              <p class="text-xs text-gray-500 mt-1">Vendor Score</p>
-            </div>
-            <div class="bg-white rounded-lg border border-gray-200 p-4 text-center">
-              <p class="text-2xl font-bold text-gray-900">{vendor.sighting_count or 0}</p>
-              <p class="text-xs text-gray-500 mt-1">Sightings</p>
-            </div>
-            <div class="bg-white rounded-lg border border-gray-200 p-4 text-center">
-              <p class="text-2xl font-bold text-gray-900">{f"{vendor.avg_response_hours or 0:.0f}"}</p>
-              <p class="text-xs text-gray-500 mt-1">Avg Response Hours</p>
-            </div>
-            <div class="bg-white rounded-lg border border-gray-200 p-4 text-center">
-              <p class="text-2xl font-bold text-gray-900">{f"{vendor.engagement_score or 0:.0f}"}</p>
-              <p class="text-xs text-gray-500 mt-1">Engagement Score</p>
-            </div>
-          </div>
-          <p class="text-sm text-gray-500 text-center">Analytics data builds as you interact with this vendor.</p>
-        </div>"""
-        return HTMLResponse(html)
+        return template_response(
+            "htmx/partials/vendors/tabs/analytics_tab.html",
+            {"request": request, "vendor": vendor},
+        )
 
     elif tab == "reviews":
         return await vendor_reviews(request=request, vendor_id=vendor_id, user=user, db=db)
@@ -607,24 +560,7 @@ async def vendor_tab(
         # Bucket activities into type-sections (the template renders by section), mirroring
         # the account Activity tab. Vendors have no RFQ-contact merge (account-only), so
         # this is a straight type bucketing of the vendor's ActivityLog rows.
-        _CALLS = frozenset({ActivityType.CALL_LOGGED})
-        _EMAILS = frozenset({ActivityType.EMAIL_SENT, ActivityType.EMAIL_RECEIVED})
-        _MEETINGS = frozenset({ActivityType.TEAMS_MESSAGE, ActivityType.WECHAT_MESSAGE, ActivityType.MEETING})
-        _NOTES = frozenset({ActivityType.NOTE, ActivityType.SALES_NOTE, ActivityType.CONTACT_NOTE})
-
-        sections: dict[str, list] = {"Calls": [], "Emails": [], "Meetings": [], "Notes": [], "Other": []}
-        for a in activities:
-            at = a.activity_type
-            if at in _CALLS:
-                sections["Calls"].append(a)
-            elif at in _EMAILS:
-                sections["Emails"].append(a)
-            elif at in _MEETINGS:
-                sections["Meetings"].append(a)
-            elif at in _NOTES:
-                sections["Notes"].append(a)
-            else:
-                sections["Other"].append(a)
+        sections = _bucket_activities(activities)
 
         # has_any_activity: drives empty-state vs. sections in the template
         has_any_activity = bool(activities)
@@ -662,33 +598,7 @@ async def vendor_tab(
             .limit(50)
             .all()
         )
-        rows = []
-        for o in offers:
-            price_str = f"${o.unit_price:,.4f}" if o.unit_price else "RFQ"
-            date_str = o.created_at.strftime("%b %d, %Y") if o.created_at else _DASH
-            qty_str = f"{o.qty_available:,}" if o.qty_available else _DASH
-            rows.append(f"""<tr class="hover:bg-brand-50">
-              <td class="px-4 py-2 text-sm font-mono text-gray-900">{html_mod.escape(o.mpn or _DASH)}</td>
-              <td class="px-4 py-2 text-sm text-gray-500 text-right">{qty_str}</td>
-              <td class="px-4 py-2 text-sm text-right">{price_str}</td>
-              <td class="px-4 py-2 text-sm text-gray-500">{html_mod.escape(o.lead_time or _DASH)}</td>
-              <td class="px-4 py-2 text-sm text-gray-500">{date_str}</td>
-            </tr>""")
-        if rows:
-            html = f"""<div class="overflow-x-auto">
-              <table class="min-w-full divide-y divide-gray-200">
-                <thead class="bg-gray-50">
-                  <tr>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">MPN</th>
-                    <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Qty</th>
-                    <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Price</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Lead Time</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-                  </tr>
-                </thead>
-                <tbody class="divide-y divide-gray-200">{"".join(rows)}</tbody>
-              </table>
-            </div>"""
-        else:
-            html = '<div class="p-8 text-center"><p class="text-sm text-gray-500">No offers from this vendor yet.</p></div>'
-        return HTMLResponse(html)
+        return template_response(
+            "htmx/partials/vendors/tabs/offers_tab.html",
+            {"request": request, "offers": offers},
+        )

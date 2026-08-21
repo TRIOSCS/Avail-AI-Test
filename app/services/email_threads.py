@@ -23,7 +23,13 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.models import Contact, Requirement, Sighting, VendorCard, VendorContact, VendorResponse
+from app.shared_constants import RFQ_SUBJECT_TAG_RE
 from app.utils.graph_client import GraphClient
+
+# Display-side strip of the canonical RFQ subject token (plus surrounding whitespace) —
+# composed from the shared pattern so a token-format change can never leave raw tokens
+# visible in thread subjects.
+_SUBJECT_TAG_STRIP_RE = re.compile(rf"\s*{RFQ_SUBJECT_TAG_RE.pattern}\s*")
 
 # ── In-memory cache ────────────────────────────────────────────────────
 # key → (timestamp, data)
@@ -357,7 +363,7 @@ async def fetch_threads_for_requirement(
     gc = GraphClient(user_token)
     threads: dict[str, dict] = {}  # conversation_id → thread summary
 
-    # ── Tier 1: ConversationId match via Contact records ──
+    # ── Tier 1 + 1b: ConversationId match via Contact and VendorResponse records ──
     contacts = (
         db.query(Contact)
         .filter(
@@ -366,17 +372,6 @@ async def fetch_threads_for_requirement(
         )
         .all()
     )
-    for contact in contacts:
-        conv_id = contact.graph_conversation_id
-        if conv_id and conv_id not in threads:
-            try:
-                external_msgs = await _fetch_conversation(gc, conv_id)
-                if external_msgs:
-                    threads[conv_id] = _build_thread_summary(conv_id, external_msgs, "conversation_id")
-            except Exception as e:
-                logger.warning(f"Graph query failed for conversationId {conv_id[:20]}: {e}")
-
-    # ── Tier 1b: ConversationId match via VendorResponse records ──
     vendor_responses = (
         db.query(VendorResponse)
         .filter(
@@ -385,15 +380,26 @@ async def fetch_threads_for_requirement(
         )
         .all()
     )
-    for vr in vendor_responses:
-        conv_id = vr.graph_conversation_id
-        if conv_id and conv_id not in threads:
-            try:
-                external_msgs = await _fetch_conversation(gc, conv_id)
-                if external_msgs:
-                    threads[conv_id] = _build_thread_summary(conv_id, external_msgs, "conversation_id")
-            except Exception as e:
-                logger.warning(f"Graph query failed for VR conversationId: {e}")
+    # One ordered, deduped id list (Contact ids first, then VendorResponse ids) fetched
+    # concurrently — a req with several sent RFQs pays ~one fetch's latency, not N.
+    conv_ids: list[str] = []
+    for record in [*contacts, *vendor_responses]:
+        conv_id = record.graph_conversation_id
+        if conv_id and conv_id not in conv_ids:
+            conv_ids.append(conv_id)
+    if conv_ids:
+        results = await asyncio.gather(
+            *[_fetch_conversation(gc, cid) for cid in conv_ids],
+            return_exceptions=True,
+        )
+        for conv_id, fetched in zip(conv_ids, results):
+            if isinstance(fetched, BaseException):
+                if not isinstance(fetched, Exception):
+                    raise fetched
+                logger.warning(f"Graph query failed for conversationId {conv_id[:20]}: {fetched}")
+                continue
+            if fetched:
+                threads[conv_id] = _build_thread_summary(conv_id, fetched, "conversation_id")
 
     # ── Tier 2: Subject [ref:{req_id}] token (also legacy [AVAIL-{req_id}]) ──
     req_id = requirement.requisition_id
@@ -494,7 +500,7 @@ def _build_thread_summary(conversation_id: str, messages: list[dict], matched_vi
     latest = sorted_msgs[0]
     subject = latest.get("subject", "(No Subject)")
     # Strip [ref:xxx] or legacy [AVAIL-xxx] tag for cleaner display
-    clean_subject = re.sub(r"\s*\[(?:ref:|AVAIL-)\d+\]\s*", " ", subject).strip()
+    clean_subject = _SUBJECT_TAG_STRIP_RE.sub(" ", subject).strip()
 
     return {
         "conversation_id": conversation_id,

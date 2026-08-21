@@ -7,6 +7,7 @@
    Layout is deliberately tight: the auto-captured screenshot is a compact,
    collapsed chip (no large empty box) and the technical context is summarised in
    one line, so the form stays focused on the one thing we ask the user to type. #}
+{% from "htmx/partials/shared/_macros.html" import spinner -%}
 {% set is_feature = ticket_type == 'feature' %}
 <div x-data="{ submitting: false, shotOpen: false }" class="p-5">
   <div class="flex items-center gap-3 mb-3">
@@ -79,10 +80,7 @@
             class="px-4 py-2 {{ 'bg-violet-500 hover:bg-violet-600' if is_feature else 'bg-rose-500 hover:bg-rose-600' }} text-white text-sm font-medium rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
       <span x-show="!submitting" x-cloak>{{ 'Submit Request' if is_feature else 'Submit Report' }}</span>
       <span x-show="submitting" x-cloak class="flex items-center gap-2">
-        <svg class="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-        </svg>
+        {{ spinner('animate-spin h-4 w-4') }}
         Submitting...
       </span>
     </button>

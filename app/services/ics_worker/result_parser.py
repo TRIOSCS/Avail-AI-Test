@@ -19,6 +19,8 @@ from dataclasses import dataclass
 
 from loguru import logger
 
+from ..search_worker_base.parsing import parse_quantity
+
 
 @dataclass
 class IcsSighting:
@@ -36,20 +38,6 @@ class IcsSighting:
     vendor_company_id: str = ""  # from OpenProfile(ID)
     in_stock: bool = False  # from Stock checkmark column
     uploaded_date: str = ""  # from .divDateGroup
-
-
-def parse_quantity(text: str) -> int | None:
-    """Parse ICS quantity string to int.
-
-    Handles commas, '+' suffix, empty.
-    """
-    if not text:
-        return None
-    cleaned = text.strip().rstrip("+").replace(",", "")
-    try:
-        return int(cleaned)
-    except (ValueError, TypeError):
-        return None
 
 
 def _empty_company() -> dict:

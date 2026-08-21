@@ -351,14 +351,14 @@ aggregated internally by `htmx_views.py` itself so `main.py` needed zero new mou
   to a chosen rep; the O-rework successor to the retired reclaim/reassign controls). Owns the
   prospect-context helpers
   (`_prospect_card_ctx`/`_prospect_detail_ctx`/`_prospect_stats_ctx`/`_prospect_action_response`/
-  `_status_visible_under_filter`/`_wants_detail`/`_enrich_is_stale`/`_prospect_toast`).
+  `_status_visible_under_filter`/`_wants_detail`/`_enrich_is_stale`).
 - `app/routers/htmx/settings.py` — **tail split (settings/ops/user-mgmt slice)**: the
   `settings/ops-group|users|sources|system|profile|data-ops|connectors|api-keys` tabs,
   inbox scan-now, the `/api/user/*` toggle endpoints, connector test-all + card, and the CRM
   vendor/company merge + dedup admin actions (`/v2/partials/admin/*`) plus the admin api-health
   partial (real per-connector rows assembled by `app/services/connector_health.py`) +
-  data-ops partials. Owns `settings_toast` (re-imported by `routers/sources.py` and
-  `routers/admin/buy_plan_ops.py`) and `_run_inbox_scan_now` (imported by
+  data-ops partials. Toasts go through the shared `_shared.set_toast` (also used by
+  `routers/sources.py` and `routers/admin/buy_plan_ops.py`). Owns `_run_inbox_scan_now` (imported by
   `app/routers/htmx/requisitions_edit.py` because its poll-inbox route calls it).
 - `app/routers/htmx/materials.py` — **tail split (materials-partials slice; distinct from the
   domain router `app/routers/materials.py`)**: the faceted list + filter sidebars
@@ -381,8 +381,10 @@ aggregated internally by `htmx_views.py` itself so `main.py` needed zero new mou
 - `app/routers/htmx/archive.py` — **tail split (tasks/tickets lifecycle slice)**: trouble-ticket
   workspace/list/detail, account + contact + vendor tasks (add-form/create/list), task
   complete/delete/edit/snooze, and the account/contact + vendor activity add-note forms. Imports
-  `company_tab`/`vendor_tab` (its activity add-note routes re-render those tabs); `htmx_views.py`
-  re-imports `_build_ticket_list_context` for `error_reports.analyze_tickets`.
+  `company_tab`/`vendor_tab` (its activity add-note routes re-render those tabs);
+  `error_reports.analyze_tickets` imports `_build_ticket_list_context` from it for the
+  post-analyze list re-render (the analysis itself now lives in
+  `services/ticket_diagnosis_service.analyze_open_tickets`).
 - `app/routers/htmx/my_day.py` — **P4.3 final split (My Day / Tasks slice)**: the Tasks
   page (`GET /v2/partials/my-day` + filter-bar re-render) plus create/snooze/reopen
   mutations. Owns `_my_day_filtered_tasks`/`_my_day_results_response`; imports
@@ -501,6 +503,9 @@ authoritative reference. Static-analysis tests in
 | `_detail_empty.html` | partials/customers/ | Right-panel placeholder shown before any account is selected in the CDM workspace. |
 | `tabs/contacts_tab.html` | partials/customers/tabs/ | Contacts tab partial for company detail — default tab on `company_detail_partial`. Displays `contact_rows` (active SiteContacts across the company's active sites + legacy site-level contacts on active sites) and renders click-to-contact links (tel:/mailto:/Teams deep link/weixin://) with `data-outreach-log` attributes. |
 | `tabs/quotes_tab.html` | partials/customers/tabs/ | CRM account Quotes tab — Alpine status filter (all/draft/sent/won/lost). Quote set = union of site-linked and requisition-linked quotes via `_company_quotes_query`. Served at `GET /v2/partials/customers/{id}/tab/quotes`. |
+| `_offset_pager.html` | partials/shared/ | Shared offset-based Prev/Next pager + "{start}–{end} of {total}" count strip for the offset-paged lists (requisitions/customers-contacts/vendors/vendor-contacts/materials); page-based lists keep `shared/pagination.html`. Callers pass their Prev/Next control attributes as raw strings, so each list keeps its own hx-get/hx-vals wiring. (Simplify sweep.) |
+| `_task_widget.html` | partials/shared/ | One source for the account / contact / vendor task UI (panel, rows, add + edit form macros). The thin wrappers (`customers/_account_tasks.html` / `_contact_tasks.html`, `vendors/tabs/_vendor_tasks.html` + their `*_task_form` siblings) pass container ids and URL prefixes in, so the existing `#…-tasks-{id}` swap contracts are unchanged. (Simplify sweep.) |
+| `_doc_style.html` | templates/documents/ | Shared print stylesheet for the customer-facing PDF documents — included inside the `<style>` tag of `quote_report.html`, `bid_report.html`, and `rfq_summary.html` (resolved as `documents/_doc_style.html` in both the app-wide env and `document_service._jinja_env`). (Simplify sweep.) |
 
 ### Inline Editing
 

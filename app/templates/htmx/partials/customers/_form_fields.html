@@ -1,6 +1,6 @@
 {# _form_fields.html — Shared field macros for the company create/edit forms.
    Extracted from create_form.html and edit_form.html to remove copy-paste of the
-   account-owner <select>.
+   account-owner <select> and the plain label+input company field blocks.
 
    Call convention: the macro body's first line carries no leading indentation, so
    the call site supplies the opening indent, e.g. `      {{ owner_select(users) }}`.
@@ -23,4 +23,18 @@
           {% endfor %}
         </select>
       </div>
+{%- endmacro -%}
+
+
+{# Plain label + <input class="input"> company field block, shared by the create
+   and edit forms. Pass company (edit form) to emit value="{{ company.<name> or '' }}";
+   omit it (create form) for an empty field. maxlength always comes from
+   column_maxlength('company', name). Fields with extra behavior (the name field's
+   duplicate check, selects, textareas) stay inline in their forms. #}
+{%- macro labeled_input(label, name, type='text', placeholder=none, company=none) -%}
+<div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">{{ label }}</label>
+          <input type="{{ type }}" name="{{ name }}" maxlength="{{ column_maxlength('company', name) }}"{% if company is not none %} value="{{ company|attr(name) or '' }}"{% endif %}{% if placeholder %} placeholder="{{ placeholder }}"{% endif %}
+                 class="input">
+        </div>
 {%- endmacro -%}

@@ -11,7 +11,7 @@
   Every hx-* control sets an explicit hx-target. Credential saves send a nested JSON body
   ({credentials:{ENV:val}}) via hx-ext="json-enc".
 #}
-{% from "htmx/partials/shared/_macros.html" import status_badge %}
+{% from "htmx/partials/shared/_macros.html" import status_badge, spinner %}
 
 {# ── Status pill ─────────────────────────────────────────────────────── #}
 {# Delegates its label+color rendering to the shared status_badge() primitive
@@ -87,10 +87,7 @@
 
 {# ── Inline spinner (respects prefers-reduced-motion) ────────────────── #}
 {% macro _spinner() -%}
-<svg class="w-3.5 h-3.5 animate-spin motion-reduce:hidden" data-loading viewBox="0 0 24 24" fill="none" aria-hidden="true">
-  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-</svg>
+{{ spinner('w-3.5 h-3.5 animate-spin motion-reduce:hidden', attrs='data-loading aria-hidden="true"') }}
 {%- endmacro %}
 
 {# After a JSON action succeeds, re-GET the single card into its own container. #}
@@ -132,7 +129,7 @@ hx-on::after-request='if(event.detail.successful){htmx.ajax("GET","/v2/partials/
   </div>
 {% endmacro %}
 
-{# ── Multi-field credential form (8x8) ───────────────────────────────── #}
+{# ── Credential form + encrypted note (key connectors and multi_field/8x8) ── #}
 {% macro multi_field_form(s, label) %}
   <div class="space-y-2">
     {% for ev, field in s.creds.items() %}
@@ -268,15 +265,7 @@ hx-on::after-request='if(event.detail.successful){htmx.ajax("GET","/v2/partials/
     {% if s.state == 'needs_setup' %}
     <p class="text-secondary">Add your {{ s.display_name }} API key to turn this on</p>
     {% endif %}
-    <div class="space-y-2">
-      {% for ev, field in s.creds.items() %}
-        {{ key_field(s, ev, field) }}
-      {% endfor %}
-      <div class="flex items-center gap-2 pt-1">
-        {{ save_button(s, 'Save key') }}
-        <span class="text-secondary">Saved keys are encrypted; we never show the full key again</span>
-      </div>
-    </div>
+    {{ multi_field_form(s, 'Save key') }}
 
   {% elif s.control_type == 'browser_login' %}
     {# Worker-backed: health is the worker heartbeat, not a direct API. Only surface the

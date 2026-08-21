@@ -1,0 +1,189 @@
+{# _task_widget.html — Shared entity task widget (panel, rows, add + edit forms).
+   One source for the account / contact / vendor task UI. The thin wrapper
+   partials (customers/_account_tasks.html, customers/_contact_tasks.html,
+   vendors/tabs/_vendor_tasks.html and their *_task_form / *_task_edit_form
+   siblings) pass their container ids and URL prefixes into these macros, so
+   the existing #account-tasks-{id} / #contact-tasks-{id} / #vendor-tasks-{id}
+   swap contracts are unchanged.
+
+   Receives (per macro call): see each macro's signature. `task_add_form` is
+   imported `with context` because it reads `users` + `current_user_id` from
+   the calling template's context.
+   Called by: the wrapper partials listed above.
+   Depends on: task_due_state Jinja global (template_env.py), fmtdate filter,
+               HTMX, brand palette.
+#}
+
+{% macro task_item(t, container_id, now_utc, compact=False) %}
+      {# Overdue/due-today via the shared task_due_state helper (per-user tz, calendar-day
+         based) — NOT in-template `due_at <= now_utc` math, which flagged a task due earlier
+         today as Overdue and bucketed on the UTC day. #}
+      {% set _due_state = task_due_state(t, now_utc) %}
+      {% set is_overdue = _due_state[0] %}
+      {% set is_due_today = _due_state[1] %}
+      <li class="flex items-start gap-2 text-xs">
+        <form hx-post="/v2/partials/tasks/{{ t.id }}/complete"
+              hx-target="#{{ container_id }}"
+              hx-swap="outerHTML">
+          <button type="submit"
+                  class="mt-0.5 w-4 h-4 flex-shrink-0 rounded border border-gray-300 hover:border-brand-400 focus:outline-none focus:ring-2 focus:ring-accent-500"
+                  title="Mark done"
+                  aria-label="{% if compact %}Complete: {{ t.title }}{% else %}Complete task: {{ t.title }}{% endif %}"></button>
+        </form>
+        {% if compact %}
+        <span class="text-gray-800 flex-1">{{ t.title }}{% if t.due_at %}
+          <span class="{% if is_overdue %}text-rose-600 font-semibold{% elif is_due_today %}text-amber-600 font-semibold{% else %}text-gray-400{% endif %}">
+            &middot;
+            {% if is_overdue %}Overdue ({{ t.due_at|fmtdate('%b %-d') }}){% elif is_due_today %}Due today{% else %}{{ t.due_at|fmtdate('%b %-d') }}{% endif %}
+          </span>
+          {% endif %}</span>
+        {% else %}
+        <div class="min-w-0 flex-1">
+          <span class="text-gray-800">{{ t.title }}</span>
+          {% if t.due_at %}
+            <span class="ml-1 {% if is_overdue %}text-rose-600 font-semibold{% elif is_due_today %}text-amber-600 font-semibold{% else %}text-gray-400{% endif %}">
+              &middot;
+              {% if is_overdue %}Overdue ({{ t.due_at|fmtdate('%b %-d') }}){% elif is_due_today %}Due today{% else %}Due {{ t.due_at|fmtdate('%b %-d') }}{% endif %}
+            </span>
+          {% endif %}
+        </div>
+        {% endif %}
+        <div class="flex items-center gap-1 flex-shrink-0">
+          <form hx-post="/v2/partials/tasks/{{ t.id }}/snooze"
+                hx-target="#{{ container_id }}"
+                hx-swap="outerHTML">
+            <button type="submit"
+                    class="btn btn-sm text-xs text-gray-400 hover:text-amber-600 focus:outline-none"
+                    title="Snooze 1 week" aria-label="Snooze task: {{ t.title }}">Snooze</button>
+          </form>
+          <button type="button"
+                  hx-get="/v2/partials/tasks/{{ t.id }}/edit-form"
+                  hx-target="#{{ container_id }}"
+                  hx-swap="outerHTML"
+                  class="text-gray-400 hover:text-brand-600 focus:outline-none"
+                  title="Edit task" aria-label="Edit task: {{ t.title }}">
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>
+            </svg>
+          </button>
+          <button type="button"
+                  hx-delete="/v2/partials/tasks/{{ t.id }}"
+                  hx-target="#{{ container_id }}"
+                  hx-swap="outerHTML"
+                  hx-confirm="Delete this task?"
+                  class="text-gray-400 hover:text-rose-600 focus:outline-none"
+                  title="Delete task" aria-label="Delete task: {{ t.title }}">
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+            </svg>
+          </button>
+        </div>
+      </li>
+{% endmacro %}
+
+
+{% macro tasks_panel(container_id, form_id, add_form_url, tasks, now_utc) %}
+<div class="bg-white rounded-xl shadow-card border border-brand-200 p-4" id="{{ container_id }}">
+  <div class="flex items-center justify-between mb-2">
+    <h2 class="text-sm font-semibold text-gray-900">Tasks</h2>
+    <button type="button"
+            hx-get="{{ add_form_url }}"
+            hx-target="#{{ form_id }}"
+            hx-swap="innerHTML"
+            class="text-xs text-brand-600 hover:text-brand-700 font-medium">+ Add task</button>
+  </div>
+  <div id="{{ form_id }}"></div>
+  {% if tasks %}
+    <ul class="space-y-1">
+      {% for t in tasks %}
+      {{ task_item(t, container_id, now_utc) }}
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="text-secondary italic">No open tasks.</p>
+  {% endif %}
+</div>
+{% endmacro %}
+
+
+{# Add-task form. Cancel has two variants (both pre-existing behavior):
+   - cancel_url set (vendor): hx-get re-fetches the task list over #target_id.
+   - form_id set (account/contact): onclick clears the inline form container. #}
+{% macro task_add_form(post_url, target_id, form_id=none, cancel_url=none, form_class='mt-2 space-y-2') %}
+<form hx-post="{{ post_url }}"
+      hx-target="#{{ target_id }}"
+      hx-swap="outerHTML"
+      class="{{ form_class }}">
+  <input type="text" name="title" placeholder="Task title" required
+         class="w-full px-2 py-1 text-xs border border-gray-300 rounded input-focus"
+         aria-label="Task title">
+  <input type="date" name="due_at"
+         class="px-2 py-1 text-xs border border-gray-300 rounded input-focus"
+         aria-label="Due date">
+  <div class="flex gap-2">
+    <select name="priority" aria-label="Priority"
+            class="px-2 py-1 text-xs border border-gray-300 rounded input-focus">
+      <option value="2" selected>Medium</option>
+      <option value="1">Low</option>
+      <option value="3">High</option>
+    </select>
+    <select name="assigned_to_id" aria-label="Assignee"
+            class="flex-1 px-2 py-1 text-xs border border-gray-300 rounded input-focus">
+      {% for u in users %}
+      <option value="{{ u.id }}"{{ ' selected' if u.id == current_user_id else '' }}>{{ u.name or u.email }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="flex gap-2">
+    <button type="submit"
+            class="btn-primary btn-sm">Save</button>
+    {% if cancel_url %}
+    <button type="button"
+            hx-get="{{ cancel_url }}"
+            hx-target="#{{ target_id }}"
+            hx-swap="outerHTML"
+            class="btn-secondary btn-sm">Cancel</button>
+    {% else %}
+    <button type="button"
+            onclick="document.getElementById('{{ form_id }}').innerHTML = ''"
+            class="btn-secondary btn-sm">Cancel</button>
+    {% endif %}
+  </div>
+</form>
+{% endmacro %}
+
+
+{# Edit-task form. The root div re-carries the id of the container this fragment
+   outerHTML-replaces (#account-tasks-{id} / #contact-tasks-{id} /
+   #vendor-tasks-{id}) — without it the Save/Cancel hx-targets match nothing and
+   htmx aborts (htmx:targetError) before any request. container_class mirrors
+   the replaced container's classes. #}
+{% macro task_edit_form(task, container_id, container_class, cancel_url, error=none) %}
+<div id="{{ container_id }}" class="{{ container_class }}">
+<form hx-post="/v2/partials/tasks/{{ task.id }}/edit"
+      hx-target="#{{ container_id }}"
+      hx-swap="outerHTML"
+      class="mt-2 space-y-2">
+  <input type="text" name="title" value="{{ task.title }}" required
+         placeholder="Task title"
+         class="w-full px-2 py-1 text-xs border border-gray-300 rounded input-focus"
+         aria-label="Task title">
+  <input type="date" name="due_at"
+         value="{{ task.due_at.strftime('%Y-%m-%d') if task.due_at else '' }}"
+         class="px-2 py-1 text-xs border border-gray-300 rounded input-focus"
+         aria-label="Due date">
+  <div id="task-edit-error-{{ task.id }}">
+    {% if error %}<p class="text-xs text-rose-600">{{ error }}</p>{% endif %}
+  </div>
+  <div class="flex gap-2">
+    <button type="submit"
+            class="btn btn-primary btn-sm">Save</button>
+    <button type="button"
+            hx-get="{{ cancel_url }}"
+            hx-target="#{{ container_id }}"
+            hx-swap="outerHTML"
+            class="btn btn-secondary btn-sm">Cancel</button>
+  </div>
+</form>
+</div>
+{% endmacro %}

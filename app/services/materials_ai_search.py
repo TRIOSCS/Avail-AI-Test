@@ -8,7 +8,7 @@ Depends on: claude_client, commodity_registry
 
 from loguru import logger
 
-from app.services.commodity_registry import COMMODITY_SPEC_SEEDS, COMMODITY_TREE, get_all_commodities
+from app.services.commodity_registry import COMMODITY_SPEC_SEEDS, get_all_commodities
 
 
 def _build_commodity_summary() -> str:
@@ -142,11 +142,3 @@ async def interpret_search_query(query: str) -> dict | None:
     except Exception as e:
         logger.warning("AI search interpretation failed: {}", e)
         return None
-
-
-def get_parent_for_commodity(commodity: str) -> str:
-    """Find the parent group name for a commodity in the tree."""
-    for group, subs in COMMODITY_TREE.items():
-        if commodity in subs:
-            return group
-    return ""

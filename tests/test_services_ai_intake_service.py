@@ -312,7 +312,7 @@ class TestParseFreeformIntake:
             "requirements": [{"mpn": "LM358", "quantity": 100}],
             "offers": [],
         }
-        with patch("app.services.ai_intake_parser.routed_structured", new_callable=AsyncMock) as mock_llm:
+        with patch("app.services.ai_intake_parser.claude_structured", new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = mock_result
             result = await parse_freeform_intake("Need 100x LM358")
 
@@ -324,7 +324,7 @@ class TestParseFreeformIntake:
 
     @pytest.mark.asyncio
     async def test_llm_returns_none(self):
-        with patch("app.services.ai_intake_parser.routed_structured", new_callable=AsyncMock) as mock_llm:
+        with patch("app.services.ai_intake_parser.claude_structured", new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = None
             result = await parse_freeform_intake("Some text")
         assert result is None
@@ -338,7 +338,7 @@ class TestParseFreeformIntake:
             "offers": [{"mpn": "ABC", "unit_price": 1.5}],
         }
         context = [{"mpn": "ABC", "qty": 50}, {"mpn": "DEF", "qty": 100}]
-        with patch("app.services.ai_intake_parser.routed_structured", new_callable=AsyncMock) as mock_llm:
+        with patch("app.services.ai_intake_parser.claude_structured", new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = mock_result
             result = await parse_freeform_intake("Vendor quote text", context)
 
@@ -352,7 +352,7 @@ class TestParseFreeformIntake:
 
     @pytest.mark.asyncio
     async def test_non_dict_result_returns_none(self):
-        with patch("app.services.ai_intake_parser.routed_structured", new_callable=AsyncMock) as mock_llm:
+        with patch("app.services.ai_intake_parser.claude_structured", new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = "just a string"
             result = await parse_freeform_intake("Some text")
         assert result is None

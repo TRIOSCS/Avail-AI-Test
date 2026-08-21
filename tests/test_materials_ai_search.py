@@ -11,7 +11,6 @@ import pytest
 from app.services.materials_ai_search import (
     _build_commodity_summary,
     _build_enum_reference,
-    get_parent_for_commodity,
     interpret_search_query,
 )
 from tests.conftest import engine  # noqa: F401
@@ -35,15 +34,8 @@ def test_build_enum_reference_includes_ddr_types():
     assert "DDR5" in ref
 
 
-def test_get_parent_for_commodity_known():
-    """Known commodities should return their parent group."""
-    assert get_parent_for_commodity("dram") == "Memory"
-    assert get_parent_for_commodity("capacitors") == "Passives"
-
-
-def test_get_parent_for_commodity_unknown():
-    """Unknown commodities should return empty string."""
-    assert get_parent_for_commodity("nonexistent_thing") == ""
+# get_parent_for_commodity was removed — the AI-interpret route now uses
+# commodity_registry.get_parent_group (covered by tests/test_commodity_registry.py).
 
 
 # ── Tests for interpret_search_query ─────────────────────────────────

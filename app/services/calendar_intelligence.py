@@ -184,19 +184,18 @@ def _log_calendar_activity(
 
     For each event detected as a vendor-meeting, trade-show, or has-external-attendee
     the old pre-WS3 guarantee is preserved: the event is always recorded on the rep's
-    feed even when no attendee resolves to a known CRM entity.  When log_meeting_activity
-    returns linked rows those are used as-is.  When it returns [] because no attendee
-    matched (not because the event was already deduped), exactly ONE unlinked
-    ActivityType.MEETING fallback row is written so the meeting still appears on the
-    timeline and activities_logged counts it.
+    feed even when no attendee resolves to a known CRM entity —
+    ``create_unlinked_fallback=True`` has log_meeting_activity (the one owner of the
+    meeting-row shape) write exactly ONE unlinked ActivityType.MEETING row when no
+    attendee matched, so the meeting still appears on the timeline and
+    activities_logged counts it.
 
     Returns the list of rows created.  Returns [] only when the event was already
     logged on a previous scan (idempotent dedup).
     """
-    from app.models import ActivityLog
     from app.services.activity_service import log_meeting_activity
 
-    rows = log_meeting_activity(
+    return log_meeting_activity(
         user_id=user_id,
         graph_event_id=graph_event_id,
         subject=subject,
@@ -206,63 +205,5 @@ def _log_calendar_activity(
         attendee_emails=attendee_emails,
         location=location,
         db=db,
+        create_unlinked_fallback=True,
     )
-
-    if rows:
-        return rows
-
-    # log_meeting_activity returns [] for two reasons:
-    #   (a) dedup — the external_id row already exists → nothing to do.
-    #   (b) no CRM match — no attendee resolved → write one unlinked fallback.
-    # Distinguish by checking whether the row is already present.
-    external_id = f"calendar-{graph_event_id}"
-    already_exists = db.query(ActivityLog).filter(ActivityLog.external_id == external_id).first()
-    if already_exists:
-        return []
-
-    # No match and not yet logged — write the unlinked fallback so the event is
-    # captured on the rep's activity feed.
-    from app.constants import ActivityType, Channel, Direction, EventType
-    from app.services.cadence_service import bump_clocks_from_activity
-
-    organizer_lower = (organizer_email or "").strip().lower()
-    # Determine direction from whether the organizer is an internal domain address.
-    # Without settings access here we treat an absent organizer as own-organised.
-    from app.config import settings
-
-    organizer_is_own = (not organizer_lower) or (organizer_lower.split("@")[-1] in settings.own_domains)
-    direction = Direction.OUTBOUND if organizer_is_own else Direction.INBOUND
-    duration_seconds = max(0, int((end_dt - start_dt).total_seconds()))
-
-    record = ActivityLog(
-        user_id=user_id,
-        activity_type=ActivityType.MEETING,
-        channel=Channel.CALENDAR,
-        company_id=None,
-        vendor_card_id=None,
-        site_contact_id=None,
-        subject=(subject or "")[:500] or None,
-        external_id=external_id,
-        direction=direction,
-        event_type=EventType.MEETING,
-        is_meaningful=True,
-        duration_seconds=duration_seconds,
-        occurred_at=start_dt,
-        details={
-            "attendees": attendee_emails[:20],
-            "organizer": organizer_email,
-            "location": location,
-            "subject": subject,
-            "graph_event_id": graph_event_id,
-        },
-        summary=f"Meeting: {subject or '(no subject)'}",
-    )
-    db.add(record)
-    db.flush()
-    bump_clocks_from_activity(db, record)
-    logger.info(
-        "Meeting activity logged (unlinked fallback): {} by user {}",
-        graph_event_id,
-        user_id,
-    )
-    return [record]

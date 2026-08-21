@@ -21,8 +21,9 @@ from sqlalchemy.orm import Session
 
 from ..cache.decorators import invalidate_prefix
 from ..models import MaterialCard, MaterialVendorHistory, VendorCard
+from ..services.material_card_service import get_live_card_by_key
 from ..services.price_snapshot_service import record_price_snapshot
-from ..utils.normalization import normalize_mpn, normalize_mpn_key
+from ..utils.normalization import normalize_mpn, normalize_mpn_key, parse_website_domain
 from ..vendor_utils import normalize_vendor_name
 
 ALLOWED_EXTENSIONS = {".csv", ".xlsx", ".xls", ".tsv"}
@@ -130,10 +131,9 @@ def ingest_stock_list(
     vendor_card = db.query(VendorCard).filter_by(normalized_name=norm_vendor).first()
     new_vendor = False
     if not vendor_card:
-        domain = ""
-        website = (vendor_website or "").strip()
-        if website:
-            domain = website.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0].lower()
+        # Validated extractor (never the blanket str.replace chain — it mangles hosts
+        # containing the substring); junk input yields "" → domain stays NULL.
+        domain = parse_website_domain(vendor_website or "")
         vendor_card = VendorCard(
             normalized_name=norm_vendor,
             display_name=clean_vendor,
@@ -173,11 +173,7 @@ def ingest_stock_list(
         # Only ACTIVE cards match: prod runs a PARTIAL unique index (WHERE deleted_at
         # IS NULL), so a soft-deleted twin must not capture the ingest — a new active
         # card is created instead (the partial unique allows the coexisting dead row).
-        card = (
-            db.query(MaterialCard)
-            .filter(MaterialCard.normalized_mpn == norm, MaterialCard.deleted_at.is_(None))
-            .first()
-        )
+        card = get_live_card_by_key(db, norm)
         if not card:
             card = MaterialCard(
                 normalized_mpn=norm,
@@ -189,11 +185,7 @@ def ingest_stock_list(
                 db.flush()
             except IntegrityError:
                 db.rollback()
-                card = (
-                    db.query(MaterialCard)
-                    .filter(MaterialCard.normalized_mpn == norm, MaterialCard.deleted_at.is_(None))
-                    .first()
-                )
+                card = get_live_card_by_key(db, norm)
                 if not card:
                     result.skipped_rows += 1
                     result.warnings.append(
@@ -266,8 +258,8 @@ async def maybe_trigger_vendor_enrichment(db: Session, result: StockListResult) 
     """Fire background vendor enrichment when the ingest flagged a brand-new vendor with
     a domain and an enrichment credential is configured.
 
-    Used by the Vendors-page HTMX upload route. (The JSON ``import-stock`` route keeps its
-    own equivalent trigger so its long-standing monkeypatch contract stays stable.)
+    Used by BOTH upload routes: the Vendors-page HTMX modal and the JSON
+    ``import-stock`` endpoint (routers/materials.py binds it as ``_maybe_enrich_vendor``).
     """
     if not result.enrich_vendor or result.vendor_card_id is None:
         return False

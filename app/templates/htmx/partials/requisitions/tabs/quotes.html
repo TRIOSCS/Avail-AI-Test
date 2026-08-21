@@ -1,9 +1,12 @@
 {# quotes.html — Quotes tab for requisition detail.
    Receives: quotes (list of Quote objects), req (Requisition).
    Called by: requisition tab route.
-   Depends on: brand palette, HTMX, shared/_macros.html (status_badge, badge).
+   Depends on: brand palette, HTMX, shared/_macros.html (status_badge),
+   quotes/_macros.html (quote_margin_badge).
 #}
-{% from "htmx/partials/shared/_macros.html" import status_badge, badge %}
+{% from "htmx/partials/shared/_macros.html" import status_badge %}
+{% from "htmx/partials/quotes/_macros.html" import quote_margin_badge %}
+{% from "htmx/partials/shared/empty_state.html" import empty_state %}
 <div>
   {% if quotes %}
   <div class="flex items-center justify-between mb-4">
@@ -33,16 +36,10 @@
             hx-trigger="click, keyup[key=='Enter']">
           <td class="px-4 py-2.5 text-sm font-medium text-brand-500 hover:text-brand-600">{{ q.quote_number or "Q-" ~ q.id }}</td>
           <td class="px-4 py-2.5 text-sm text-gray-600">{{ q.customer_name or "—" }}</td>
-          <td class="px-4 py-2.5 text-sm text-gray-900 font-medium text-right">{{ "${:,.2f}".format(q.subtotal) if q.subtotal else "—" }}</td>
+          <td class="px-4 py-2.5 text-sm text-gray-900 font-medium text-right">{{ "$" ~ q.subtotal|money if q.subtotal else "—" }}</td>
           <td class="px-4 py-2.5 text-sm text-right">
             {% if q.total_margin_pct is not none %}
-              {% if q.total_margin_pct >= 30 %}
-                {{ badge("%.1f%%"|format(q.total_margin_pct), tone='success') }}
-              {% elif q.total_margin_pct >= 15 %}
-                {{ badge("%.1f%%"|format(q.total_margin_pct), tone='warning') }}
-              {% else %}
-                {{ badge("%.1f%%"|format(q.total_margin_pct), tone='danger') }}
-              {% endif %}
+              {{ quote_margin_badge(q.total_margin_pct) }}
             {% else %}
               <span class="text-gray-600">—</span>
             {% endif %}
@@ -64,13 +61,11 @@
     </table>
   </div>
   {% else %}
-  <div class="py-6 sm:py-8 text-center">
-    <svg class="mx-auto h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
-            d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z"/>
-    </svg>
-    <p class="text-sm font-medium text-gray-600 mt-3">No quotes generated.</p>
+  {% call empty_state('M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z',
+                      'No quotes generated.',
+                      wrapper_class='py-6 sm:py-8 text-center',
+                      message_class='text-sm font-medium text-gray-600 mt-3') %}
     <p class="text-secondary mt-1">Create a quote from the Offers tab by selecting offers and clicking "Create Quote."</p>
-  </div>
+  {% endcall %}
   {% endif %}
 </div>

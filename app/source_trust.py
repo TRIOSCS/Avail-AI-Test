@@ -9,7 +9,7 @@ What it does:
      scrape) — a human-verified manual entry is more trustworthy than an anonymous
      scrape result, even though it wasn't pulled from a live API.
   3. Source-type category sets (AUTHORIZED_SOURCES / API_SOURCES / MARKETPLACE_SOURCES
-     / EMAIL_SOURCES / MANUAL_SOURCES / HISTORY_SOURCES) so evidence_tiers.py and
+     / EMAIL_SOURCES / HISTORY_SOURCES) so evidence_tiers.py and
      sourcing_leads.py derive tier/score decisions from the same membership lists
      instead of maintaining separate, drifting copies.
   4. VENDOR_RELIABILITY_UNKNOWN / VENDOR_RELIABILITY_KNOWN_NO_SCORE — fallback
@@ -41,7 +41,6 @@ AUTHORIZED_SOURCES: frozenset[str] = frozenset({"digikey", "mouser", "element14"
 API_SOURCES: frozenset[str] = frozenset({"nexar", "octopart", "brokerbin", "sourcengine"})
 MARKETPLACE_SOURCES: frozenset[str] = frozenset({"ebay", "oemsecrets", "ics", "ics_scrape"})
 EMAIL_SOURCES: frozenset[str] = frozenset({"email_parse", "email_auto_import", "email"})
-MANUAL_SOURCES: frozenset[str] = frozenset({"manual", ""})
 HISTORY_SOURCES: frozenset[str] = frozenset({"material_history", "stock_list", "excess_list"})
 
 # ---------------------------------------------------------------------------

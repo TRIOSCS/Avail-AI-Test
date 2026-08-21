@@ -368,7 +368,7 @@ class TestIcsScheduler:
     def test_is_business_hours(self, weekday, hour, expected):
         scheduler = self._make_scheduler()
 
-        with patch("app.services.ics_worker.scheduler.datetime") as mock_dt:
+        with patch("app.services.search_worker_base.scheduler.datetime") as mock_dt:
             mock_now = MagicMock()
             mock_now.weekday.return_value = weekday
             mock_now.hour = hour

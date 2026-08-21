@@ -18,6 +18,7 @@ from loguru import logger
 from ..database import SessionLocal
 from ..http_client import http
 from ..utils.normalization import normalize_mpn_key
+from ..utils.timezones import as_utc
 from .datasheet_library import upload_datasheet_to_library
 
 MAX_DATASHEET_BYTES = 25 * 1024 * 1024
@@ -184,7 +185,7 @@ async def capture_datasheet(mpn: str, user_id: int) -> None:
             if card.datasheets:
                 return
             if card.datasheet_searched_at:
-                age = datetime.now(UTC) - _as_utc(card.datasheet_searched_at)
+                age = datetime.now(UTC) - as_utc(card.datasheet_searched_at)
                 if age < timedelta(days=CAPTURE_COOLDOWN_DAYS):
                     return
 
@@ -244,10 +245,6 @@ async def capture_datasheet(mpn: str, user_id: int) -> None:
         db.rollback()
     finally:
         db.close()
-
-
-def _as_utc(dt: datetime) -> datetime:
-    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
 def _stamp_searched(db, card) -> None:

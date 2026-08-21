@@ -379,7 +379,7 @@ async def auth_status(request: Request, db: Session = Depends(get_db)):
             "connected": user.m365_connected,
             "user_id": user.id,
             "user_email": user.email,
-            "user_name": user.name or user.email.split("@")[0],
+            "user_name": user.display_name,
             "user_role": user.role or "buyer",
             "m365_error": user.m365_error_reason,
             "m365_last_healthy": user.m365_last_healthy.isoformat() if user.m365_last_healthy else None,

@@ -591,7 +591,9 @@ class TestScheduler:
 class TestHumanBehavior:
     @pytest.mark.asyncio
     async def test_random_delay(self):
-        with patch("app.services.ics_worker.human_behavior.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+        with patch(
+            "app.services.search_worker_base.human_behavior.asyncio.sleep", new_callable=AsyncMock
+        ) as mock_sleep:
             await HumanBehavior.random_delay(0.5, 1.5)
             mock_sleep.assert_called_once()
             delay = mock_sleep.call_args[0][0]
@@ -603,9 +605,9 @@ class TestHumanBehavior:
         locator = AsyncMock()
         locator.click = AsyncMock()
 
-        with patch("app.services.ics_worker.human_behavior.asyncio.sleep", new_callable=AsyncMock):
-            with patch("app.services.ics_worker.human_behavior.random.uniform", return_value=0.1):
-                with patch("app.services.ics_worker.human_behavior.random.random", return_value=0.5):
+        with patch("app.services.search_worker_base.human_behavior.asyncio.sleep", new_callable=AsyncMock):
+            with patch("app.services.search_worker_base.human_behavior.random.uniform", return_value=0.1):
+                with patch("app.services.search_worker_base.human_behavior.random.random", return_value=0.5):
                     await HumanBehavior.human_type(page, locator, "abc")
 
         locator.click.assert_called_once()
@@ -616,9 +618,9 @@ class TestHumanBehavior:
         page = AsyncMock()
         locator = AsyncMock()
 
-        with patch("app.services.ics_worker.human_behavior.asyncio.sleep", new_callable=AsyncMock):
-            with patch("app.services.ics_worker.human_behavior.random.uniform", return_value=0.1):
-                with patch("app.services.ics_worker.human_behavior.random.random", return_value=0.01):
+        with patch("app.services.search_worker_base.human_behavior.asyncio.sleep", new_callable=AsyncMock):
+            with patch("app.services.search_worker_base.human_behavior.random.uniform", return_value=0.1):
+                with patch("app.services.search_worker_base.human_behavior.random.random", return_value=0.01):
                     await HumanBehavior.human_type(page, locator, "ab")
 
         assert page.keyboard.type.call_count == 2
@@ -1142,7 +1144,7 @@ class TestAiGate:
         mock_response = {
             "classifications": [{"mpn": "STM32F103", "search_ics": True, "commodity": "semiconductor", "reason": "MCU"}]
         }
-        with patch("app.utils.llm_router.routed_structured", new_callable=AsyncMock, return_value=mock_response):
+        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=mock_response):
             result = await classify_parts_batch([{"mpn": "STM32F103", "manufacturer": "ST", "description": "MCU"}])
 
         assert len(result) == 1
@@ -1153,7 +1155,7 @@ class TestAiGate:
         from app.services.ics_worker.ai_gate import classify_parts_batch
 
         with patch(
-            "app.utils.llm_router.routed_structured", new_callable=AsyncMock, side_effect=Exception("API error")
+            "app.utils.claude_client.claude_structured", new_callable=AsyncMock, side_effect=Exception("API error")
         ):
             result = await classify_parts_batch([{"mpn": "STM32F103", "manufacturer": "ST", "description": ""}])
 
@@ -1163,7 +1165,7 @@ class TestAiGate:
     async def test_classify_parts_batch_bad_format(self):
         from app.services.ics_worker.ai_gate import classify_parts_batch
 
-        with patch("app.utils.llm_router.routed_structured", new_callable=AsyncMock, return_value={"bad": "format"}):
+        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value={"bad": "format"}):
             result = await classify_parts_batch([{"mpn": "X", "manufacturer": "", "description": ""}])
 
         assert result is None
@@ -2382,7 +2384,7 @@ class TestAiGateFull:
             ]
         }
 
-        with patch("app.utils.llm_router.routed_structured", new_callable=AsyncMock, return_value=mock_result):
+        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=mock_result):
             await process_ai_gate(db_session)
 
         db_session.refresh(item)
@@ -2414,7 +2416,7 @@ class TestAiGateFull:
             ]
         }
 
-        with patch("app.utils.llm_router.routed_structured", new_callable=AsyncMock, return_value=mock_result):
+        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=mock_result):
             await process_ai_gate(db_session)
 
         db_session.refresh(item)
@@ -2440,7 +2442,7 @@ class TestAiGateFull:
         db_session.add(item)
         db_session.commit()
 
-        with patch("app.utils.llm_router.routed_structured", new_callable=AsyncMock, return_value=None):
+        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=None):
             await process_ai_gate(db_session)
 
         db_session.refresh(item)
@@ -2471,7 +2473,7 @@ class TestAiGateFull:
 
         mock_result = {"classifications": []}
 
-        with patch("app.utils.llm_router.routed_structured", new_callable=AsyncMock, return_value=mock_result):
+        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=mock_result):
             await process_ai_gate(db_session)
 
         db_session.refresh(item)
@@ -2506,7 +2508,7 @@ class TestSchedulerBranches:
     def test_business_hours_by_day(self, weekday, hour, expected):
         cfg = IcsConfig()
         sched = SearchScheduler(cfg)
-        with patch("app.services.ics_worker.scheduler.datetime") as mock_dt:
+        with patch("app.services.search_worker_base.scheduler.datetime") as mock_dt:
             mock_now = MagicMock()
             mock_now.weekday.return_value = weekday
             mock_now.hour = hour

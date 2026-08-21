@@ -134,11 +134,12 @@ def test_activity_tab_uses_canonical_activity_icon():
 
 
 def test_vendor_activity_tab_is_type_sectioned():
-    """The vendor activity tab mirrors the account tab: it imports both canonical macros
-    (activity_row for rows, activity_icon for the per-type section headers) and iterates
-    the pre-bucketed `sections` dict rather than a single flat `activities` loop."""
+    """The vendor activity tab mirrors the account tab: it imports the canonical macros
+    (activity_day_rows for the date-grouped row loop — which renders activity_row per
+    item — and activity_icon for the per-type section headers) and iterates the
+    pre-bucketed `sections` dict rather than a single flat `activities` loop."""
     src = templates.env.loader.get_source(templates.env, "htmx/partials/vendors/tabs/activity_tab.html")[0]
-    assert "import activity_row" in src, "template must import the canonical activity_row macro"
+    assert "activity_day_rows" in src, "template must import the canonical activity_day_rows macro (wraps activity_row)"
     assert "activity_icon" in src, "template must reference activity_icon (for section headers)"
     # Type-sectioned: drives off the route-built `sections` dict + _section_meta loop.
     assert "sections[section_label]" in src, "template must render per-type sections from the sections dict"

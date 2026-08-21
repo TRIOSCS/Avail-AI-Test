@@ -27,7 +27,7 @@ def test_scheduler_is_business_hours(weekday, hour, expected):
     """Business hours check honors weekday and configured hour range."""
     sched = SearchScheduler(NcConfig())
 
-    with patch("app.services.nc_worker.scheduler.datetime") as mock_dt:
+    with patch("app.services.search_worker_base.scheduler.datetime") as mock_dt:
         mock_now = MagicMock()
         mock_now.weekday.return_value = weekday
         mock_now.hour = hour

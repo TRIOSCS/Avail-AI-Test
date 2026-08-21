@@ -8,7 +8,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship, validates
 
 from ..database import UTCDateTime
-from .base import Base
+from .base import AttachmentColumnsMixin, Base, validate_custom_fields_dict
 
 
 class Company(Base):
@@ -169,18 +169,7 @@ class Company(Base):
 
     @validates("custom_fields")
     def _validate_custom_fields(self, _key, value):
-        if value is None:
-            return {}
-        if not isinstance(value, dict):
-            raise ValueError("custom_fields must be a dict")
-        if len(value) > 30:
-            raise ValueError("custom_fields: max 30 keys")
-        for k, v in value.items():
-            if len(str(k)) > 60:
-                raise ValueError(f"custom_fields key too long (max 60 chars): {k!r}")
-            if len(str(v)) > 500:
-                raise ValueError(f"custom_fields value too long (max 500 chars) for key {k!r}")
-        return value
+        return validate_custom_fields_dict(value)
 
     __table_args__ = (
         Index("ix_companies_name", "name"),
@@ -395,18 +384,7 @@ class SiteContact(Base):
 
     @validates("custom_fields")
     def _validate_custom_fields(self, _key, value):
-        if value is None:
-            return {}
-        if not isinstance(value, dict):
-            raise ValueError("custom_fields must be a dict")
-        if len(value) > 30:
-            raise ValueError("custom_fields: max 30 keys")
-        for k, v in value.items():
-            if len(str(k)) > 60:
-                raise ValueError(f"custom_fields key too long (max 60 chars): {k!r}")
-            if len(str(v)) > 500:
-                raise ValueError(f"custom_fields value too long (max 500 chars) for key {k!r}")
-        return value
+        return validate_custom_fields_dict(value)
 
     __table_args__ = (
         Index("ix_site_contacts_site", "customer_site_id"),
@@ -494,12 +472,9 @@ class AccountCollaborator(Base):
     )
 
 
-class CompanyAttachment(Base):
+class CompanyAttachment(AttachmentColumnsMixin, Base):
     """File attachment on a CRM company (stored in OneDrive or company SharePoint
-    library).
-
-    library_drive_id NULL  → OneDrive fallback row (user token, item in /me/drive)
-    library_drive_id set   → company SharePoint library row (app token)
+    library — shared payload columns on AttachmentColumnsMixin).
 
     Called by: app/routers/attachments_extra.py, app/services/attachment_service.py
     Depends on: Company, User
@@ -508,28 +483,15 @@ class CompanyAttachment(Base):
     __tablename__ = "company_attachments"
     id = Column(Integer, primary_key=True)
     company_id = Column(Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
-    file_name = Column(String(500), nullable=False)
-    library_item_id = Column(String(500))
-    library_drive_id = Column(String(200))
-    library_web_url = Column(Text)
-    thumbnail_url = Column(Text)
-    content_type = Column(String(100))
-    size_bytes = Column(Integer)
-    uploaded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     company = relationship("Company", back_populates="attachments")
-    uploaded_by = relationship("User", foreign_keys=[uploaded_by_id])
 
     __table_args__ = (Index("ix_company_attachments_company", "company_id"),)
 
 
-class SiteContactAttachment(Base):
+class SiteContactAttachment(AttachmentColumnsMixin, Base):
     """File attachment on a CRM site contact (stored in OneDrive or company SharePoint
-    library).
-
-    library_drive_id NULL  → OneDrive fallback row (user token, item in /me/drive)
-    library_drive_id set   → company SharePoint library row (app token)
+    library — shared payload columns on AttachmentColumnsMixin).
 
     Called by: app/routers/attachments_extra.py, app/services/attachment_service.py
     Depends on: SiteContact, User
@@ -538,18 +500,8 @@ class SiteContactAttachment(Base):
     __tablename__ = "site_contact_attachments"
     id = Column(Integer, primary_key=True)
     site_contact_id = Column(Integer, ForeignKey("site_contacts.id", ondelete="CASCADE"), nullable=False)
-    file_name = Column(String(500), nullable=False)
-    library_item_id = Column(String(500))
-    library_drive_id = Column(String(200))
-    library_web_url = Column(Text)
-    thumbnail_url = Column(Text)
-    content_type = Column(String(100))
-    size_bytes = Column(Integer)
-    uploaded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     site_contact = relationship("SiteContact", back_populates="attachments")
-    uploaded_by = relationship("User", foreign_keys=[uploaded_by_id])
 
     __table_args__ = (Index("ix_site_contact_attachments_contact", "site_contact_id"),)
 

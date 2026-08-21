@@ -7,7 +7,8 @@ What: ``quote_preflight(db, quote)`` runs deterministic, READ-ONLY checks just b
         2. country_of_origin  — a quoted line's sourced offer has a non-US country of origin
         3. mpn_drift          — a quoted MPN is not one the requisition actually asked for
 Called by: app/routers/crm/quotes.py (GET /api/quotes/{id}/preflight; the send/preview UI).
-Depends on: models (Quote, CustomerSite, SiteContact, Offer, Requirement),
+Depends on: models (Quote, CustomerSite, Offer, Requirement),
+            app.services.vendor_reachability.dnc_contact_for_email,
             app.utils.normalization.normalize_mpn.
 """
 
@@ -16,10 +17,10 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.models import CustomerSite, Offer, Quote, Requirement, SiteContact
+from app.models import CustomerSite, Offer, Quote, Requirement
+from app.services.vendor_reachability import dnc_contact_for_email
 from app.utils.normalization import normalize_mpn
 
 # Accepted spellings of the United States, reduced to letters-only for comparison.
@@ -87,16 +88,8 @@ def quote_preflight(db: Session, quote: Quote) -> list[PreflightWarning]:
             warnings.append(PreflightWarning("dnc", f"Customer site “{site.site_name}” is marked Do-Not-Contact."))
         recipient = (site.contact_email or "").strip().lower()
         if recipient:
-            dnc_contact = (
-                db.query(SiteContact)
-                .filter(
-                    SiteContact.customer_site_id == site.id,
-                    func.lower(SiteContact.email) == recipient,
-                    SiteContact.do_not_contact.is_(True),
-                )
-                .first()
-            )
-            if dnc_contact is not None:
+            # Same contact-level rule quote_send's hard block uses (shared helper).
+            if dnc_contact_for_email(db, site.id, recipient) is not None:
                 warnings.append(PreflightWarning("dnc", f"Recipient {site.contact_email} is a Do-Not-Contact contact."))
 
     line_refs = _quote_line_refs(quote)

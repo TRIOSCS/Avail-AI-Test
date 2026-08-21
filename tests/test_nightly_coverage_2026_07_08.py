@@ -573,7 +573,7 @@ class TestBeneficiaryFallbacks:
 
     def test_display_name_fallback_when_no_legal_no_vendor_name(self, db_session: Session):
         """When legal_name=None and vendor_name=None, falls back to display_name."""
-        from app.services.prepayment_notifications import _beneficiary
+        from app.services.prepayment_notifications import beneficiary_name as _beneficiary
 
         # Use a mock to avoid NOT NULL DB constraint on display_name
         mock_vc = MagicMock()
@@ -589,7 +589,7 @@ class TestBeneficiaryFallbacks:
 
     def test_dash_when_no_vendor_info(self, db_session: Session):
         """_beneficiary returns '—' when vendor_card is None and vendor_name is None."""
-        from app.services.prepayment_notifications import _beneficiary
+        from app.services.prepayment_notifications import beneficiary_name as _beneficiary
 
         buyer = _make_user(db_session)
         pp = _make_prepayment_direct(db_session, buyer)
@@ -603,7 +603,7 @@ class TestBeneficiaryFallbacks:
 
     def test_vendor_card_none_uses_vendor_name(self, db_session: Session):
         """When vendor_card is None, falls back to prepayment.vendor_name."""
-        from app.services.prepayment_notifications import _beneficiary
+        from app.services.prepayment_notifications import beneficiary_name as _beneficiary
 
         buyer = _make_user(db_session)
         pp = _make_prepayment_direct(db_session, buyer)

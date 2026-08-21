@@ -219,6 +219,23 @@ def _pricefmt_filter(value, default: str = "—") -> str:
 templates.env.filters["pricefmt"] = _pricefmt_filter
 
 
+def _money_filter(value, default: str = "—") -> str:
+    """Format a monetary amount: comma-grouped, always 2 decimals (1234.5 -> 1,234.50).
+
+    Companion to |pricefmt (which serves unit prices with up to 4 decimals) for
+    totals/extended amounts. Formats Decimal/float/int directly — no float()
+    coercion — so output is byte-identical to the '{:,.2f}'.format(...) call
+    sites it replaces (Decimal keeps exact half-even rounding). None/'' render
+    the same em-dash default as the other display filters.
+    """
+    if value is None or value == "":
+        return default
+    return f"{value:,.2f}"
+
+
+templates.env.filters["money"] = _money_filter
+
+
 def _sanitize_html_filter(value: str) -> str:
     """Sanitize HTML to prevent XSS — allows safe formatting tags only."""
     if not value:

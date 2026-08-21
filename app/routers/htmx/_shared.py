@@ -15,12 +15,14 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 from fastapi import HTTPException, Request
+from fastapi.responses import HTMLResponse
 from loguru import logger
 from sqlalchemy.orm import Session
 from starlette.responses import Response
 
 from ...constants import UserRole
 from ...models import User, VerificationGroupMember
+from ...utils import safe_float, safe_int
 
 # Vite manifest for asset fingerprinting — read once at import time.
 _MANIFEST_PATH = Path("app/static/dist/.vite/manifest.json")
@@ -115,6 +117,53 @@ def set_canonical_url(resp, request: Request, canonical_path: str) -> None:
     resp.headers["HX-Replace-Url"] = canonical
 
 
+def set_toast(response, message: str, kind: str = "success", *, merge: bool = False):
+    """Attach a ``showToast`` HX-Trigger so the Alpine ``$store.toast`` surfaces
+    feedback.
+
+    The one encoding of the toast wire contract (bridged client-side by the showToast
+    listener in htmx_app.js) — replaces the per-router copies that each re-encoded the
+    same ``json.dumps({"showToast": ...})`` payload.
+
+    Default (``merge=False``) overwrites any ``HX-Trigger`` already on the response,
+    matching what every clobbering call site did before consolidation. Pass
+    ``merge=True`` (the prepayments semantics) to MERGE with an existing ``HX-Trigger``
+    (bare event name or JSON dict) instead — e.g. the prepayment create route sets
+    ``awListRefresh`` before toasting. Returns the response for chaining.
+    """
+    trigger: dict = {"showToast": {"message": message, "type": kind}}
+    if merge:
+        existing = response.headers.get("HX-Trigger")
+        if existing:
+            try:
+                parsed = json.loads(existing)
+            except ValueError:
+                parsed = None
+            if isinstance(parsed, dict):
+                trigger.update({k: v for k, v in parsed.items() if k != "showToast"})
+            else:
+                # htmx's bare form: one event name, or several comma-separated.
+                for event in str(existing).split(","):
+                    if event.strip():
+                        trigger[event.strip()] = True
+    response.headers["HX-Trigger"] = json.dumps(trigger)
+    return response
+
+
+def toast_error_response(message: str) -> HTMLResponse:
+    """Honest error feedback for an HTMX action that has no surface to re-render.
+
+    HTMX suppresses non-2xx swaps and the JSON HTTPException handler carries no
+    showToast, so raising a 4xx would leave the modal/button with ZERO feedback (a
+    silent no-op). Instead return a 200 that swaps nothing (``HX-Reswap: none``) but
+    fires an error showToast — the pattern quotes, prospecting and prepayments each
+    reimplemented locally.
+    """
+    resp = HTMLResponse("", headers={"HX-Reswap": "none"})
+    set_toast(resp, message, "error")
+    return resp
+
+
 def full_page_shell(request: Request, user: User, partial_url: str, nav_active: str = "") -> Response:
     """Serve the base app shell that HTMX-loads ``partial_url`` into #main-content.
 
@@ -174,24 +223,26 @@ def _sanitize_hx_params(hx_target: str, push_url_base: str, default_push: str) -
     return hx_target, push_url_base
 
 
-def _safe_int(val) -> int | None:
-    """Safely convert form value to int."""
-    if not val:
-        return None
-    try:
-        return int(val)
-    except (ValueError, TypeError):
-        return None
+# Form-value coercion: the canonical helpers in app/utils are the single
+# implementation (identical behavior for the str-or-None form values every
+# caller passes); aliased here so the htmx routers keep their established names.
+_safe_int = safe_int
+_safe_float = safe_float
 
 
-def _safe_float(val) -> float | None:
-    """Safely convert form value to float."""
-    if not val:
-        return None
+def _coerce_task_priority(raw: str | None) -> int:
+    """Map a submitted priority ('1'|'2'|'3') to a valid int, defaulting to 2
+    (medium)."""
     try:
-        return float(val)
-    except (ValueError, TypeError):
-        return None
+        p = int(raw) if raw not in (None, "") else 2
+    except (TypeError, ValueError):
+        return 2
+    return p if p in (1, 2, 3) else 2
+
+
+def _active_users(db: Session) -> list[User]:
+    """Active users for assignee/owner pickers, ordered by name."""
+    return db.query(User).filter(User.is_active.is_(True)).order_by(User.name).all()
 
 
 def _is_ops_member(user: User, db: Session) -> bool:

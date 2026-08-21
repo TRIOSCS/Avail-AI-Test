@@ -6,12 +6,6 @@
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}{% import "htmx/partials/prospecting/_macros.html" as score %}
 {% from "htmx/partials/shared/_score_hover.html" import score_def, score_breakdown %}
-{% set prospect_status_colors = {
-  'suggested': 'bg-brand-100 text-brand-600 border-brand-200',
-  'claimed': 'bg-emerald-50 text-emerald-700 border-emerald-200',
-  'converted': 'bg-violet-100 text-violet-700 border-violet-200',
-  'dismissed': 'bg-gray-100 text-gray-600 border-gray-200'
-} %}
 {% set snap = (snapshots or {}).get(prospect.id, {}) %}
 {% set cstats = (contact_stats_map or {}).get(prospect.id, {}) %}
 
@@ -33,9 +27,7 @@
         {% endif %}
       </div>
       <div class="shrink-0 ml-2 flex flex-col items-end gap-1">
-        <span class="badge {{ prospect_status_colors.get(prospect.status, 'bg-gray-100 text-gray-600 border-gray-200') }}">
-          {{ prospect.status|capitalize }}
-        </span>
+        {{ score.prospect_status_badge(prospect.status) }}
         {% if snap.is_buyer_ready %}
         <span class="badge bg-emerald-100 text-emerald-700 border-emerald-200"
               title="Composite buyer-ready score: {{ snap.buyer_ready_score }}/100">
@@ -52,7 +44,7 @@
     <div class="mb-2">
       {% set fit = prospect.fit_score or 0 %}
       <div class="flex items-center justify-between text-xs mb-0.5">
-        <span class="text-gray-600">{{ score_def('Fit', 'ICP fit (0-100): industry match, company size, procurement staff, NAICS, geography, and broker usage.') }} <span class="text-gray-300">(ICP match)</span></span>
+        <span class="text-gray-600">{{ score_def('Fit', score.FIT_TOOLTIP) }} <span class="text-gray-300">(ICP match)</span></span>
         {% if prospect.fit_score %}
         {{ score_breakdown(fit ~ '%', prospect_fit_breakdown(prospect), title='Fit factors', trigger_class='font-medium ' ~ score.score_text_color(fit)) }}
         {% else %}
@@ -68,7 +60,7 @@
     <div class="mb-2.5">
       {% set ready = prospect.readiness_score or 0 %}
       <div class="flex items-center justify-between text-xs mb-0.5">
-        <span class="text-gray-600">{{ score_def('Readiness', 'Buy-now readiness (0-100): buying intent, company events, hiring, new procurement hires, and contact quality.') }} <span class="text-gray-300">(timing)</span></span>
+        <span class="text-gray-600">{{ score_def('Readiness', score.READINESS_TOOLTIP) }} <span class="text-gray-300">(timing)</span></span>
         {% if prospect.readiness_score %}
         {{ score_breakdown(ready ~ '%', prospect_readiness_breakdown(prospect), title='Readiness factors', trigger_class='font-medium ' ~ score.score_text_color(ready)) }}
         {% else %}

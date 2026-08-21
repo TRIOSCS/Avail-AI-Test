@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi import BackgroundTasks, HTTPException
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 
@@ -82,13 +82,10 @@ async def test_add_requirements_single_item(db_session: Session, test_user: User
         }
     )
 
-    bg_tasks = BackgroundTasks()
-
     with patch("app.routers.requisitions.requirements.resolve_material_card", return_value=None):
         result = await add_requirements(
             req_id=test_requisition.id,
             request=mock_req,
-            background_tasks=bg_tasks,
             user=test_user,
             db=db_session,
         )
@@ -109,13 +106,10 @@ async def test_add_requirements_batch_list(db_session: Session, test_user: User,
         ]
     )
 
-    bg_tasks = BackgroundTasks()
-
     with patch("app.routers.requisitions.requirements.resolve_material_card", return_value=None):
         result = await add_requirements(
             req_id=test_requisition.id,
             request=mock_req,
-            background_tasks=bg_tasks,
             user=test_user,
             db=db_session,
         )
@@ -136,13 +130,10 @@ async def test_add_requirements_batch_with_invalid_item_skipped(
         ]
     )
 
-    bg_tasks = BackgroundTasks()
-
     with patch("app.routers.requisitions.requirements.resolve_material_card", return_value=None):
         result = await add_requirements(
             req_id=test_requisition.id,
             request=mock_req,
-            background_tasks=bg_tasks,
             user=test_user,
             db=db_session,
         )
@@ -164,14 +155,11 @@ async def test_add_requirements_single_invalid_raises_422(
         }
     )
 
-    bg_tasks = BackgroundTasks()
-
     with patch("app.routers.requisitions.requirements.resolve_material_card", return_value=None):
         with pytest.raises(HTTPException) as exc:
             await add_requirements(
                 req_id=test_requisition.id,
                 request=mock_req,
-                background_tasks=bg_tasks,
                 user=test_user,
                 db=db_session,
             )
@@ -183,13 +171,11 @@ async def test_add_requirements_requisition_not_found(db_session: Session, test_
     from app.routers.requisitions.requirements import add_requirements
 
     mock_req = _make_json_request({"primary_mpn": "LM317T", "target_qty": 100})
-    bg_tasks = BackgroundTasks()
 
     with pytest.raises(HTTPException) as exc:
         await add_requirements(
             req_id=99999,
             request=mock_req,
-            background_tasks=bg_tasks,
             user=test_user,
             db=db_session,
         )
@@ -209,13 +195,10 @@ async def test_add_requirements_with_substitutes(db_session: Session, test_user:
         }
     )
 
-    bg_tasks = BackgroundTasks()
-
     with patch("app.routers.requisitions.requirements.resolve_material_card", return_value=None):
         result = await add_requirements(
             req_id=test_requisition.id,
             request=mock_req,
-            background_tasks=bg_tasks,
             user=test_user,
             db=db_session,
         )
@@ -242,8 +225,6 @@ async def test_add_requirements_with_material_card(
         }
     )
 
-    bg_tasks = BackgroundTasks()
-
     with patch(
         "app.routers.requisitions.requirements.resolve_material_card",
         return_value=test_material_card,
@@ -251,7 +232,6 @@ async def test_add_requirements_with_material_card(
         result = await add_requirements(
             req_id=test_requisition.id,
             request=mock_req,
-            background_tasks=bg_tasks,
             user=test_user,
             db=db_session,
         )
@@ -281,13 +261,10 @@ async def test_add_requirements_with_all_fields(db_session: Session, test_user: 
         }
     )
 
-    bg_tasks = BackgroundTasks()
-
     with patch("app.routers.requisitions.requirements.resolve_material_card", return_value=None):
         result = await add_requirements(
             req_id=test_requisition.id,
             request=mock_req,
-            background_tasks=bg_tasks,
             user=test_user,
             db=db_session,
         )
@@ -313,8 +290,6 @@ async def test_add_requirements_duplicate_detection(
         }
     )
 
-    bg_tasks = BackgroundTasks()
-
     with patch(
         "app.routers.requisitions.requirements.resolve_material_card",
         return_value=test_material_card,
@@ -322,7 +297,6 @@ async def test_add_requirements_duplicate_detection(
         result = await add_requirements(
             req_id=test_requisition.id,
             request=mock_req,
-            background_tasks=bg_tasks,
             user=test_user,
             db=db_session,
         )
@@ -593,15 +567,12 @@ async def test_upload_requirements_empty_csv(db_session: Session, test_user: Use
     mock_file.read = AsyncMock(return_value=csv_content)
     mock_file.filename = "empty.csv"
 
-    bg_tasks = BackgroundTasks()
-
     with patch(
         "app.file_utils.parse_tabular_file",
         return_value=[],
     ):
         result = await upload_requirements(
             req_id=test_requisition.id,
-            background_tasks=bg_tasks,
             file=mock_file,
             user=test_user,
             db=db_session,
@@ -621,8 +592,6 @@ async def test_upload_requirements_with_valid_rows(db_session: Session, test_use
     mock_file.read = AsyncMock(return_value=csv_content)
     mock_file.filename = "bom.csv"
 
-    bg_tasks = BackgroundTasks()
-
     with (
         patch(
             "app.file_utils.parse_tabular_file",
@@ -638,7 +607,6 @@ async def test_upload_requirements_with_valid_rows(db_session: Session, test_use
     ):
         result = await upload_requirements(
             req_id=test_requisition.id,
-            background_tasks=bg_tasks,
             file=mock_file,
             user=test_user,
             db=db_session,
@@ -656,12 +624,9 @@ async def test_upload_requirements_requisition_not_found(db_session: Session, te
     mock_file.read = AsyncMock(return_value=b"mpn,qty\n")
     mock_file.filename = "test.csv"
 
-    bg_tasks = BackgroundTasks()
-
     with pytest.raises(HTTPException) as exc:
         await upload_requirements(
             req_id=99999,
-            background_tasks=bg_tasks,
             file=mock_file,
             user=test_user,
             db=db_session,
@@ -687,8 +652,6 @@ async def test_add_requirements_resolve_material_card_exception(
         }
     )
 
-    bg_tasks = BackgroundTasks()
-
     with patch(
         "app.routers.requisitions.requirements.resolve_material_card",
         side_effect=Exception("DB error"),
@@ -696,7 +659,6 @@ async def test_add_requirements_resolve_material_card_exception(
         result = await add_requirements(
             req_id=test_requisition.id,
             request=mock_req,
-            background_tasks=bg_tasks,
             user=test_user,
             db=db_session,
         )
@@ -738,8 +700,6 @@ async def test_add_requirements_with_customer_site_tag_propagation(
         }
     )
 
-    bg_tasks = BackgroundTasks()
-
     # resolve_material_card returns a material card so material_card_id is set
     with (
         patch(
@@ -754,7 +714,6 @@ async def test_add_requirements_with_customer_site_tag_propagation(
         result = await add_requirements(
             req_id=req_with_site.id,
             request=mock_req,
-            background_tasks=bg_tasks,
             user=test_user,
             db=db_session,
         )
@@ -779,8 +738,6 @@ async def test_add_requirements_task_service_exception(
         }
     )
 
-    bg_tasks = BackgroundTasks()
-
     with (
         patch(
             "app.routers.requisitions.requirements.resolve_material_card",
@@ -794,7 +751,6 @@ async def test_add_requirements_task_service_exception(
         result = await add_requirements(
             req_id=test_requisition.id,
             request=mock_req,
-            background_tasks=bg_tasks,
             user=test_user,
             db=db_session,
         )
@@ -815,8 +771,6 @@ async def test_upload_requirements_with_substitutes_column(
     mock_file.read = AsyncMock(return_value=b"mpn,qty,substitutes\nLM317T,100,LM317AT,LM317BT\n")
     mock_file.filename = "bom.csv"
 
-    bg_tasks = BackgroundTasks()
-
     with (
         patch(
             "app.file_utils.parse_tabular_file",
@@ -831,7 +785,6 @@ async def test_upload_requirements_with_substitutes_column(
     ):
         result = await upload_requirements(
             req_id=test_requisition.id,
-            background_tasks=bg_tasks,
             file=mock_file,
             user=test_user,
             db=db_session,
@@ -850,8 +803,6 @@ async def test_upload_requirements_with_invalid_substitute_normalized_to_none(
     mock_file.read = AsyncMock(return_value=b"mpn,qty,substitutes\nLM317T,100,AB\n")
     mock_file.filename = "bom.csv"
 
-    bg_tasks = BackgroundTasks()
-
     # "AB" is too short (< 3 chars) → normalize_mpn returns None → line 603 continue
     with (
         patch(
@@ -867,7 +818,6 @@ async def test_upload_requirements_with_invalid_substitute_normalized_to_none(
     ):
         result = await upload_requirements(
             req_id=test_requisition.id,
-            background_tasks=bg_tasks,
             file=mock_file,
             user=test_user,
             db=db_session,

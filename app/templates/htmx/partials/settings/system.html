@@ -14,6 +14,7 @@
   Called by: htmx_views.py settings_system_tab endpoint.
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
+{% from "htmx/partials/shared/_macros.html" import lazy_body %}
 
 <div class="max-w-2xl">
   <div class="bg-white border border-line-base rounded-lg p-4 mb-6">
@@ -112,20 +113,14 @@
   </div>
 
   {# Connector Health — read-only diagnostics, same require_admin gate as this tab.
-     hx-target="this" avoids inheriting <main#main-content hx-target="this">;
-     hx-push-url="false" because hx-push-url is inherited from the tab nav and a
-     background loader must never rewrite the URL. #}
-  <div hx-get="/v2/partials/admin/api-health"
-       hx-target="this"
-       hx-trigger="load"
-       hx-swap="innerHTML"
-       hx-push-url="false"
-       hx-indicator="#api-health-spinner"
-       class="mb-6">
+     lazy_body emits the explicit hx-target guard (never inherits <main#main-content
+     hx-target="this">); hx-push-url="false" because hx-push-url is inherited from
+     the tab nav and a background loader must never rewrite the URL. #}
+  {% call lazy_body(url='/v2/partials/admin/api-health', target='this', class_='mb-6', indicator='#api-health-spinner', extra_attrs='hx-push-url="false"') %}
     <div id="api-health-spinner" class="htmx-indicator flex items-center justify-center py-4">
       <svg class="h-5 w-5 text-gray-400 animate-spin" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
     </div>
-  </div>
+  {% endcall %}
 
   {# Read-only job-state watermarks — collapsed disclosure, never editable. #}
   {% if job_state %}

@@ -1220,6 +1220,14 @@ SP4 Account Reclamation config keys (sourced from `.env` / `app/config.py`):
 
 ### Search Queues
 
+> **Shared ORM mixins (simplify sweep, model-layer only — no schema change).** The nine
+> ics/nc/tbf queue + search-log + worker-status models now declare their common columns,
+> indexes, and constraints once via `SearchQueueMixin` / `SearchLogMixin` /
+> `WorkerStatusMixin` in `app/models/marketplace_search.py` (marketplace-derived names
+> like `uq_{prefix}_queue_requirement_mpn` / `ck_{prefix}_worker_status_singleton` come
+> from each concrete class's `__tablename__`). Each `app/models/{ics,nc,tbf}_*.py` file
+> keeps its concrete class and any marketplace-specific columns.
+
 **`ics_search_queue`** — ICS browser automation queue (priority, status, gate_decision). Dedup keyed on `(requirement_id, normalized_mpn)` — backed by a composite UNIQUE (`uq_ics_queue_requirement_mpn`) that replaced the legacy per-requirement UNIQUE — so the spec-code resolver can enqueue multiple AVL MPNs per requirement while concurrent enqueues still can't double-insert (the app-layer check in `QueueManager.enqueue_search` catches the resulting `IntegrityError` and returns the winning row); carries `resolved_via_spec_code` lineage. `status` (String 20, default `pending`) uses the `SearchQueueStatus` StrEnum (app/constants.py): `pending` (enqueued, awaiting AI-gate classification) -> `queued` (gate approved, or reclaimed after a stale/failed attempt) -> `searching` (claimed by a worker) -> `completed` (results recorded) or `gated_out` (AI gate decided not worth searching) or `failed` (worker gave up after retries/circuit-breaker trip). `app/services/search_worker_base/{queue_manager,ai_gate}.py` and the ics_worker wrapper are the sole readers/writers; values are DB-persisted `String` columns, not native DB enums, so they must equal the pre-enum string literals exactly.
 **`nc_search_queue`** — NetComponents browser automation queue (same structure + same composite-UNIQUE dedup `uq_nc_queue_requirement_mpn` / lineage change; same `SearchQueueStatus` vocabulary, nc_worker as reader/writer)
 **`tbf_search_queue`** — The Broker Forum (thebrokersite.com) browser automation queue (same structure + same composite-UNIQUE dedup `uq_tbf_queue_requirement_mpn` / lineage change; same `SearchQueueStatus` vocabulary, tbf_worker as reader/writer). Backed by the `avail-tbf-worker` host worker (ACTIVE: authenticates with member creds and records the real seller `vendor_name` + `vendor_phone` per listing). Sister tables `tbf_search_log` (per-search audit) + `tbf_worker_status` (singleton id=1 heartbeat row, seeded by migration 130 / `seed_tbf_worker_status_singleton`).

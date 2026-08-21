@@ -4,6 +4,7 @@
    Called by: requisition tab route.
    Depends on: HTMX, brand palette.
 #}
+{% from "htmx/partials/shared/_macros.html" import spinner -%}
 <div>
   {# Action bar #}
   <div class="flex items-center justify-between mb-4">
@@ -20,7 +21,7 @@
       </svg>
       Poll Inbox
       <span id="poll-spinner" class="htmx-indicator">
-        <svg class="animate-spin h-3 w-3 text-brand-500" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+        {{ spinner('animate-spin h-3 w-3 text-brand-500') }}
       </span>
     </button>
   </div>

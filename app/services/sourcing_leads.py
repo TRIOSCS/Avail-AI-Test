@@ -379,6 +379,72 @@ def _compute_vendor_safety(
     return score, flags, summary
 
 
+# Human-readable, caution-language labels for the vendor-safety signal codes — feeds
+# the reusable safety_review.html signal lists (which want display strings, not codes).
+_SAFETY_FLAG_LABELS: dict[str, str] = {
+    "internal_do_not_contact_history": "On the internal do-not-contact list",
+    "buyer_marked_do_not_contact": "A buyer flagged this vendor do-not-contact",
+    "high_cancellation_rate": "History of order cancellations",
+    "repeated_bad_feedback": "Repeated unfavorable buyer feedback",
+    "no_business_footprint": "No verifiable business footprint (no site/domain)",
+    "limited_business_footprint": "Limited business footprint",
+    "unverifiable_address": "No verifiable business address",
+    "conflicting_contact_info": "No verified contact channels on file",
+    "limited_verified_contact_channels": "Few verified contact channels",
+    "new_domain": "New to us — no internal history",
+    "no_internal_vendor_profile": "No internal vendor profile",
+    "marketplace_trust_unknown": "Marketplace trust unknown",
+    "verified_business_footprint": "Verified business footprint",
+    "business_website_exists": "Business website on file",
+    "email_domain_matches_website": "Email domain matches the website",
+    "contact_channels_present": "Contact channels present",
+    "established_relationship": "Established relationship",
+    "proven_success_history": "Proven success history",
+    "marketplace_listing_found": "Marketplace listing found",
+}
+
+
+def _safety_label(code: str) -> str:
+    return _SAFETY_FLAG_LABELS.get(code, code.replace("_", " ").capitalize())
+
+
+def vendor_safety_for_card(db: Session, vendor_card: VendorCard | None) -> dict:
+    """Vendor safety band + caution/positive signals computed from a VendorCard alone.
+
+    The single shared vendor-risk computation used by BOTH the offer Pre-check and the
+    buy-plan flag generator, so the same vendor can never show two different risk reads
+    on two screens. Reuses ``_compute_vendor_safety`` (the vendor-page model) with a
+    card-only contactability floor (no Sighting in scope) and the vendor-wide,
+    time-decayed buyer-feedback rollup.
+
+    Returns ``{band, score, summary, caution, positives}``: ``caution`` is the list of
+    non-positive signal codes (the "red flags"); ``positives`` strips the ``positive:``
+    prefix. ``band`` is "unknown" when there is no vendor card.
+    """
+    contactability = 0.0
+    if vendor_card is not None:
+        if vendor_card.emails:
+            contactability = 70.0
+        elif vendor_card.phones:
+            contactability = 60.0
+        if vendor_card.website or vendor_card.domain:
+            contactability = min(100.0, contactability + 20.0)
+    fb = get_vendor_feedback_adjustment(db, vendor_card.id if vendor_card is not None else None)
+    score, flags, summary = _compute_vendor_safety(vendor_card, contactability, fb.safety_penalty, fb.do_not_contact)
+    caution = [f for f in flags if not f.startswith("positive:")]
+    positives = [f.removeprefix("positive:") for f in flags if f.startswith("positive:")]
+    return {
+        "band": _safety_band(score, has_vendor_data=vendor_card is not None),
+        "score": score,
+        "summary": summary,
+        "caution": caution,
+        "positives": positives,
+        # Human-readable versions for the safety_review.html signal lists.
+        "caution_labels": [_safety_label(c) for c in caution],
+        "positive_labels": [_safety_label(p) for p in positives],
+    }
+
+
 def _source_category(source_type: str) -> str:
     """Map a connector source_type to a handoff-spec source category.
 

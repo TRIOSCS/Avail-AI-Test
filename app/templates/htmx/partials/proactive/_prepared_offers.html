@@ -22,7 +22,7 @@
       <div class="flex-1 min-w-0">
         <p class="text-sm font-medium text-gray-900 truncate">{{ p.company_name }}</p>
         <p class="text-xs text-gray-500 truncate">
-          {{ p.line_count }} part{{ 's' if p.line_count != 1 }} · ${{ "{:,.2f}".format(p.total_sell) }}
+          {{ p.line_count }} part{{ 's' if p.line_count != 1 }} · ${{ p.total_sell|money }}
           {% if scope == 'all' %} · {{ p.salesperson_name }}{% endif %}
           ·
           {% if p.recipient_emails %}to {{ p.recipient_emails | join(', ') }}{% else %}<span class="text-rose-600 font-medium">no contact on file</span>{% endif %}

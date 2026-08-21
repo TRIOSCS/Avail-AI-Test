@@ -64,14 +64,9 @@ def _ctx(request: Request, user: User) -> dict:
 
 def _resolve_card(db: Session, key: str) -> MaterialCard | None:
     """Look up a live MaterialCard by normalized key (never creates one)."""
-    if not key:
-        return None
-    return (
-        db.query(MaterialCard)
-        .filter(MaterialCard.normalized_mpn == key)
-        .filter(MaterialCard.deleted_at.is_(None))
-        .first()
-    )
+    from ..services.material_card_service import get_live_card_by_key
+
+    return get_live_card_by_key(db, key)
 
 
 @router.get("/v2/partials/search/dossier/hero", response_class=HTMLResponse)
@@ -324,6 +319,19 @@ def _redirect_to_req(req: Requisition | None) -> HTMLResponse:
     return HTMLResponse("", status_code=200, headers={"HX-Redirect": f"/v2/requisitions/{req.id}"})
 
 
+async def _quick_source_action(db: Session, user: User, mpn: str, items: str, vendor_name: str) -> HTMLResponse:
+    """Shared impl for both quick-source routes: start the scratch req, redirect, and
+    fire the background datasheet capture."""
+    response = _redirect_to_req(_start_quick_source(db, user, mpn, items, vendor_name))
+    if mpn.strip():
+        from ..services.datasheet_capture import capture_datasheet
+
+        await safe_background_task(
+            capture_datasheet(mpn.strip().upper(), user.id), task_name="datasheet_capture", suppress_in_testing=True
+        )
+    return response
+
+
 @router.post("/v2/partials/search/quick-source/rfq", response_class=HTMLResponse)
 async def quick_source_rfq(
     mpn: str = Form(""),
@@ -333,14 +341,7 @@ async def quick_source_rfq(
     db: Session = Depends(get_db),
 ):
     """Send RFQ from the dossier → scratch req + captured sightings → its workspace."""
-    response = _redirect_to_req(_start_quick_source(db, user, mpn, items, vendor_name))
-    if mpn.strip():
-        from ..services.datasheet_capture import capture_datasheet
-
-        await safe_background_task(
-            capture_datasheet(mpn.strip().upper(), user.id), task_name="datasheet_capture", suppress_in_testing=True
-        )
-    return response
+    return await _quick_source_action(db, user, mpn, items, vendor_name)
 
 
 @router.post("/v2/partials/search/quick-source/offer", response_class=HTMLResponse)
@@ -352,14 +353,7 @@ async def quick_source_offer(
     db: Session = Depends(get_db),
 ):
     """Add Offer from the dossier → scratch req + captured sightings → its workspace."""
-    response = _redirect_to_req(_start_quick_source(db, user, mpn, items, vendor_name))
-    if mpn.strip():
-        from ..services.datasheet_capture import capture_datasheet
-
-        await safe_background_task(
-            capture_datasheet(mpn.strip().upper(), user.id), task_name="datasheet_capture", suppress_in_testing=True
-        )
-    return response
+    return await _quick_source_action(db, user, mpn, items, vendor_name)
 
 
 @router.get("/v2/partials/search/dossier/datasheet/{datasheet_id:int}/download")

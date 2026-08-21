@@ -1,0 +1,32 @@
+{# customers/tabs/requisitions_tab.html — company detail "Requisitions" tab.
+
+   Rendered by app/routers/htmx/_shared_tabs.py::company_tab (tab == "requisitions").
+   Context: reqs — up to 50 requisitions linked to the account (FK or name match),
+   newest first. Markup mirrors the former Python f-string block exactly. #}
+{% if reqs %}
+<div class="overflow-x-auto">
+  <table class="min-w-full divide-y divide-gray-200">
+    <thead class="bg-gray-50">
+      <tr>
+        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Created</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-200">
+      {% for r in reqs %}
+      <tr class="hover:bg-brand-50 cursor-pointer"
+          hx-get="/v2/partials/requisitions/{{ r.id }}"
+          hx-target="#main-content"
+          hx-push-url="/v2/requisitions/{{ r.id }}">
+        <td class="px-4 py-2 text-sm font-medium text-brand-500">{{ r.name or "" }}</td>
+        <td class="px-4 py-2 text-sm text-gray-500">{{ r.status or "—" }}</td>
+        <td class="px-4 py-2 text-sm text-gray-500">{{ r.created_at.strftime("%b %d, %Y") if r.created_at else "—" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="p-8 text-center"><p class="text-sm text-gray-500">No requisitions for this company.</p></div>
+{% endif %}

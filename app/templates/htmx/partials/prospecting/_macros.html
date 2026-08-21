@@ -17,3 +17,21 @@
 {%- macro score_bar_color(score) -%}
 {% if score >= 70 %}bg-emerald-500{% elif score >= 40 %}bg-amber-500{% else %}bg-rose-500{% endif %}
 {%- endmacro -%}
+
+{% from "htmx/partials/shared/_macros.html" import status_badge %}
+
+{# Prospect status → badge. The single color map for the four prospect states —
+   card and detail both call this so they can never diverge. #}
+{%- macro prospect_status_badge(status) -%}
+{{ status_badge(status, status_map={
+  'suggested': 'bg-brand-100 text-brand-600 border-brand-200',
+  'claimed': 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  'converted': 'bg-violet-100 text-violet-700 border-violet-200',
+  'dismissed': 'bg-gray-100 text-gray-600 border-gray-200'
+}) }}
+{%- endmacro -%}
+
+{# Shared score_def tooltip copy — Fit and Readiness read the same in the card
+   and the detail header (import as `score.FIT_TOOLTIP` / `score.READINESS_TOOLTIP`). #}
+{% set FIT_TOOLTIP = 'ICP fit (0-100): industry match, company size, procurement staff, NAICS, geography, and broker usage.' %}
+{% set READINESS_TOOLTIP = 'Buy-now readiness (0-100): buying intent, company events, hiring, new procurement hires, and contact quality.' %}

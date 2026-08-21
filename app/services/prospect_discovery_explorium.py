@@ -22,10 +22,7 @@ from app.config import settings
 from app.connectors import explorium
 from app.schemas.prospect_account import ProspectAccountCreate
 from app.services.enrichment_credit_guard import ProviderQuotaError
-from app.services.prospect_scoring import (
-    calculate_fit_score,
-    calculate_readiness_score,
-)
+from app.utils.normalization import parse_website_domain
 
 # Kept for backward-compatible imports (app.services.prospect_signals reads these).
 EXPLORIUM_BASE = getattr(settings, "explorium_api_base_url", "https://api.explorium.ai")
@@ -158,7 +155,7 @@ def normalize_explorium_result(raw: dict, segment_key: str) -> dict:
     Extracts firmographics + signals into a unified dict ready for scoring.
     """
     domain = (
-        (raw.get("domain") or raw.get("website_domain") or _domain_from_website(raw.get("website")) or "")
+        (raw.get("domain") or raw.get("website_domain") or parse_website_domain(raw.get("website") or "") or "")
         .strip()
         .lower()
     )
@@ -264,13 +261,6 @@ def normalize_explorium_result(raw: dict, segment_key: str) -> dict:
     result["enrichment_raw"] = raw
 
     return result
-
-
-def _domain_from_website(website: str | None) -> str:
-    """Derive a bare domain from a website URL (strips scheme + path)."""
-    if not website:
-        return ""
-    return website.replace("https://", "").replace("http://", "").split("/")[0]
 
 
 def _fmt_band(obj) -> str | None:
@@ -467,23 +457,14 @@ async def run_explorium_discovery_batch(
 
                 seen_domains.add(domain)
 
-                # Score immediately with signal data
-                fit_data = {
-                    "name": r.get("name"),
-                    "industry": r.get("industry"),
-                    "naics_code": r.get("naics_code"),
-                    "employee_count_range": r.get("employee_count_range"),
-                    "region": r.get("region"),
-                    "uses_brokers": None,
-                }
-                fit_score, fit_reasoning = calculate_fit_score(fit_data)
-
+                # No scoring here: ProspectAccountCreate carries no score fields, and
+                # prospect_scheduler._persist_discovery_results scores every row at
+                # persist (the single arbitration point for all discovery sources).
                 signals = {
                     "intent": r.get("intent", {}),
                     "events": r.get("events", []),
                     "hiring": r.get("hiring", {}),
                 }
-                readiness_score, readiness_breakdown = calculate_readiness_score(fit_data, signals)
 
                 prospect = ProspectAccountCreate(
                     name=r["name"],

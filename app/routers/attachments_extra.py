@@ -25,6 +25,9 @@ Called by: app/main.py (router registration)
 Depends on: app/services/attachment_service, all attachment models, app/dependencies
 """
 
+from collections.abc import Callable
+from dataclasses import dataclass
+
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from sqlalchemy.orm import Session, selectinload
 
@@ -102,6 +105,117 @@ def db_get_vendor_card(db: Session, vendor_id: int) -> VendorCard | None:
 
 
 # ---------------------------------------------------------------------------
+# Per-kind entity gates + endpoint spec (shared by list/upload/delete below)
+# ---------------------------------------------------------------------------
+
+
+def _company_access(db: Session, user: User, company_id: int) -> bool:
+    """True if the user may manage the company (user_can_access_company)."""
+    return user_can_access_company(db, user, company_id) is not None
+
+
+def _site_contact_access(db: Session, user: User, contact_id: int) -> bool:
+    """True if the contact exists and the user may manage its owning company (contact →
+    CustomerSite → Company chain)."""
+    contact = db.get(SiteContact, contact_id)
+    if not contact:
+        return False
+    site = db.get(CustomerSite, contact.customer_site_id)
+    return bool(site and user_can_access_company(db, user, site.company_id))
+
+
+def _material_access(db: Session, user: User, card_id: int) -> bool:
+    """Material cards are a shared catalog — existence + require_user is sufficient."""
+    return db.get(MaterialCard, card_id) is not None
+
+
+def _vendor_access(db: Session, user: User, vendor_id: int) -> bool:
+    """Any authenticated user may access any existing vendor."""
+    return db_get_vendor_card(db, vendor_id) is not None
+
+
+def _vendor_contact_access(db: Session, user: User, contact_id: int) -> bool:
+    """Any authenticated user may access any existing vendor contact."""
+    return db.get(VendorContact, contact_id) is not None
+
+
+@dataclass(frozen=True)
+class _AttachmentSpec:
+    """Everything kind-specific about one entity's attachment endpoint triplet."""
+
+    model: type
+    fk_field: str
+    entity_label: str
+    not_found: str  # 404 detail when the entity is missing / not accessible
+    access: Callable[[Session, User, int], bool]
+
+
+_ATTACH_SPECS: dict[str, _AttachmentSpec] = {
+    "company": _AttachmentSpec(CompanyAttachment, "company_id", "Companies", "Company not found", _company_access),
+    "contact": _AttachmentSpec(
+        SiteContactAttachment, "site_contact_id", "Contacts", "Contact not found", _site_contact_access
+    ),
+    "material": _AttachmentSpec(
+        MaterialCardAttachment, "material_card_id", "Materials", "Material card not found", _material_access
+    ),
+    "vendor_card": _AttachmentSpec(
+        VendorCardAttachment, "vendor_card_id", "Vendors", "Vendor not found", _vendor_access
+    ),
+    "vendor_contact": _AttachmentSpec(
+        VendorContactAttachment,
+        "vendor_contact_id",
+        "VendorContacts",
+        "Vendor contact not found",
+        _vendor_contact_access,
+    ),
+}
+
+
+def _list_attachments(kind: str, entity_id: int, request: Request, user: User, db: Session):
+    """Shared list body: gate on the entity, query newest-first, render/serialize."""
+    spec = _ATTACH_SPECS[kind]
+    if not spec.access(db, user, entity_id):
+        raise HTTPException(404, spec.not_found)
+    atts = (
+        db.query(spec.model)
+        .options(selectinload(spec.model.uploaded_by))
+        .filter(getattr(spec.model, spec.fk_field) == entity_id)
+        .order_by(spec.model.created_at.desc())
+        .all()
+    )
+    return attachment_service.attachment_list_response(request, kind=kind, entity_id=entity_id, rows=atts)
+
+
+async def _upload_attachment(kind: str, entity_id: int, file: UploadFile, user: User, db: Session):
+    """Shared upload body: gate on the entity, store + attach, serialize."""
+    spec = _ATTACH_SPECS[kind]
+    if not spec.access(db, user, entity_id):
+        raise HTTPException(404, spec.not_found)
+    att = await attachment_service.store_and_attach(
+        db,
+        model=spec.model,
+        fk_field=spec.fk_field,
+        entity_label=spec.entity_label,
+        entity_id=entity_id,
+        file=file,
+        user=user,
+    )
+    return attachment_service.serialize(att)
+
+
+async def _delete_attachment(kind: str, att_id: int, user: User, db: Session):
+    """Shared delete body: gate on the owning entity, best-effort cloud delete + row
+    removal."""
+    spec = _ATTACH_SPECS[kind]
+    att = db.get(spec.model, att_id)
+    if not att:
+        raise HTTPException(404, "Attachment not found")
+    if not spec.access(db, user, getattr(att, spec.fk_field)):
+        raise HTTPException(404, "Attachment not found")
+    return await attachment_service.remove_attachment(db, att, user)
+
+
+# ---------------------------------------------------------------------------
 # Serve-route ownership check (closes Task 4 TODO)
 # ---------------------------------------------------------------------------
 
@@ -128,11 +242,7 @@ def _check_serve_access(kind: str, att, user: User, db: Session) -> None:
         if not user_can_access_company(db, user, att.company_id):
             raise HTTPException(404, "Attachment not found")
     elif kind == "contact":
-        contact = db.get(SiteContact, att.site_contact_id)
-        if not contact:
-            raise HTTPException(404, "Attachment not found")
-        site = db.get(CustomerSite, contact.customer_site_id)
-        if not site or not user_can_access_company(db, user, site.company_id):
+        if not _site_contact_access(db, user, att.site_contact_id):
             raise HTTPException(404, "Attachment not found")
     elif kind == "material":
         # Material cards are a shared catalog — require_user is sufficient.
@@ -188,17 +298,7 @@ async def list_company_attachments(
     db: Session = Depends(get_db),
 ):
     """List attachments on a company, newest first (HTML for HTMX, JSON otherwise)."""
-    company = user_can_access_company(db, user, company_id)
-    if not company:
-        raise HTTPException(404, "Company not found")
-    atts = (
-        db.query(CompanyAttachment)
-        .options(selectinload(CompanyAttachment.uploaded_by))
-        .filter(CompanyAttachment.company_id == company_id)
-        .order_by(CompanyAttachment.created_at.desc())
-        .all()
-    )
-    return attachment_service.attachment_list_response(request, kind="company", entity_id=company_id, rows=atts)
+    return _list_attachments("company", company_id, request, user, db)
 
 
 @router.post("/api/companies/{company_id}/attachments")
@@ -209,19 +309,7 @@ async def upload_company_attachment(
     db: Session = Depends(get_db),
 ):
     """Upload a file and attach it to a company."""
-    company = user_can_access_company(db, user, company_id)
-    if not company:
-        raise HTTPException(404, "Company not found")
-    att = await attachment_service.store_and_attach(
-        db,
-        model=CompanyAttachment,
-        fk_field="company_id",
-        entity_label="Companies",
-        entity_id=company_id,
-        file=file,
-        user=user,
-    )
-    return attachment_service.serialize(att)
+    return await _upload_attachment("company", company_id, file, user, db)
 
 
 @router.delete("/api/company-attachments/{att_id}")
@@ -231,12 +319,7 @@ async def delete_company_attachment(
     db: Session = Depends(get_db),
 ):
     """Delete a company attachment (best-effort cloud delete + DB row removal)."""
-    att = db.get(CompanyAttachment, att_id)
-    if not att:
-        raise HTTPException(404, "Attachment not found")
-    if not user_can_access_company(db, user, att.company_id):
-        raise HTTPException(404, "Attachment not found")
-    return await attachment_service.remove_attachment(db, att, user)
+    return await _delete_attachment("company", att_id, user, db)
 
 
 # ---------------------------------------------------------------------------
@@ -253,20 +336,7 @@ async def list_contact_attachments(
 ):
     """List attachments on a site contact, newest first (HTML for HTMX, JSON
     otherwise)."""
-    contact = db.get(SiteContact, contact_id)
-    if not contact:
-        raise HTTPException(404, "Contact not found")
-    site = db.get(CustomerSite, contact.customer_site_id)
-    if not site or not user_can_access_company(db, user, site.company_id):
-        raise HTTPException(404, "Contact not found")
-    atts = (
-        db.query(SiteContactAttachment)
-        .options(selectinload(SiteContactAttachment.uploaded_by))
-        .filter(SiteContactAttachment.site_contact_id == contact_id)
-        .order_by(SiteContactAttachment.created_at.desc())
-        .all()
-    )
-    return attachment_service.attachment_list_response(request, kind="contact", entity_id=contact_id, rows=atts)
+    return _list_attachments("contact", contact_id, request, user, db)
 
 
 @router.post("/api/contacts/{contact_id}/attachments")
@@ -277,22 +347,7 @@ async def upload_contact_attachment(
     db: Session = Depends(get_db),
 ):
     """Upload a file and attach it to a site contact."""
-    contact = db.get(SiteContact, contact_id)
-    if not contact:
-        raise HTTPException(404, "Contact not found")
-    site = db.get(CustomerSite, contact.customer_site_id)
-    if not site or not user_can_access_company(db, user, site.company_id):
-        raise HTTPException(404, "Contact not found")
-    att = await attachment_service.store_and_attach(
-        db,
-        model=SiteContactAttachment,
-        fk_field="site_contact_id",
-        entity_label="Contacts",
-        entity_id=contact_id,
-        file=file,
-        user=user,
-    )
-    return attachment_service.serialize(att)
+    return await _upload_attachment("contact", contact_id, file, user, db)
 
 
 @router.delete("/api/contact-attachments/{att_id}")
@@ -302,16 +357,7 @@ async def delete_contact_attachment(
     db: Session = Depends(get_db),
 ):
     """Delete a contact attachment (best-effort cloud delete + DB row removal)."""
-    att = db.get(SiteContactAttachment, att_id)
-    if not att:
-        raise HTTPException(404, "Attachment not found")
-    contact = db.get(SiteContact, att.site_contact_id)
-    if not contact:
-        raise HTTPException(404, "Attachment not found")
-    site = db.get(CustomerSite, contact.customer_site_id)
-    if not site or not user_can_access_company(db, user, site.company_id):
-        raise HTTPException(404, "Attachment not found")
-    return await attachment_service.remove_attachment(db, att, user)
+    return await _delete_attachment("contact", att_id, user, db)
 
 
 # ---------------------------------------------------------------------------
@@ -328,18 +374,7 @@ async def list_material_card_attachments(
 ):
     """List attachments on a material card, newest first (HTML for HTMX, JSON
     otherwise)."""
-    # Material cards are a shared catalog — require_user is sufficient.
-    card = db.get(MaterialCard, card_id)
-    if not card:
-        raise HTTPException(404, "Material card not found")
-    atts = (
-        db.query(MaterialCardAttachment)
-        .options(selectinload(MaterialCardAttachment.uploaded_by))
-        .filter(MaterialCardAttachment.material_card_id == card_id)
-        .order_by(MaterialCardAttachment.created_at.desc())
-        .all()
-    )
-    return attachment_service.attachment_list_response(request, kind="material", entity_id=card_id, rows=atts)
+    return _list_attachments("material", card_id, request, user, db)
 
 
 @router.post("/api/material-cards/{card_id}/attachments")
@@ -350,20 +385,7 @@ async def upload_material_card_attachment(
     db: Session = Depends(get_db),
 ):
     """Upload a file and attach it to a material card."""
-    # Material cards are a shared catalog — require_user is sufficient.
-    card = db.get(MaterialCard, card_id)
-    if not card:
-        raise HTTPException(404, "Material card not found")
-    att = await attachment_service.store_and_attach(
-        db,
-        model=MaterialCardAttachment,
-        fk_field="material_card_id",
-        entity_label="Materials",
-        entity_id=card_id,
-        file=file,
-        user=user,
-    )
-    return attachment_service.serialize(att)
+    return await _upload_attachment("material", card_id, file, user, db)
 
 
 @router.delete("/api/material-card-attachments/{att_id}")
@@ -373,13 +395,7 @@ async def delete_material_card_attachment(
     db: Session = Depends(get_db),
 ):
     """Delete a material card attachment (best-effort cloud delete + DB row removal)."""
-    att = db.get(MaterialCardAttachment, att_id)
-    if not att:
-        raise HTTPException(404, "Attachment not found")
-    # Material cards are a shared catalog — require_user is sufficient.
-    if not db.get(MaterialCard, att.material_card_id):
-        raise HTTPException(404, "Attachment not found")
-    return await attachment_service.remove_attachment(db, att, user)
+    return await _delete_attachment("material", att_id, user, db)
 
 
 # ---------------------------------------------------------------------------
@@ -396,17 +412,7 @@ async def list_vendor_card_attachments(
 ):
     """List attachments on a vendor card, newest first (HTML for HTMX, JSON
     otherwise)."""
-    vendor = db_get_vendor_card(db, vendor_id)
-    if not vendor:
-        raise HTTPException(404, "Vendor not found")
-    atts = (
-        db.query(VendorCardAttachment)
-        .options(selectinload(VendorCardAttachment.uploaded_by))
-        .filter(VendorCardAttachment.vendor_card_id == vendor_id)
-        .order_by(VendorCardAttachment.created_at.desc())
-        .all()
-    )
-    return attachment_service.attachment_list_response(request, kind="vendor_card", entity_id=vendor_id, rows=atts)
+    return _list_attachments("vendor_card", vendor_id, request, user, db)
 
 
 @router.post("/api/vendors/{vendor_id}/attachments")
@@ -417,19 +423,7 @@ async def upload_vendor_card_attachment(
     db: Session = Depends(get_db),
 ):
     """Upload a file and attach it to a vendor card."""
-    vendor = db_get_vendor_card(db, vendor_id)
-    if not vendor:
-        raise HTTPException(404, "Vendor not found")
-    att = await attachment_service.store_and_attach(
-        db,
-        model=VendorCardAttachment,
-        fk_field="vendor_card_id",
-        entity_label="Vendors",
-        entity_id=vendor_id,
-        file=file,
-        user=user,
-    )
-    return attachment_service.serialize(att)
+    return await _upload_attachment("vendor_card", vendor_id, file, user, db)
 
 
 @router.delete("/api/vendor-attachments/{att_id}")
@@ -439,12 +433,7 @@ async def delete_vendor_card_attachment(
     db: Session = Depends(get_db),
 ):
     """Delete a vendor card attachment (best-effort cloud delete + DB row removal)."""
-    att = db.get(VendorCardAttachment, att_id)
-    if not att:
-        raise HTTPException(404, "Attachment not found")
-    if not db_get_vendor_card(db, att.vendor_card_id):
-        raise HTTPException(404, "Attachment not found")
-    return await attachment_service.remove_attachment(db, att, user)
+    return await _delete_attachment("vendor_card", att_id, user, db)
 
 
 # ---------------------------------------------------------------------------
@@ -461,17 +450,7 @@ async def list_vendor_contact_attachments(
 ):
     """List attachments on a vendor contact, newest first (HTML for HTMX, JSON
     otherwise)."""
-    contact = db.get(VendorContact, contact_id)
-    if not contact:
-        raise HTTPException(404, "Vendor contact not found")
-    atts = (
-        db.query(VendorContactAttachment)
-        .options(selectinload(VendorContactAttachment.uploaded_by))
-        .filter(VendorContactAttachment.vendor_contact_id == contact_id)
-        .order_by(VendorContactAttachment.created_at.desc())
-        .all()
-    )
-    return attachment_service.attachment_list_response(request, kind="vendor_contact", entity_id=contact_id, rows=atts)
+    return _list_attachments("vendor_contact", contact_id, request, user, db)
 
 
 @router.post("/api/vendor-contacts/{contact_id}/attachments")
@@ -482,19 +461,7 @@ async def upload_vendor_contact_attachment(
     db: Session = Depends(get_db),
 ):
     """Upload a file and attach it to a vendor contact."""
-    contact = db.get(VendorContact, contact_id)
-    if not contact:
-        raise HTTPException(404, "Vendor contact not found")
-    att = await attachment_service.store_and_attach(
-        db,
-        model=VendorContactAttachment,
-        fk_field="vendor_contact_id",
-        entity_label="VendorContacts",
-        entity_id=contact_id,
-        file=file,
-        user=user,
-    )
-    return attachment_service.serialize(att)
+    return await _upload_attachment("vendor_contact", contact_id, file, user, db)
 
 
 @router.delete("/api/vendor-contact-attachments/{att_id}")
@@ -505,9 +472,4 @@ async def delete_vendor_contact_attachment(
 ):
     """Delete a vendor contact attachment (best-effort cloud delete + DB row
     removal)."""
-    att = db.get(VendorContactAttachment, att_id)
-    if not att:
-        raise HTTPException(404, "Attachment not found")
-    if not db.get(VendorContact, att.vendor_contact_id):
-        raise HTTPException(404, "Attachment not found")
-    return await attachment_service.remove_attachment(db, att, user)
+    return await _delete_attachment("vendor_contact", att_id, user, db)

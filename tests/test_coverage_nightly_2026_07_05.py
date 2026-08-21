@@ -411,7 +411,7 @@ class TestPrepaymentNotificationsExtra:
 
     def test_beneficiary_vendor_name_fallback(self, db_session: Session):
         """_beneficiary falls back to vendor_name when legal_name is None."""
-        from app.services.prepayment_notifications import _beneficiary
+        from app.services.prepayment_notifications import beneficiary_name as _beneficiary
 
         pp = _make_prepayment_stub(db_session)
         pp.vendor_name = "Snapshot Name"
@@ -421,7 +421,7 @@ class TestPrepaymentNotificationsExtra:
 
     def test_beneficiary_display_name_fallback(self, db_session: Session):
         """_beneficiary falls back to vc.display_name when no legal or snapshot."""
-        from app.services.prepayment_notifications import _beneficiary
+        from app.services.prepayment_notifications import beneficiary_name as _beneficiary
 
         pp = _make_prepayment_stub(db_session)
         pp.vendor_name = None
@@ -431,7 +431,7 @@ class TestPrepaymentNotificationsExtra:
 
     def test_beneficiary_dash_when_no_card(self, db_session: Session):
         """_beneficiary returns '—' when no vendor_card and no vendor_name."""
-        from app.services.prepayment_notifications import _beneficiary
+        from app.services.prepayment_notifications import beneficiary_name as _beneficiary
 
         pp = _make_prepayment_stub(db_session)
         pp.vendor_name = None

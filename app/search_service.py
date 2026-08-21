@@ -90,6 +90,21 @@ _CONNECTOR_SOURCE_MAP = {
 }
 
 
+def _worker_enqueues() -> tuple[tuple, ...]:
+    """(enqueue_fn, log_label) pairs for the browser-automation worker queues.
+
+    Iterated wherever a requirement (or AVL alias MPN) fans out to all async
+    workers — add a new worker here, not at each enqueue site. Resolved at call
+    time (not import time) so test patches of the module attributes
+    (``patch("app.search_service.enqueue_for_ics_search")``) still intercept.
+    """
+    return (
+        (enqueue_for_ics_search, "ICS"),
+        (enqueue_for_nc_search, "NC"),
+        (enqueue_for_tbf_search, "TBF"),
+    )
+
+
 def _median(values: list[float]) -> float | None:
     """Return the median of a list of numbers, or None if empty."""
     if not values:
@@ -643,6 +658,201 @@ def _persist_interactive_sightings(
         write_db.close()
 
 
+async def _run_spec_resolver_fallback(
+    req_id: int,
+    write_bind,
+    now: datetime,
+    db: Session,
+) -> tuple[list[dict], list[dict]]:
+    """Spec-code resolver fallback (spec §6) — zero-hit AVL re-fanout.
+
+    Resolves the requirement's spec-code to an AVL of real MPNs via a grounded
+    Claude call, re-fans the cooldown-stale AVL MPNs through the live connectors,
+    persists any resulting sightings, stamps the AVL cooldown clock, enqueues the
+    async workers per AVL MPN, and records pending-mapping usage.
+
+    Kept UNTHREADED (unlike search_requirement's primary save path): it makes its
+    own ~60s grounded Claude call already, so it can't avoid blocking briefly
+    regardless, and it only fires on the rare zero-hit + feature-flagged path —
+    not worth the added complexity of a second threaded write session for a cold
+    path. Opens its OWN write session on ``write_bind`` (mirrors
+    _persist_fru_aliases) since search_requirement's threaded write_db is already
+    closed; ``db`` (the caller's request session) is used only for the AVL
+    connector fan-out.
+
+    Returns ``(resolved_dicts, resolved_stats)``: sighting dicts to merge into the
+    caller's results and source stats for the caller to extend source_stats with.
+
+    Called by: search_requirement (only when ``spec_resolver_enabled`` and the
+    primary fan-out produced zero sightings).
+    """
+    from sqlalchemy.orm import sessionmaker as _sessionmaker
+
+    resolved_dicts: list[dict] = []
+    _ResolverSession = _sessionmaker(bind=write_bind, autocommit=False, autoflush=False, expire_on_commit=False)
+    resolver_db = _ResolverSession()
+    try:
+        resolver_write_req = resolver_db.get(Requirement, req_id)
+        if resolver_write_req is None:
+            logger.warning("spec_resolver: requirement {} not found in resolver session", req_id)
+            return [], []
+
+        try:
+            from app.services.spec_code_resolver import SpecCodeResolver
+
+            # resolve() owns its own persistence SAVEPOINT and releases the DB
+            # connection during the grounded LLM call, so we do NOT wrap it in a
+            # transaction here — doing so would pin a pooled connection for the
+            # call's ~60s duration. The sightings committed just above are durable
+            # and unaffected, and a concurrent-insert race is recovered inside
+            # resolve() (it reuses the winning row).
+            resolver = SpecCodeResolver(resolver_db)
+            resolution = await resolver.resolve(
+                resolver_write_req.primary_mpn,
+                oem=resolver_write_req.oem_hint or "IBM",
+            )
+        except Exception:
+            logger.warning(
+                "spec_resolver: resolve() failed for req {} mpn {}",
+                req_id,
+                resolver_write_req.primary_mpn,
+                exc_info=True,
+            )
+            resolution = None
+
+        if resolution is None or resolution.status == "unresolved" or not resolution.avl:
+            return [], []
+        avl_mpns = [entry["mpn"] for entry in resolution.avl if entry.get("mpn")]
+        if not avl_mpns:
+            return [], []
+
+        # Issue 2 fix: AVL re-fanout must honor the same per-MPN
+        # cooldown that the primary path applies via
+        # ``_mpn_cooldown_partition``, otherwise every click on
+        # a zero-hit spec-code burns connector quota on the same AVL
+        # set. ``now`` is the search timestamp computed earlier in
+        # the calling search.
+        to_fetch_avl, _cached_avl = _mpn_cooldown_partition(resolver_db, avl_mpns, now=now)
+
+        # Issue 3 fix: explicit try/except distinguishes "connectors
+        # crashed" from "no AVL hits". Design intent: still enqueue
+        # async workers + write pending bookkeeping even when the
+        # live connectors fail — the buyer benefits from worker
+        # output independent of connector outages.
+        try:
+            if to_fetch_avl:
+                resolved_fresh, resolved_stats = await _fetch_fresh(to_fetch_avl, db)
+            else:
+                resolved_fresh, resolved_stats = [], []
+        except Exception:
+            logger.warning(
+                "spec_resolver: AVL fanout failed for req {} (spec_code={}); still enqueueing workers for async pickup",
+                req_id,
+                resolver_write_req.primary_mpn,
+                exc_info=True,
+            )
+            resolved_fresh, resolved_stats = [], []
+
+        spec_code_tag = resolver_write_req.primary_mpn
+        for row in resolved_fresh:
+            row["resolved_via_spec_code"] = spec_code_tag
+            row["source_mpn"] = row.get("mpn") or row.get("mpn_matched")
+
+        resolved_succeeded = {
+            stat["source"]
+            for stat in resolved_stats
+            if stat.get("status") == SourceRunStatus.OK.value and not stat.get("error")
+        }
+        if resolved_fresh:
+            resolved_sightings = _save_sightings(resolved_fresh, resolver_write_req, resolver_db, resolved_succeeded)
+            resolved_dicts = [sighting_to_dict(s) for s in resolved_sightings]
+        else:
+            resolved_sightings = []
+        logger.info(
+            "spec_resolver: re-fanout produced {} sightings for req {} (spec_code={})",
+            len(resolved_sightings),
+            req_id,
+            spec_code_tag,
+        )
+
+        # Stamp the cooldown clock on every AVL MPN we actually
+        # searched. Without this, ``_mpn_cooldown_partition`` keeps
+        # returning the full AVL set as stale on every subsequent
+        # zero-hit click and re-burns connector quota — the bug the
+        # partition gate above is meant to prevent. Mirror the
+        # primary path: upsert a card from the AVL sightings, fall
+        # back to ``resolve_material_card`` when the fanout was empty
+        # so a card always exists to carry ``last_searched_at``.
+        for avl_pn in to_fetch_avl:
+            try:
+                avl_card = _upsert_material_card(avl_pn, resolved_sightings, resolver_db, now)
+                if avl_card is None:
+                    avl_card = resolve_material_card(avl_pn, resolver_db)
+                if avl_card:
+                    avl_card.last_searched_at = now
+            except Exception as e:
+                logger.error("AVL_MATERIAL_CARD_STAMP_FAIL: mpn={} error={}", avl_pn, e)
+                resolver_db.rollback()
+
+        # Enqueue each AVL MPN to all async workers in addition
+        # to search_requirement's primary-MPN enqueue.
+        for mpn in avl_mpns:
+            for enqueue_fn, worker_label in _worker_enqueues():
+                try:
+                    enqueue_fn(
+                        req_id,
+                        resolver_db,
+                        override_mpn=mpn,
+                        resolved_via_spec_code=spec_code_tag,
+                    )
+                except Exception:
+                    logger.warning(
+                        "spec_resolver: {} AVL enqueue failed for req {} mpn {}",
+                        worker_label,
+                        req_id,
+                        mpn,
+                        exc_info=True,
+                    )
+
+        # Record this requirement on the pending row so the admin
+        # UI can show which requirements consumed each speculative
+        # mapping (spec §4.2 ``used_in_requirement_ids``).
+        if resolution.status == "pending":
+            from app.models.sourcing import OemSpecCodePending
+
+            # Issue 1 fix: ``with_for_update`` takes a row-level lock
+            # on PG so concurrent ``search_requirement()`` calls for
+            # different requirements targeting the same (oem,
+            # spec_code) serialize on this row, eliminating the
+            # lost-update race on the JSONB list. SQLite ignores the
+            # lock but its single-threaded execution model means the
+            # existing test still passes.
+            oem_normalized = (resolver_write_req.oem_hint or "IBM").strip().upper()
+            spec_code_normalized = spec_code_tag.strip().upper()
+            pending_row = (
+                resolver_db.query(OemSpecCodePending)
+                .filter_by(
+                    oem=oem_normalized,
+                    spec_code=spec_code_normalized,
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            if pending_row is not None:
+                used = list(pending_row.used_in_requirement_ids or [])
+                if req_id not in used:
+                    used.append(req_id)
+                    pending_row.used_in_requirement_ids = used
+                resolver_db.commit()
+
+        return resolved_dicts, resolved_stats
+    except Exception:
+        resolver_db.rollback()
+        raise
+    finally:
+        resolver_db.close()
+
+
 async def search_requirement(req: Requirement, db: Session) -> dict:
     """Search APIs for stale MPNs only; surface cached sightings for fresh ones.
 
@@ -749,205 +959,15 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
     # --- Spec-code resolver fallback (spec §6) ---
     # Trigger only on a hard zero from the synchronous fanout AND the feature
     # flag. The async ICS/NC workers run independently below for the primary
-    # MPN regardless of resolver outcome. Kept UNTHREADED (unlike the primary
-    # save path above): it makes its own ~60s grounded Claude call already, so
-    # it can't avoid blocking briefly regardless, and it only fires on the rare
-    # zero-hit + feature-flagged path — not worth the added complexity of a
-    # second threaded write session for a cold path. Opens its OWN write
-    # session (mirrors _persist_fru_aliases) since the thread's write_db above
-    # is already closed.
+    # MPN regardless of resolver outcome. The whole fallback (own resolver
+    # session, grounded resolve, AVL re-fanout, cooldown stamping, worker
+    # enqueues, pending bookkeeping) lives in _run_spec_resolver_fallback.
     from .config import settings as _settings
 
     resolved_dicts: list[dict] = []
     if _settings.spec_resolver_enabled and len(sighting_dicts) == 0 and req.primary_mpn:
-        from sqlalchemy.orm import sessionmaker as _sessionmaker
-
-        _ResolverSession = _sessionmaker(bind=write_bind, autocommit=False, autoflush=False, expire_on_commit=False)
-        resolver_db = _ResolverSession()
-        try:
-            resolver_write_req = resolver_db.get(Requirement, req_id)
-            if resolver_write_req is None:
-                logger.warning("spec_resolver: requirement {} not found in resolver session", req_id)
-            else:
-                try:
-                    from app.services.spec_code_resolver import SpecCodeResolver
-
-                    # resolve() owns its own persistence SAVEPOINT and releases the DB
-                    # connection during the grounded LLM call, so we do NOT wrap it in a
-                    # transaction here — doing so would pin a pooled connection for the
-                    # call's ~60s duration. The sightings committed just above are durable
-                    # and unaffected, and a concurrent-insert race is recovered inside
-                    # resolve() (it reuses the winning row).
-                    resolver = SpecCodeResolver(resolver_db)
-                    resolution = await resolver.resolve(
-                        resolver_write_req.primary_mpn,
-                        oem=resolver_write_req.oem_hint or "IBM",
-                    )
-                except Exception:
-                    logger.warning(
-                        "spec_resolver: resolve() failed for req {} mpn {}",
-                        req_id,
-                        resolver_write_req.primary_mpn,
-                        exc_info=True,
-                    )
-                    resolution = None
-
-                if resolution is not None and resolution.status != "unresolved" and resolution.avl:
-                    avl_mpns = [entry["mpn"] for entry in resolution.avl if entry.get("mpn")]
-                    if avl_mpns:
-                        # Issue 2 fix: AVL re-fanout must honor the same per-MPN
-                        # cooldown that the primary path applies via
-                        # ``_mpn_cooldown_partition`` above, otherwise every click on
-                        # a zero-hit spec-code burns connector quota on the same AVL
-                        # set. ``now`` is the search timestamp computed earlier in
-                        # this call.
-                        to_fetch_avl, _cached_avl = _mpn_cooldown_partition(resolver_db, avl_mpns, now=now)
-
-                        # Issue 3 fix: explicit try/except distinguishes "connectors
-                        # crashed" from "no AVL hits". Design intent: still enqueue
-                        # async workers + write pending bookkeeping even when the
-                        # live connectors fail — the buyer benefits from worker
-                        # output independent of connector outages.
-                        try:
-                            if to_fetch_avl:
-                                resolved_fresh, resolved_stats = await _fetch_fresh(to_fetch_avl, db)
-                            else:
-                                resolved_fresh, resolved_stats = [], []
-                        except Exception:
-                            logger.warning(
-                                "spec_resolver: AVL fanout failed for req {} (spec_code={}); "
-                                "still enqueueing workers for async pickup",
-                                req_id,
-                                resolver_write_req.primary_mpn,
-                                exc_info=True,
-                            )
-                            resolved_fresh, resolved_stats = [], []
-
-                        spec_code_tag = resolver_write_req.primary_mpn
-                        for row in resolved_fresh:
-                            row["resolved_via_spec_code"] = spec_code_tag
-                            row["source_mpn"] = row.get("mpn") or row.get("mpn_matched")
-
-                        resolved_succeeded = {
-                            stat["source"]
-                            for stat in resolved_stats
-                            if stat.get("status") == SourceRunStatus.OK.value and not stat.get("error")
-                        }
-                        if resolved_fresh:
-                            resolved_sightings = _save_sightings(
-                                resolved_fresh, resolver_write_req, resolver_db, resolved_succeeded
-                            )
-                            resolved_dicts = [sighting_to_dict(s) for s in resolved_sightings]
-                        else:
-                            resolved_sightings = []
-                        source_stats.extend(resolved_stats)
-                        logger.info(
-                            "spec_resolver: re-fanout produced {} sightings for req {} (spec_code={})",
-                            len(resolved_sightings),
-                            req_id,
-                            spec_code_tag,
-                        )
-
-                        # Stamp the cooldown clock on every AVL MPN we actually
-                        # searched. Without this, ``_mpn_cooldown_partition`` keeps
-                        # returning the full AVL set as stale on every subsequent
-                        # zero-hit click and re-burns connector quota — the bug the
-                        # partition gate above is meant to prevent. Mirror the
-                        # primary path: upsert a card from the AVL sightings, fall
-                        # back to ``resolve_material_card`` when the fanout was empty
-                        # so a card always exists to carry ``last_searched_at``.
-                        for avl_pn in to_fetch_avl:
-                            try:
-                                avl_card = _upsert_material_card(avl_pn, resolved_sightings, resolver_db, now)
-                                if avl_card is None:
-                                    avl_card = resolve_material_card(avl_pn, resolver_db)
-                                if avl_card:
-                                    avl_card.last_searched_at = now
-                            except Exception as e:
-                                logger.error("AVL_MATERIAL_CARD_STAMP_FAIL: mpn={} error={}", avl_pn, e)
-                                resolver_db.rollback()
-
-                        # Enqueue each AVL MPN to ICS and NC workers in addition
-                        # to the primary-MPN enqueue below.
-                        for mpn in avl_mpns:
-                            try:
-                                enqueue_for_ics_search(
-                                    req_id,
-                                    resolver_db,
-                                    override_mpn=mpn,
-                                    resolved_via_spec_code=spec_code_tag,
-                                )
-                            except Exception:
-                                logger.warning(
-                                    "spec_resolver: ICS AVL enqueue failed for req {} mpn {}",
-                                    req_id,
-                                    mpn,
-                                    exc_info=True,
-                                )
-                            try:
-                                enqueue_for_nc_search(
-                                    req_id,
-                                    resolver_db,
-                                    override_mpn=mpn,
-                                    resolved_via_spec_code=spec_code_tag,
-                                )
-                            except Exception:
-                                logger.warning(
-                                    "spec_resolver: NC AVL enqueue failed for req {} mpn {}",
-                                    req_id,
-                                    mpn,
-                                    exc_info=True,
-                                )
-                            try:
-                                enqueue_for_tbf_search(
-                                    req_id,
-                                    resolver_db,
-                                    override_mpn=mpn,
-                                    resolved_via_spec_code=spec_code_tag,
-                                )
-                            except Exception:
-                                logger.warning(
-                                    "spec_resolver: TBF AVL enqueue failed for req {} mpn {}",
-                                    req_id,
-                                    mpn,
-                                    exc_info=True,
-                                )
-
-                        # Record this requirement on the pending row so the admin
-                        # UI can show which requirements consumed each speculative
-                        # mapping (spec §4.2 ``used_in_requirement_ids``).
-                        if resolution.status == "pending":
-                            from app.models.sourcing import OemSpecCodePending
-
-                            # Issue 1 fix: ``with_for_update`` takes a row-level lock
-                            # on PG so concurrent ``search_requirement()`` calls for
-                            # different requirements targeting the same (oem,
-                            # spec_code) serialize on this row, eliminating the
-                            # lost-update race on the JSONB list. SQLite ignores the
-                            # lock but its single-threaded execution model means the
-                            # existing test still passes.
-                            oem_normalized = (resolver_write_req.oem_hint or "IBM").strip().upper()
-                            spec_code_normalized = spec_code_tag.strip().upper()
-                            pending_row = (
-                                resolver_db.query(OemSpecCodePending)
-                                .filter_by(
-                                    oem=oem_normalized,
-                                    spec_code=spec_code_normalized,
-                                )
-                                .with_for_update()
-                                .one_or_none()
-                            )
-                            if pending_row is not None:
-                                used = list(pending_row.used_in_requirement_ids or [])
-                                if req_id not in used:
-                                    used.append(req_id)
-                                    pending_row.used_in_requirement_ids = used
-                                resolver_db.commit()
-        except Exception:
-            resolver_db.rollback()
-            raise
-        finally:
-            resolver_db.close()
+        resolved_dicts, _resolver_stats = await _run_spec_resolver_fallback(req_id, write_bind, now, db)
+        source_stats.extend(_resolver_stats)
     # --- end resolver block ---
 
     all_sighting_dicts = sighting_dicts + resolved_dicts
@@ -978,18 +998,11 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
     # so per-substitute iteration would just round-trip dedup checks. Called
     # after the write thread's commit, so the worker reads the same durable
     # state we just wrote.
-    try:
-        enqueue_for_ics_search(req_id, db)
-    except Exception:
-        logger.warning("ICS enqueue failed for requirement {}", req_id, exc_info=True)
-    try:
-        enqueue_for_nc_search(req_id, db)
-    except Exception:
-        logger.warning("NC enqueue failed for requirement {}", req_id, exc_info=True)
-    try:
-        enqueue_for_tbf_search(req_id, db)
-    except Exception:
-        logger.warning("TBF enqueue failed for requirement {}", req_id, exc_info=True)
+    for enqueue_fn, worker_label in _worker_enqueues():
+        try:
+            enqueue_fn(req_id, db)
+        except Exception:
+            logger.warning("{} enqueue failed for requirement {}", worker_label, req_id, exc_info=True)
 
     # 5. Combine + sort
     results = []
@@ -1077,10 +1090,8 @@ async def quick_search_mpn(mpn: str, db: Session) -> dict:
     Does NOT persist sightings (read-only quick check).
 
     Called by: routers/materials.py (POST /api/quick-search)
-    Depends on: _fetch_fresh, _get_material_history, scoring, normalization
+    Depends on: _fetch_fresh, _score_raw_hit, _get_material_history, scoring, normalization
     """
-    from .evidence_tiers import tier_for_sighting
-
     clean_mpn = normalize_mpn(mpn) or mpn.strip().upper()
     if not clean_mpn:
         return {"sightings": [], "source_stats": [], "material_card": None}
@@ -1105,73 +1116,22 @@ async def quick_search_mpn(mpn: str, db: Session) -> dict:
         )
         vendor_score_map = {vc.normalized_name: vc.vendor_score for vc in vendor_cards}
 
-    # 3. Score raw results into sighting-like dicts (no DB persist)
+    # 3. Score raw results into sighting-like dicts (no DB persist). Shares
+    # _score_raw_hit with the streaming path; only the five requirement-less /
+    # freshness bookkeeping keys are added on top.
     results = []
     for r in fresh:
-        raw_mpn = r.get("mpn_matched")
-        clean_mpn_r = normalize_mpn(raw_mpn) or raw_mpn
-        raw_vendor = r.get("vendor_name", "Unknown")
-        clean_vendor = fix_encoding((raw_vendor or "").strip()) or raw_vendor
-
-        clean_qty = normalize_quantity(r.get("qty_available"))
-        if clean_qty is None and isinstance(r.get("qty_available"), (int, float)) and r["qty_available"] > 0:
-            clean_qty = int(r["qty_available"])
-
-        clean_price = normalize_price(r.get("unit_price"))
-        if clean_price is None and isinstance(r.get("unit_price"), (int, float)) and r["unit_price"] > 0:
-            clean_price = float(r["unit_price"])
-
-        raw_currency = r.get("currency") or "USD"
-        clean_currency = detect_currency(raw_currency) if raw_currency else "USD"
-        raw_conf = r.get("confidence", 0) or 0
-        norm_conf = raw_conf / 5.0 if raw_conf > 1 else raw_conf
-        is_auth = r.get("is_authorized", False)
-        norm_name = normalize_vendor_name(clean_vendor)
-        base_score = score_sighting(vendor_score_map.get(norm_name), is_auth)
-        tier = tier_for_sighting(r.get("source_type"), is_auth)
-        raw_moq = r.get("moq")
-
-        results.append(
+        row = _score_raw_hit(r, vendor_score_map)
+        row.update(
             {
                 "id": None,
                 "requirement_id": None,
-                "vendor_name": clean_vendor,
-                "vendor_email": r.get("vendor_email"),
-                "vendor_phone": r.get("vendor_phone"),
-                "mpn_matched": clean_mpn_r,
-                "manufacturer": r.get("manufacturer"),
-                "qty_available": clean_qty,
-                "unit_price": clean_price,
-                "currency": clean_currency,
-                "source_type": r.get("source_type"),
-                "is_authorized": is_auth,
-                "confidence": norm_conf,
-                "score": base_score,
-                "octopart_url": r.get("octopart_url"),
-                "click_url": r.get("click_url"),
-                "vendor_url": r.get("vendor_url"),
-                "vendor_sku": r.get("vendor_sku"),
-                "condition": normalize_condition(r.get("condition")),
-                "moq": raw_moq if raw_moq and raw_moq > 0 else None,
-                "date_code": normalize_date_code(r.get("date_code")),
-                "packaging": normalize_packaging(r.get("packaging")),
-                "lead_time_days": normalize_lead_time(r.get("lead_time")),
-                "lead_time": r.get("lead_time"),
-                "evidence_tier": tier,
                 "created_at": now.isoformat(),
                 "is_historical": False,
                 "is_material_history": False,
-                "country": r.get("country"),
-                "lead_quality": classify_lead(
-                    score=base_score,
-                    is_authorized=is_auth,
-                    has_price=clean_price is not None,
-                    has_qty=clean_qty is not None,
-                    has_contact=bool(r.get("vendor_email") or r.get("vendor_phone")),
-                    evidence_tier=tier,
-                ),
             }
         )
+        results.append(row)
 
     # 4. v2 scoring with median price context. Prices are converted to USD before
     # the median and the per-offer comparison so a search mixing e.g. JPY and USD
@@ -1734,6 +1694,20 @@ def _any_pn_obsolete(db: Session, pns: list[str]) -> bool:
     )
 
 
+def _hit_dedup_key(r: dict) -> tuple[str, str, str]:
+    """Semantic identity key for a raw connector hit: (vendor, mpn_key, sku).
+
+    The single definition shared by ``_flatten_dedupe_filter_junk``, the seen-set
+    rebuild in ``_fetch_fresh``, and the AI-results merge — so cross-set dedup
+    between those passes can never drift.
+    """
+    return (
+        r.get("vendor_name", "").lower(),
+        normalize_mpn_key(r.get("mpn_matched", "")),
+        str(r.get("vendor_sku") or "").lower(),
+    )
+
+
 def _flatten_dedupe_filter_junk(raw: list[dict]) -> list[dict]:
     """Flatten already-collected raw connector hits, dedupe by (vendor, mpn_key, sku),
     and drop junk vendors (no-seller placeholders etc).
@@ -1749,11 +1723,7 @@ def _flatten_dedupe_filter_junk(raw: list[dict]) -> list[dict]:
     seen: set[tuple] = set()
     out = []
     for r in raw:
-        key = (
-            r.get("vendor_name", "").lower(),
-            normalize_mpn_key(r.get("mpn_matched", "")),
-            str(r.get("vendor_sku") or "").lower(),
-        )
+        key = _hit_dedup_key(r)
         if key not in seen:
             seen.add(key)
             out.append(r)
@@ -1789,6 +1759,51 @@ def _aggregate_source_stats(stats_updates: list[tuple[str, int, int, str | None]
                 "status": SourceRunStatus.ERROR.value if error else SourceRunStatus.OK.value,
             }
     return agg
+
+
+def _flush_source_telemetry(
+    db: Session,
+    stats_updates: list[tuple[str, int, int, str | None]],
+    log_context: str = "",
+) -> None:
+    """Apply per-source search telemetry to ApiSource in one guarded pass.
+
+    Increments total_searches/total_results, updates the EWMA avg_response_ms
+    ((prev*3 + ms) // 4), flips status to LIVE / records last_error, per the
+    (source, hits, ms, error) tuples collected during a fan-out. Best-effort:
+    commit on success, warn + rollback on any failure — a telemetry failure
+    must never abort the search.
+
+    Shared by ``_fetch_fresh`` and ``stream_search_mpn`` so the connector-health
+    numbers admin relies on come from a single implementation.
+    """
+    try:
+        source_names = {s[0] for s in stats_updates if s[0]}
+        src_map = (
+            {s.name: s for s in db.query(ApiSource).filter(ApiSource.name.in_(source_names)).all()}
+            if source_names
+            else {}
+        )
+        for source_name, hit_count, elapsed_ms, error in stats_updates:
+            src = src_map.get(source_name)
+            if not src:
+                continue
+            src.total_searches = (src.total_searches or 0) + 1
+            src.total_results = (src.total_results or 0) + hit_count
+            if not error:
+                src.last_success = datetime.now(UTC)
+                prev = src.avg_response_ms or elapsed_ms
+                src.avg_response_ms = (prev * 3 + elapsed_ms) // 4
+                src.status = ApiSourceStatus.LIVE.value
+                src.last_error = None
+            else:
+                src.last_error = error
+                src.last_error_at = datetime.now(UTC)
+                src.error_count_24h = (src.error_count_24h or 0) + 1
+        db.commit()
+    except Exception as e:
+        logger.warning("API source stats update failed{}: {}", log_context, e)
+        db.rollback()
 
 
 async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[dict]]:
@@ -1921,33 +1936,7 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
             results_lists.append(t.result())
 
     # Apply stats to DB in one pass — safe, sequential, after gather completes
-    try:
-        source_names = {s[0] for s in stats_updates if s[0]}
-        src_map = (
-            {s.name: s for s in db.query(ApiSource).filter(ApiSource.name.in_(source_names)).all()}
-            if source_names
-            else {}
-        )
-        for source_name, hit_count, elapsed_ms, error in stats_updates:
-            src = src_map.get(source_name)
-            if not src:
-                continue
-            src.total_searches = (src.total_searches or 0) + 1
-            src.total_results = (src.total_results or 0) + hit_count
-            if not error:
-                src.last_success = datetime.now(UTC)
-                prev = src.avg_response_ms or elapsed_ms
-                src.avg_response_ms = (prev * 3 + elapsed_ms) // 4
-                src.status = ApiSourceStatus.LIVE.value
-                src.last_error = None
-            else:
-                src.last_error = error
-                src.last_error_at = datetime.now(UTC)
-                src.error_count_24h = (src.error_count_24h or 0) + 1
-        db.commit()
-    except Exception as e:
-        logger.warning("API source stats update failed: {}", e)
-        db.rollback()
+    _flush_source_telemetry(db, stats_updates)
 
     # Flatten, dedupe, and drop junk vendors
     raw = []
@@ -1957,14 +1946,7 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
         # If it's an exception from gather, skip it
 
     out = _flatten_dedupe_filter_junk(raw)
-    seen = {
-        (
-            r.get("vendor_name", "").lower(),
-            normalize_mpn_key(r.get("mpn_matched", "")),
-            str(r.get("vendor_sku") or "").lower(),
-        )
-        for r in out
-    }
+    seen = {_hit_dedup_key(r) for r in out}
 
     # ── Smart AI trigger: conditionally fire AI connector ────────────
     if ai_connector is not None:
@@ -2056,11 +2038,7 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
             for result in ai_results_lists:
                 if isinstance(result, list):
                     for r in result:
-                        key = (
-                            r.get("vendor_name", "").lower(),
-                            normalize_mpn_key(r.get("mpn_matched", "")),
-                            str(r.get("vendor_sku") or "").lower(),
-                        )
+                        key = _hit_dedup_key(r)
                         if key not in seen:
                             seen.add(key)
                             out.append(r)
@@ -3065,6 +3043,40 @@ def sighting_to_dict(s: Sighting) -> dict:
 # ── Streaming search ────────────────────────────────────────────────────
 
 
+def _extend_vendor_score_map(db: Session, vendor_score_map: dict, hits: list[dict]) -> None:
+    """Add vendor_score entries for the hit vendors not already in the map.
+
+    IN-filtered on just the missing normalized names (same pattern as
+    quick_search_mpn and _save_sightings) instead of loading the whole
+    vendor_cards table per search. Names with no VendorCard are cached as None
+    so a later round never re-queries them (``.get`` still returns None, exactly
+    like a missing key). Key derivation mirrors _score_raw_hit exactly
+    (fix_encoding before normalize_vendor_name) so every lookup scoring performs
+    finds its entry.
+
+    Called by: stream_search_mpn (cache-hit path + each completed connector round)
+    """
+    needed: set[str] = set()
+    for r in hits:
+        raw_vendor = r.get("vendor_name", "Unknown")
+        clean_vendor = fix_encoding((raw_vendor or "").strip()) or raw_vendor
+        needed.add(normalize_vendor_name(clean_vendor))
+    needed.discard("")
+    missing = needed - vendor_score_map.keys()
+    if not missing:
+        return
+    from .models import VendorCard
+
+    rows = (
+        db.query(VendorCard.normalized_name, VendorCard.vendor_score)
+        .filter(VendorCard.normalized_name.in_(missing))
+        .all()
+    )
+    vendor_score_map.update({vc.normalized_name: vc.vendor_score for vc in rows})
+    for name in missing - vendor_score_map.keys():
+        vendor_score_map[name] = None
+
+
 def _score_raw_hit(r: dict, vendor_score_map: dict) -> dict:
     """Normalize and score a single raw connector result for streaming search.
 
@@ -3072,7 +3084,7 @@ def _score_raw_hit(r: dict, vendor_score_map: dict) -> dict:
     available incrementally). Produces fields needed by _incremental_dedup
     and vendor card rendering.
 
-    Called by: stream_search_mpn
+    Called by: stream_search_mpn, quick_search_mpn
     Depends on: scoring, evidence_tiers, normalization utilities
     """
     from .evidence_tiers import tier_for_sighting
@@ -3208,6 +3220,19 @@ async def stream_search_mpn(search_id: str, mpn: str) -> None:
     active_broker = getattr(_self_mod, "broker", _broker)
 
     channel = f"search:{search_id}"
+
+    async def _publish_source_status(source, status, *, error=None, results=0, ms=0) -> None:
+        """Publish one source-status SSE chip event — the single payload schema for
+        every emit site in this function."""
+        await active_broker.publish(
+            channel,
+            "source-status",
+            json.dumps(
+                {"source": source, "status": status, "error": error, "results": results, "ms": ms},
+                default=str,
+            ),
+        )
+
     accumulated: list[dict] = []
     total_results = 0
     off_target_total = 0  # hits excluded by the relevance guard (different MPN)
@@ -3229,19 +3254,12 @@ async def stream_search_mpn(search_id: str, mpn: str) -> None:
             for _src_name, _stat in source_stats_map.items():
                 _status = _stat.get("status")
                 if _status and _status != SourceRunStatus.OK.value:
-                    await active_broker.publish(
-                        channel,
-                        "source-status",
-                        json.dumps(
-                            {
-                                "source": _stat.get("source", _src_name),
-                                "status": _status,
-                                "error": _stat.get("error"),
-                                "results": _stat.get("results", 0),
-                                "ms": _stat.get("ms", 0),
-                            },
-                            default=str,
-                        ),
+                    await _publish_source_status(
+                        _stat.get("source", _src_name),
+                        _status,
+                        error=_stat.get("error"),
+                        results=_stat.get("results", 0),
+                        ms=_stat.get("ms", 0),
                     )
 
             if not connectors:
@@ -3252,11 +3270,10 @@ async def stream_search_mpn(search_id: str, mpn: str) -> None:
                 )
                 return
 
-            # Build vendor score lookup for scoring raw results
-            from .models import VendorCard
-
-            vendor_cards = db.query(VendorCard.normalized_name, VendorCard.vendor_score).all()
-            vendor_score_map = {vc.normalized_name: vc.vendor_score for vc in vendor_cards}
+            # Vendor score lookup for scoring raw results — filled lazily per
+            # round by _extend_vendor_score_map (IN-filtered on the hit vendors)
+            # instead of loading the whole vendor_cards table per search.
+            vendor_score_map: dict = {}
 
             # Shared 15-min search-result cache (the same one _fetch_fresh reads/writes
             # for requisition searches — _search_cache_key is keyed on PNs + active
@@ -3289,25 +3306,19 @@ async def stream_search_mpn(search_id: str, mpn: str) -> None:
                     else:
                         off_target_total += 1
 
+                _extend_vendor_score_map(db, vendor_score_map, on_target)
                 scored_hits = [_score_raw_hit(r, vendor_score_map) for r in on_target]
                 new_cards, _updated_cards = _incremental_dedup(scored_hits, accumulated)
                 total_results = len(on_target)
                 sources_completed = len(cached_stats)
 
                 for stat in cached_stats:
-                    await active_broker.publish(
-                        channel,
-                        "source-status",
-                        json.dumps(
-                            {
-                                "source": stat.get("source"),
-                                "status": stat.get("status", SourceRunStatus.OK.value),
-                                "error": stat.get("error"),
-                                "results": stat.get("results", 0),
-                                "ms": stat.get("ms", 0),
-                            },
-                            default=str,
-                        ),
+                    await _publish_source_status(
+                        stat.get("source"),
+                        stat.get("status", SourceRunStatus.OK.value),
+                        error=stat.get("error"),
+                        results=stat.get("results", 0),
+                        ms=stat.get("ms", 0),
                     )
 
                 if new_cards:
@@ -3364,19 +3375,11 @@ async def stream_search_mpn(search_id: str, mpn: str) -> None:
                             source_name = task_map[task]
                             sources_completed += 1
                             stats_updates.append((source_name, 0, budget_ms, "search budget exceeded"))
-                            await active_broker.publish(
-                                channel,
-                                "source-status",
-                                json.dumps(
-                                    {
-                                        "source": source_name,
-                                        "status": SourceRunStatus.ERROR.value,
-                                        "error": "search budget exceeded",
-                                        "results": 0,
-                                        "ms": budget_ms,
-                                    },
-                                    default=str,
-                                ),
+                            await _publish_source_status(
+                                source_name,
+                                SourceRunStatus.ERROR.value,
+                                error="search budget exceeded",
+                                ms=budget_ms,
                             )
                         break
 
@@ -3406,24 +3409,18 @@ async def stream_search_mpn(search_id: str, mpn: str) -> None:
                             raw_out.extend(on_target)
 
                             # Score and normalize each on-target hit
+                            _extend_vendor_score_map(db, vendor_score_map, on_target)
                             scored_hits = [_score_raw_hit(r, vendor_score_map) for r in on_target]
 
                             # Incremental dedup against accumulated results
                             new_cards, updated_cards = _incremental_dedup(scored_hits, accumulated)
 
                             # Publish source status
-                            await active_broker.publish(
-                                channel,
-                                "source-status",
-                                json.dumps(
-                                    {
-                                        "source": source_name,
-                                        "status": SourceRunStatus.OK.value,
-                                        "results": hit_count,
-                                        "ms": elapsed_ms,
-                                    },
-                                    default=str,
-                                ),
+                            await _publish_source_status(
+                                source_name,
+                                SourceRunStatus.OK.value,
+                                results=hit_count,
+                                ms=elapsed_ms,
                             )
 
                             # Publish new result cards (HTML for sse-swap="results" — not JSON)
@@ -3461,52 +3458,16 @@ async def stream_search_mpn(search_id: str, mpn: str) -> None:
                                 search_id,
                                 mpn,
                             )
-                            await active_broker.publish(
-                                channel,
-                                "source-status",
-                                json.dumps(
-                                    {
-                                        "source": source_name,
-                                        "status": SourceRunStatus.ERROR.value,
-                                        "error": _redact_secrets(str(e))[:500],
-                                        "results": 0,
-                                        "ms": 0,
-                                    },
-                                    default=str,
-                                ),
+                            await _publish_source_status(
+                                source_name,
+                                SourceRunStatus.ERROR.value,
+                                error=_redact_secrets(str(e))[:500],
                             )
 
-                # Flush per-source telemetry to ApiSource in one guarded pass (mirrors
-                # _fetch_fresh) — records searches/results/latency + errors (including
-                # budget-exceeded timeouts) so the interactive path is visible in admin
-                # health. Best-effort: a telemetry failure must never abort the search.
-                try:
-                    source_names = {s[0] for s in stats_updates if s[0]}
-                    src_map = (
-                        {s.name: s for s in db.query(ApiSource).filter(ApiSource.name.in_(source_names)).all()}
-                        if source_names
-                        else {}
-                    )
-                    for source_name, hit_count, elapsed_ms, error in stats_updates:
-                        src = src_map.get(source_name)
-                        if not src:
-                            continue
-                        src.total_searches = (src.total_searches or 0) + 1
-                        src.total_results = (src.total_results or 0) + hit_count
-                        if not error:
-                            src.last_success = datetime.now(UTC)
-                            prev = src.avg_response_ms or elapsed_ms
-                            src.avg_response_ms = (prev * 3 + elapsed_ms) // 4
-                            src.status = ApiSourceStatus.LIVE.value
-                            src.last_error = None
-                        else:
-                            src.last_error = error
-                            src.last_error_at = datetime.now(UTC)
-                            src.error_count_24h = (src.error_count_24h or 0) + 1
-                    db.commit()
-                except Exception as e:
-                    logger.warning("API source stats update failed (streaming): {}", e)
-                    db.rollback()
+                # Flush per-source telemetry to ApiSource (shared with _fetch_fresh) —
+                # records searches/results/latency + errors (including budget-exceeded
+                # timeouts) so the interactive path is visible in admin health.
+                _flush_source_telemetry(db, stats_updates, " (streaming)")
 
                 # Write the shared search-result cache in the same flat/unscored shape
                 # _fetch_fresh's cache-miss path writes, so a later requisition search

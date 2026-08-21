@@ -152,6 +152,79 @@ def _meter_usage(bucket: str, model_tier: str, usage: dict) -> None:
         logger.debug("claude usage metering skipped ({}): {}", bucket, e)
 
 
+async def _post_messages_with_retry(
+    body: dict,
+    *,
+    kind: str,
+    model_tier: str,
+    cache_system: bool,
+    timeout: int,
+    max_attempts: int,
+    cost_bucket: str | None,
+) -> tuple[dict, dict]:
+    """POST one Messages API call with span, retry/backoff, and usage metering.
+
+    Shared engine for :func:`claude_structured_with_usage` and
+    :func:`claude_text` — Sentry span, 429/503 backoff, connect/timeout
+    retries, non-200 mapping via ``_raise_for_status``, and usage recording.
+    ``kind`` ("structured"/"text") only labels the span and retry logs.
+
+    Returns ``(response_json, usage)``. Raises ClaudeError subclasses on
+    failure; callers keep their own result extraction and terminal logging.
+    """
+    model = body["model"]
+    max_attempts = max(1, max_attempts)
+    for attempt in range(1, max_attempts + 1):
+        try:
+            with sentry_sdk.start_span(
+                op="ai.chat_completions.create",
+                description=f"claude_{kind} ({model_tier})",
+            ) as span:
+                span.set_data("ai.model_id", model)
+                span.set_data("ai.streaming", False)
+                span.set_data("ai.pipeline.name", f"claude_{kind}")
+
+                resp = await http.post(
+                    API_URL,
+                    headers=_headers(cache=cache_system),
+                    json=body,
+                    timeout=timeout,
+                )
+
+                # Retry on transient errors (429 rate limit, 503 overloaded)
+                if resp.status_code in (429, 503) and attempt < max_attempts:
+                    delay = 2**attempt
+                    logger.warning(
+                        f"Claude API {resp.status_code} (attempt {attempt}/{max_attempts}), retrying in {delay}s"
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+
+                if resp.status_code != 200:
+                    span.set_data("ai.response.status_code", resp.status_code)
+                    logger.warning(f"Claude API {resp.status_code}: {resp.text[:200]}")
+                    _raise_for_status(resp, context="Claude API error")
+
+                data = resp.json()
+                usage = data.get("usage", {})
+                _record_usage(span, usage)
+                if cost_bucket:
+                    _meter_usage(cost_bucket, model_tier, usage)
+                return data, usage
+
+        except (httpx.ConnectError, httpx.TimeoutException) as e:
+            if attempt < max_attempts:
+                delay = 2**attempt
+                logger.warning(
+                    f"Claude {kind} {type(e).__name__} (attempt {attempt}/{max_attempts}), retrying in {delay}s"
+                )
+                await asyncio.sleep(delay)
+                continue
+            raise ClaudeError(f"Claude API unreachable: {e}") from e
+
+    raise ClaudeError("All retry attempts failed")
+
+
 async def claude_structured(
     prompt: str,
     schema: dict,
@@ -262,68 +335,28 @@ async def claude_structured_with_usage(
     body["tools"] = [_structured_output_tool(schema)]
     body["tool_choice"] = {"type": "tool", "name": _STRUCTURED_OUTPUT_TOOL_NAME}
 
-    max_attempts = max(1, max_attempts)
-    for attempt in range(1, max_attempts + 1):
-        try:
-            with sentry_sdk.start_span(
-                op="ai.chat_completions.create",
-                description=f"claude_structured ({model_tier})",
-            ) as span:
-                span.set_data("ai.model_id", model)
-                span.set_data("ai.streaming", False)
-                span.set_data("ai.pipeline.name", "claude_structured")
-
-                resp = await http.post(
-                    API_URL,
-                    headers=_headers(cache=cache_system),
-                    json=body,
-                    timeout=timeout,
-                )
-
-                # Retry on transient errors (429 rate limit, 503 overloaded)
-                if resp.status_code in (429, 503) and attempt < max_attempts:
-                    delay = 2**attempt
-                    logger.warning(
-                        f"Claude API {resp.status_code} (attempt {attempt}/{max_attempts}), retrying in {delay}s"
-                    )
-                    await asyncio.sleep(delay)
-                    continue
-
-                if resp.status_code != 200:
-                    span.set_data("ai.response.status_code", resp.status_code)
-                    logger.warning(f"Claude API {resp.status_code}: {resp.text[:200]}")
-                    _raise_for_status(resp, context="Claude API error")
-
-                data = resp.json()
-                usage = data.get("usage", {})
-                _record_usage(span, usage)
-                if cost_bucket:
-                    _meter_usage(cost_bucket, model_tier, usage)
-
-                # Tool use response — extract the tool input (guaranteed valid JSON)
-                tool_input = _extract_tool_input(data.get("content", []))
-                if tool_input is _MISSING:
-                    logger.warning("Claude structured output: no tool_use block in response")
-                    return None, usage
-                return tool_input, usage
-
-        except (ClaudeError,):
-            raise
-        except (httpx.ConnectError, httpx.TimeoutException) as e:
-            if attempt < max_attempts:
-                delay = 2**attempt
-                logger.warning(
-                    f"Claude structured {type(e).__name__} (attempt {attempt}/{max_attempts}), retrying in {delay}s"
-                )
-                await asyncio.sleep(delay)
-                continue
-            raise ClaudeError(f"Claude API unreachable: {e}") from e
-        except Exception as e:
-            logger.warning("Claude structured call failed: {} ({})", type(e).__name__, e)
-            logger.debug("Claude structured call traceback:", exc_info=True)
-            raise ClaudeError(f"Claude structured call failed: {e}") from e
-
-    raise ClaudeError("All retry attempts failed")
+    try:
+        data, usage = await _post_messages_with_retry(
+            body,
+            kind="structured",
+            model_tier=model_tier,
+            cache_system=cache_system,
+            timeout=timeout,
+            max_attempts=max_attempts,
+            cost_bucket=cost_bucket,
+        )
+        # Tool use response — extract the tool input (guaranteed valid JSON)
+        tool_input = _extract_tool_input(data.get("content", []))
+        if tool_input is _MISSING:
+            logger.warning("Claude structured output: no tool_use block in response")
+            return None, usage
+        return tool_input, usage
+    except ClaudeError:
+        raise
+    except Exception as e:
+        logger.warning("Claude structured call failed: {} ({})", type(e).__name__, e)
+        logger.debug("Claude structured call traceback:", exc_info=True)
+        raise ClaudeError(f"Claude structured call failed: {e}") from e
 
 
 async def claude_text(
@@ -377,63 +410,24 @@ async def claude_text(
     if tools:
         body["tools"] = tools
 
-    max_attempts = 3
-    for attempt in range(1, max_attempts + 1):
-        try:
-            with sentry_sdk.start_span(
-                op="ai.chat_completions.create",
-                description=f"claude_text ({model_tier})",
-            ) as span:
-                span.set_data("ai.model_id", model)
-                span.set_data("ai.streaming", False)
-                span.set_data("ai.pipeline.name", "claude_text")
-
-                resp = await http.post(
-                    API_URL,
-                    headers=_headers(cache=cache_system),
-                    json=body,
-                    timeout=timeout,
-                )
-
-                # Retry on transient errors (429 rate limit, 503 overloaded)
-                if resp.status_code in (429, 503) and attempt < max_attempts:
-                    delay = 2**attempt
-                    logger.warning(
-                        f"Claude API {resp.status_code} (attempt {attempt}/{max_attempts}), retrying in {delay}s"
-                    )
-                    await asyncio.sleep(delay)
-                    continue
-
-                if resp.status_code != 200:
-                    span.set_data("ai.response.status_code", resp.status_code)
-                    logger.warning(f"Claude API {resp.status_code}: {resp.text[:200]}")
-                    _raise_for_status(resp, context="Claude API error")
-
-                data = resp.json()
-                _record_usage(span, data.get("usage", {}))
-                if cost_bucket:
-                    _meter_usage(cost_bucket, model_tier, data.get("usage", {}))
-
-                # Extract text from response (may be interleaved with tool use)
-                texts = [b["text"] for b in data.get("content", []) if b.get("type") == "text"]
-                return "\n".join(texts) if texts else None
-
-        except (ClaudeError,):
-            raise
-        except (httpx.ConnectError, httpx.TimeoutException) as e:
-            if attempt < max_attempts:
-                delay = 2**attempt
-                logger.warning(
-                    f"Claude text {type(e).__name__} (attempt {attempt}/{max_attempts}), retrying in {delay}s"
-                )
-                await asyncio.sleep(delay)
-                continue
-            raise ClaudeError(f"Claude API unreachable: {e}") from e
-        except Exception as e:
-            logger.warning(f"Claude text call failed: {e}")
-            raise ClaudeError(f"Claude text call failed: {e}") from e
-
-    raise ClaudeError("All retry attempts failed")
+    try:
+        data, _usage = await _post_messages_with_retry(
+            body,
+            kind="text",
+            model_tier=model_tier,
+            cache_system=cache_system,
+            timeout=timeout,
+            max_attempts=3,
+            cost_bucket=cost_bucket,
+        )
+        # Extract text from response (may be interleaved with tool use)
+        texts = [b["text"] for b in data.get("content", []) if b.get("type") == "text"]
+        return "\n".join(texts) if texts else None
+    except ClaudeError:
+        raise
+    except Exception as e:
+        logger.warning(f"Claude text call failed: {e}")
+        raise ClaudeError(f"Claude text call failed: {e}") from e
 
 
 async def claude_json(
@@ -577,13 +571,7 @@ async def claude_batch_submit(
 
         if resp.status_code != 200:
             logger.warning(f"Batch API submit {resp.status_code}: {resp.text[:300]}")
-            if resp.status_code in (401, 403):
-                raise ClaudeAuthError(f"Claude API auth failed: {resp.status_code}")
-            if resp.status_code == 429:
-                raise ClaudeRateLimitError("Rate limit exceeded")
-            if resp.status_code >= 500:
-                raise ClaudeServerError(f"Claude API error: {resp.status_code}")
-            raise ClaudeError(f"Batch API submit error: {resp.status_code}")
+            _raise_for_status(resp, context="Batch API submit error")
 
         data = resp.json()
         batch_id: str | None = data.get("id")  # Batch API JSON boundary
