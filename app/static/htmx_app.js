@@ -798,6 +798,41 @@ Alpine.data('splitPanel', (panelId, defaultPct) => ({
 }));
 
 /**
+ * ratioSplitMixin — shared drag-to-resize state for ratio-based split workspaces.
+ * One definition of the splitRatio/dragging/startDrag/onDrag/stopDrag pointer-drag
+ * math, spread into each workspace's inline x-data object:
+ *   x-data="{ ...window.ratioSplitMixin('sightings-split', 0.50, 0.25, 0.75), ... }"
+ * Each surface keeps its own localStorage key, default ratio, and clamp bounds, so
+ * persisted ratios survive. The host element must carry x-ref="container" plus
+ * @mousemove.window="onDrag($event)" and @mouseup.window="stopDrag()".
+ *
+ * Called by: sightings/list.html, parts/workspace.html, approvals/_workspace_split.html
+ * Depends on: Alpine.js ($refs on `this`), localStorage.
+ */
+window.ratioSplitMixin = function (storageKey, defaultRatio, minRatio, maxRatio) {
+    return {
+        splitRatio: parseFloat(localStorage.getItem(storageKey) || String(defaultRatio)),
+        dragging: false,
+        startDrag(e) {
+            this.dragging = true;
+            e.preventDefault();
+        },
+        onDrag(e) {
+            if (!this.dragging) return;
+            const rect = this.$refs.container.getBoundingClientRect();
+            const ratio = (e.clientX - rect.left) / rect.width;
+            this.splitRatio = Math.max(minRatio, Math.min(maxRatio, ratio));
+        },
+        stopDrag() {
+            if (this.dragging) {
+                this.dragging = false;
+                localStorage.setItem(storageKey, this.splitRatio.toFixed(3));
+            }
+        },
+    };
+};
+
+/**
  * sourcingWorkspace — keyboard navigation for the split-panel sourcing workspace.
  * Arrow keys walk the selection through leadIds and lazy-load each lead's detail
  * into #split-right-sourcing; Escape restores the empty-state placeholder.
@@ -1189,6 +1224,29 @@ Alpine.data('dedupSelect', () => ({
       if (row) { row.style.display = 'none'; }
     });
   },
+}));
+
+// ── bulkSelect: shared list bulk-select scope (CRM accounts + global contacts) ──
+// selectedIds is an Object used as a Set — keys are row-id STRINGS (rows call
+// toggle('{{ id }}')). `ids` is the current page's full id list, passed from the
+// template (x-data='bulkSelect({{ rows|map(attribute="id")|list|tojson }})') so
+// allSelected/toggleAll know the page size. The list partial is re-rendered on a
+// bulk apply, so the scope resets fresh; the wrapper element also listens for
+// @clear-selection.window="clear()" (dispatched via HX-Trigger after a bulk apply).
+// Used by: customers/_account_list.html, customers/contacts_list.html.
+Alpine.data('bulkSelect', (ids) => ({
+  ids: (ids || []).map(String),
+  selectedIds: {},
+  get count() { return Object.keys(this.selectedIds).length; },
+  get allSelected() { return this.ids.length > 0 && Object.keys(this.selectedIds).length === this.ids.length; },
+  toggle(id) {
+    if (this.selectedIds[id]) { delete this.selectedIds[id]; } else { this.selectedIds[id] = true; }
+  },
+  toggleAll(checked) {
+    if (checked) { this.ids.forEach(id => { this.selectedIds[id] = true; }); } else { this.selectedIds = {}; }
+  },
+  idsStr() { return Object.keys(this.selectedIds).join(','); },
+  clear() { this.selectedIds = {}; },
 }));
 
 // ── Page-level loading bar for navigation ──────────────────
@@ -1658,32 +1716,10 @@ Alpine.data('materialsFilter', () => ({
     this.applyFilters();
   },
 
-  toggleFilter(specKey, value) {
-    if (!this.subFilters[specKey]) {
-      this.subFilters[specKey] = [value];
-    } else {
-      const idx = this.subFilters[specKey].indexOf(value);
-      if (idx >= 0) {
-        this.subFilters[specKey].splice(idx, 1);
-        if (this.subFilters[specKey].length === 0) {
-          delete this.subFilters[specKey];
-        }
-      } else {
-        this.subFilters[specKey].push(value);
-      }
-    }
-    if (window.innerWidth >= 1024) {
-      this.applyFilters();
-    }
-  },
-
-  // Numeric common-value chip toggle (P2). Maintains subFilters[specKey + '__vals']
-  // as an array of NUMBERS — the backend predicate is value_numeric IN (...), and the
-  // chip :class membership check (.includes()) compares against JS numbers. Mirrors
-  // toggleFilter's add/remove + delete-when-empty shape; the value is server-rendered
-  // from value_numeric (chip.value|tojson), so it is always a number.
-  toggleNumericChip(specKey, value) {
-    const key = specKey + '__vals';
+  // Shared add/remove + delete-when-empty array bookkeeping for a subFilters list key,
+  // with the desktop auto-apply guard. toggleFilter and toggleNumericChip both delegate
+  // here — one body, two key spellings.
+  _toggleListValue(key, value) {
     if (!this.subFilters[key]) {
       this.subFilters[key] = [value];
     } else {
@@ -1700,6 +1736,20 @@ Alpine.data('materialsFilter', () => ({
     if (window.innerWidth >= 1024) {
       this.applyFilters();
     }
+  },
+
+  toggleFilter(specKey, value) {
+    this._toggleListValue(specKey, value);
+  },
+
+  // Numeric common-value chip toggle (P2). Maintains subFilters[specKey + '__vals']
+  // as an array of NUMBERS — the backend predicate is value_numeric IN (...), and the
+  // chip :class membership check (.includes()) compares against JS numbers. Same
+  // add/remove + delete-when-empty shape as toggleFilter (shared _toggleListValue);
+  // the value is server-rendered from value_numeric (chip.value|tojson), so it is
+  // always a number.
+  toggleNumericChip(specKey, value) {
+    this._toggleListValue(specKey + '__vals', value);
   },
 
   setRange(specKey, bound, value) {
@@ -2024,6 +2074,29 @@ Alpine.data('unifiedReqModal', () => ({
     },
 }));
 
+// ── Shared quote-line math (quoteBuilder modal + quoteBuilderTab) ──
+// ONE definition of the persisted margin (2dp, 0 when sell is 0) and of the saved
+// line-payload core, so the two builder surfaces can never drift on margin rounding
+// or the common payload field contract. Surface-specific fields ride in `extra`
+// (spread last, preserving each caller's exact key order).
+function quoteMarginPct(sell, cost) {
+  return sell > 0 ? parseFloat(((sell - cost) / sell * 100).toFixed(2)) : 0;
+}
+
+function buildQuoteLinePayload({ requirement_id, offer_id, mpn, manufacturer, qty, cost, sell, extra }) {
+  return {
+    requirement_id,
+    offer_id,
+    mpn,
+    manufacturer,
+    qty,
+    cost_price: cost,
+    sell_price: sell,
+    margin_pct: quoteMarginPct(sell, cost),
+    ...extra,
+  };
+}
+
 Alpine.data('quoteBuilder', (initialLines, reqId, hasCustomerSite, requirementIds, multiReqIds) => ({
   lines: initialLines,
   reqId: reqId,
@@ -2245,26 +2318,24 @@ Alpine.data('quoteBuilder', (initialLines, reqId, hasCustomerSite, requirementId
     const decided = this.lines.filter(l => l.status === 'decided');
     const linePayload = decided.map(l => {
       const offer = l.offers.find(o => o.id === l.selected_offer_id);
-      const cost = offer?.unit_price || 0;
-      const sell = l.sell_price || 0;
-      const margin = sell > 0 ? parseFloat(((sell - cost) / sell * 100).toFixed(2)) : 0;
-      return {
+      return buildQuoteLinePayload({
         requirement_id: l.requirement_id,
         offer_id: l.selected_offer_id,
         mpn: l.mpn,
         manufacturer: l.manufacturer,
         qty: l.target_qty,
-        cost_price: cost,
-        sell_price: sell,
-        margin_pct: margin,
-        lead_time: offer?.lead_time || null,
-        date_code: offer?.date_code || null,
-        condition: offer?.condition || null,
-        packaging: offer?.packaging || null,
-        moq: offer?.moq || null,
-        material_card_id: offer?.material_card_id || null,
-        notes: l.buyer_notes || null,
-      };
+        cost: offer?.unit_price || 0,
+        sell: l.sell_price || 0,
+        extra: {
+          lead_time: offer?.lead_time || null,
+          date_code: offer?.date_code || null,
+          condition: offer?.condition || null,
+          packaging: offer?.packaging || null,
+          moq: offer?.moq || null,
+          material_card_id: offer?.material_card_id || null,
+          notes: l.buyer_notes || null,
+        },
+      });
     });
     try {
       // A combined (multi-req) build saves ONE quote spanning all selected reqs via the
@@ -2426,22 +2497,16 @@ Alpine.data('quoteBuilderTab', (reqId, hasCustomerSite, minMarginPct, quoteExist
     return JSON.stringify(
       Object.entries(this.data)
         .filter(([id, l]) => l.sel && this._sellOf(l) !== null)
-        .map(([id, l]) => {
-          const sell = this._sellOf(l);
-          const cost = l.cost || 0;
-          const margin = sell > 0 ? parseFloat(((sell - cost) / sell * 100).toFixed(2)) : 0;
-          return {
-            requirement_id: Number(id),
-            offer_id: l.offerId,
-            mpn: l.mpn,
-            manufacturer: l.mfr,
-            qty: l.qty || 0,
-            cost_price: cost,
-            sell_price: sell,
-            margin_pct: margin,
-            condition: l.cond,
-          };
-        })
+        .map(([id, l]) => buildQuoteLinePayload({
+          requirement_id: Number(id),
+          offer_id: l.offerId,
+          mpn: l.mpn,
+          manufacturer: l.mfr,
+          qty: l.qty || 0,
+          cost: l.cost || 0,
+          sell: this._sellOf(l),
+          extra: { condition: l.cond },
+        }))
     );
   },
 }));

@@ -279,8 +279,6 @@ class TestRunExploriumDiscoveryBatch:
                     {"company_name": "New Co", "domain": "new.com", "country_code": "US"},
                 ],
             ),
-            patch("app.services.prospect_discovery_explorium.calculate_fit_score", return_value=(70, "Good fit")),
-            patch("app.services.prospect_discovery_explorium.calculate_readiness_score", return_value=(50, {})),
             patch("asyncio.sleep", new_callable=AsyncMock),
         ):
             result = await run_explorium_discovery_batch("batch-002", existing_domains={"known.com"})

@@ -926,19 +926,6 @@ env-var presence, which diverged from what searches actually resolve). Logic in
 `connectors.html`. Tests: `tests/test_connector_service.py`, `tests/test_connector_status.py`,
 `tests/test_connectors_settings.py`.
 
-**HTML structure-hash drift alert (2026-07-04, Phase 2).** Each browser worker
-fingerprints the results HTML it parses via
-`search_worker_base.monitoring.check_html_structure_hash` and warns (Loguru + Sentry)
-when a page's structure is one it has not seen — an early signal that a supplier
-changed its markup and the parser may need updating. The fingerprint hashes only the
-sequence of tag NAMES (open/close), never attributes: attribute values (`class`, `id`,
-`data-*`, inline `style`) vary per row and per part, so folding them in made almost
-every page read as a "layout change" — spamming Sentry and growing the stored
-per-component hash set without bound. Genuine layout changes (a table becoming a list,
-a wrapper appearing) still alter the tag sequence and are still caught. The stored set
-is additionally capped at `_MAX_STRUCTURE_HASHES` (evict-arbitrary-at-cap) as a hard
-bound. Tests: `tests/test_search_worker_monitoring.py`.
-
 ### Removed (2026-05-14)
 
 - Daily 3 AM `_job_refresh_stale_requisitions` cron — no background refresh
@@ -3133,7 +3120,7 @@ not requisition-scoped.
 Settings → Profile lets a user edit their own display name, 8x8 extension, and
 notification preferences. All three handlers live in `htmx_views.py`, take
 `require_user` (the current user, NOT admin-only), commit, and emit a `showToast`
-HX-Trigger via the shared `settings_toast()` helper.
+HX-Trigger via the shared `set_toast()` helper (`routers/htmx/_shared.py`).
 
 ```
 POST /api/user/profile            (form: name, extension)
@@ -3141,7 +3128,7 @@ POST /api/user/profile            (form: name, extension)
     +---> name.strip(): empty OR >255 chars -> 400 JSON {error, status_code, request_id}
     +---> extension.strip(): >20 chars       -> 400 JSON {error, ...}
     +---> sets user.name + user.eight_by_eight_extension (empty extension clears it)
-    +---> db.commit(); settings_toast("Profile updated.") -> 200 (empty body + HX-Trigger)
+    +---> db.commit(); set_toast("Profile updated.") -> 200 (empty body + HX-Trigger)
 
 POST /api/user/toggle-buyplan-email
     htmx_views.toggle_buyplan_email()
@@ -3157,7 +3144,7 @@ POST /api/user/toggle-new-offer-alert
 ```
 
 These clone the existing `toggle_8x8` (`POST /api/user/toggle-8x8`) pattern but route
-their toast through `settings_toast()`.
+their toast through `set_toast()`.
 
 ---
 
@@ -3276,7 +3263,7 @@ extension — not a standard form POST). On success the card re-fetches via
 
 **Feedback & safety polish (Task 5):**
 - **Success toasts** — `activate` and `credentials` handlers attach a `showToast`
-  HX-Trigger via `htmx_views.settings_toast` (lazy import to avoid a circular import):
+  HX-Trigger via the shared `htmx/_shared.set_toast`:
   "Key saved." / "Credentials saved." / "<name> enabled/disabled." Clay `disconnect`
   (router `clay_oauth.py`) sets the same HX-Trigger on its 302 ("Clay disconnected.").
 - **Destructive confirms** (`hx-confirm`, client-side) — Clay **Disconnect** ("Disconnect
@@ -3764,7 +3751,7 @@ merges different-`account_owner_id` accounts) are reused AS-IS.
   names never render as twin buttons). Both merge endpoints now re-render the whole
   Data Ops partial via `_render_data_ops` into `#settings-content` (so pairs referencing
   the just-merged entity drop without a manual refresh) and surface the kept-name /
-  failure message via a `settings_toast` `HX-Trigger` rather than swapping a `<p>` into
+  failure message via a `set_toast` `HX-Trigger` rather than swapping a `<p>` into
   the row.
 - **Click-merge bug fix (root cause):** the merge buttons used to be wrapped in a dead
   `x-data="{ merged: false }"` + `<template x-if="!merged" x-cloak>` guard. `merged` was
@@ -6038,7 +6025,7 @@ per-caller constants. Pure data/lookup module, no I/O.
   correction: T6 (manual buyer entry) moved from −10 to +3 — a human-verified manual
   entry now outranks T3 (anonymous marketplace scrape).
 - Source-type category sets (`AUTHORIZED_SOURCES`/`API_SOURCES`/`MARKETPLACE_SOURCES`/
-  `EMAIL_SOURCES`/`MANUAL_SOURCES`/`HISTORY_SOURCES`) so `evidence_tiers.py` (tier
+  `EMAIL_SOURCES`/`HISTORY_SOURCES`) so `evidence_tiers.py` (tier
   assignment) and `services/sourcing_leads.py` (`_source_reliability` = base + tier
   bonus) share one membership list instead of drifting copies.
 - `VENDOR_RELIABILITY_UNKNOWN` (25.0) / `VENDOR_RELIABILITY_KNOWN_NO_SCORE` (50.0) —

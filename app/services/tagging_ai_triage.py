@@ -111,21 +111,24 @@ async def submit_triage_batch(db: Session, limit: int = 50000) -> dict:
 
     logger.info(f"Triage: processing {len(candidates)} untagged cards")
 
-    # Step 1: Heuristic pass
-    heuristic_flagged = 0
+    # Step 1: Heuristic pass — one classification call over the full MPN list, then a
+    # single set-based UPDATE for the flagged ids (the candidate query selected only
+    # id+mpn, so a per-row db.get() would round-trip once per flagged card).
+    verdicts = triage_internal_parts([mpn for _, mpn in candidates])
+    flagged_ids: list[int] = []
     remaining = []
 
-    for card_id, mpn in candidates:
-        if triage_internal_parts([mpn])[0]["is_internal"]:
-            card = db.get(MaterialCard, card_id)
-            if card:
-                card.is_internal_part = True
-                heuristic_flagged += 1
+    for (card_id, mpn), verdict in zip(candidates, verdicts):
+        if verdict["is_internal"]:
+            flagged_ids.append(card_id)
         else:
             remaining.append((card_id, mpn))
 
-        if heuristic_flagged % 1000 == 0 and heuristic_flagged > 0:
-            db.commit()
+    if flagged_ids:
+        db.query(MaterialCard).filter(MaterialCard.id.in_(flagged_ids)).update(
+            {"is_internal_part": True}, synchronize_session=False
+        )
+    heuristic_flagged = len(flagged_ids)
 
     db.commit()
     logger.info(f"Triage heuristic pass: {heuristic_flagged} flagged as internal, {len(remaining)} remaining")

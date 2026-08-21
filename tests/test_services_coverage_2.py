@@ -488,7 +488,7 @@ class TestAiGate:
             ]
         }
 
-        with patch("app.utils.llm_router.routed_structured", new_callable=AsyncMock, return_value=mock_result):
+        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=mock_result):
             result = _run(classify_parts_batch(parts))
 
         assert len(result) == 1
@@ -500,7 +500,9 @@ class TestAiGate:
 
         parts = [{"mpn": "TEST123", "manufacturer": "Test", "description": "Part"}]
 
-        with patch("app.utils.llm_router.routed_structured", new_callable=AsyncMock, side_effect=Exception("API down")):
+        with patch(
+            "app.utils.claude_client.claude_structured", new_callable=AsyncMock, side_effect=Exception("API down")
+        ):
             result = _run(classify_parts_batch(parts))
 
         assert result is None
@@ -640,23 +642,23 @@ class TestStrategicVendorService:
     """Tests for app.services.strategic_vendor_service."""
 
     def test_ensure_utc_naive(self):
-        from app.services.strategic_vendor_service import _ensure_utc
+        from app.utils.timezones import as_utc
 
         naive = datetime(2026, 1, 1)
-        result = _ensure_utc(naive)
+        result = as_utc(naive)
         assert result.tzinfo == UTC
 
     def test_ensure_utc_aware(self):
-        from app.services.strategic_vendor_service import _ensure_utc
+        from app.utils.timezones import as_utc
 
         aware = datetime(2026, 1, 1, tzinfo=UTC)
-        result = _ensure_utc(aware)
+        result = as_utc(aware)
         assert result is aware
 
     def test_ensure_utc_none(self):
-        from app.services.strategic_vendor_service import _ensure_utc
+        from app.utils.timezones import as_utc
 
-        assert _ensure_utc(None) is None
+        assert as_utc(None) is None
 
     def test_get_my_strategic_empty(self, db_session: Session, test_user: User):
         from app.services.strategic_vendor_service import get_my_strategic
@@ -1846,7 +1848,9 @@ class TestAiGateExtra:
 
         parts = [{"mpn": "TEST", "manufacturer": "X", "description": "Part"}]
 
-        with patch("app.utils.llm_router.routed_structured", new_callable=AsyncMock, return_value={"unexpected": True}):
+        with patch(
+            "app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value={"unexpected": True}
+        ):
             result = _run(classify_parts_batch(parts))
         assert result is None
 

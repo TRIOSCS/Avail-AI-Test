@@ -7,14 +7,13 @@ admin actions, and the admin api-health + data-ops partials. Extracted verbatim 
 htmx_views.py (same `/v2/partials/settings`, `/api/user`, `/v2/partials/admin` paths,
 same `htmx-views` tag).
 
-Called by: app/main.py (router mount); htmx_views.py re-imports `settings_toast`
-    (external importers in sources.py / admin.buy_plan_ops) and `_run_inbox_scan_now`
-    (the staying poll-inbox route).
+Called by: app/main.py (router mount); htmx_views.py re-imports `_run_inbox_scan_now`
+    (the staying poll-inbox route). Toast feedback goes through the shared
+    `_shared.set_toast` helper.
 Depends on: app.models, app.dependencies, app.database, app.services, ._shared
 """
 
 import asyncio
-import json
 import os
 import time
 
@@ -44,7 +43,7 @@ from ...models import (
 from ...services import clay_oauth
 from ...services.connector_health import get_health_dashboard
 from ...template_env import template_response
-from ._shared import _base_ctx
+from ._shared import _base_ctx, set_toast
 
 router = APIRouter(tags=["htmx-views"])
 
@@ -82,16 +81,6 @@ async def settings_users_tab(
     ctx = _base_ctx(request, user, "settings")
     ctx.update(users_context(db))
     return template_response("htmx/partials/settings/users.html", ctx)
-
-
-def settings_toast(response, message: str, kind: str = "success") -> None:
-    """Attach a showToast HX-Trigger for settings mutation responses.
-
-    Called by settings mutation handlers to surface success/error feedback via the
-    Alpine $store.toast. Mirrors _prospect_toast but is scoped to settings so later
-    tasks can import it cleanly.
-    """
-    response.headers["HX-Trigger"] = json.dumps({"showToast": {"message": message, "type": kind}})
 
 
 # ── Settings partials ────────────────────────────────────────────────
@@ -288,7 +277,7 @@ async def update_user_profile(
     db.commit()
     logger.info("Profile updated", user_id=user.id)
     response = HTMLResponse(status_code=200)
-    settings_toast(response, "Profile updated.")
+    set_toast(response, "Profile updated.")
     return response
 
 
@@ -335,7 +324,7 @@ async def update_display_timezone(
     current_user_display_tz_var.set(tz)
     logger.info("Display timezone updated", user_id=user.id, timezone=tz)
     response = HTMLResponse(status_code=200)
-    settings_toast(response, "Timezone updated.")
+    set_toast(response, "Timezone updated.")
     return response
 
 
@@ -350,7 +339,7 @@ async def toggle_buyplan_email(
     state = "enabled" if user.notify_buyplan_email_enabled else "disabled"
     logger.info("Buy-plan email notifications toggled", user_id=user.id, enabled=user.notify_buyplan_email_enabled)
     response = HTMLResponse(status_code=200)
-    settings_toast(response, f"Buy-plan email notifications {state}.")
+    set_toast(response, f"Buy-plan email notifications {state}.")
     return response
 
 
@@ -365,7 +354,7 @@ async def toggle_new_offer_alert(
     state = "enabled" if user.notify_new_offer_alert_enabled else "disabled"
     logger.info("New-offer alerts toggled", user_id=user.id, enabled=user.notify_new_offer_alert_enabled)
     response = HTMLResponse(status_code=200)
-    settings_toast(response, f"New-offer alerts {state}.")
+    set_toast(response, f"New-offer alerts {state}.")
     return response
 
 
@@ -381,7 +370,7 @@ async def toggle_resource_alert(
     state = "enabled" if user.notify_resource_alert_enabled else "disabled"
     logger.info("Re-source alerts toggled", user_id=user.id, enabled=user.notify_resource_alert_enabled)
     response = HTMLResponse(status_code=200)
-    settings_toast(response, f"Re-source alerts {state}.")
+    set_toast(response, f"Re-source alerts {state}.")
     return response
 
 
@@ -714,7 +703,7 @@ async def connectors_test_all(
     # it bypassed that entirely. Cap it per-user (a sweep is far heavier than one probe).
     if not check_rate_limit(user.id, "connectors_test_all", limit=_TEST_ALL_MAX_PER_MIN, window_seconds=60):
         resp = HTMLResponse("")
-        settings_toast(
+        set_toast(
             resp,
             "Test-all is rate-limited — wait a minute before retrying (each run spends live API quota).",
             kind="error",
@@ -779,6 +768,43 @@ async def connectors_test_all(
     return template_response("htmx/partials/settings/_connectors_testall.html", ctx)
 
 
+def _dedup_single_action(
+    request: Request,
+    user: User,
+    db: Session,
+    *,
+    action_fn,
+    success_msg_fn,
+    error_prefix: str,
+) -> Response:
+    """Shared skeleton for the four single-pair dedup actions (vendor/company
+    merge/delete-both), mirroring _dedup_bulk's parametrized dispatch.
+
+    Admin gate, then run the bound service call + commit. Any failure rolls back and
+    surfaces as an error toast — the services raise ValueError on validation, but an
+    unexpected SQLAlchemy error must surface as a toast too, not a 500. Success builds
+    its message from the service result via ``success_msg_fn``; either way the Data Ops
+    pane re-renders with the outcome toast.
+    """
+    from ...dependencies import is_admin
+
+    if not is_admin(user):
+        raise HTTPException(403, "Admin only")
+
+    try:
+        result = action_fn()
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        message, kind = f"{error_prefix}: {e}", "error"
+    else:
+        message, kind = success_msg_fn(result), "success"
+
+    resp = _render_data_ops(request, user, db)
+    set_toast(resp, message, kind=kind)
+    return resp
+
+
 @router.post("/v2/partials/admin/vendor-merge", response_class=HTMLResponse)
 async def admin_vendor_merge(
     request: Request,
@@ -788,30 +814,21 @@ async def admin_vendor_merge(
     db: Session = Depends(get_db),
 ):
     """Merge two vendor cards via HTMX."""
-    from ...dependencies import is_admin
-
-    if not is_admin(user):
-        raise HTTPException(403, "Admin only")
-
     from ...services.vendor_merge_service import merge_vendor_cards as _merge
 
-    try:
-        result = _merge(keep_id, remove_id, db)
-        db.commit()
-    except Exception as e:
-        # Align with company-merge: the service raises ValueError on validation, but an
-        # unexpected SQLAlchemy error here must surface as a toast, not a 500.
-        db.rollback()
-        message, kind = f"Vendor merge failed: {e}", "error"
-    else:
+    def _msg(result: dict) -> str:
         kept = db.get(VendorCard, result.get("kept", keep_id))
         kept_name = kept.display_name if kept and kept.display_name else "vendor"
-        message = f"Merged into {kept_name}. {result.get('reassigned', 0)} records reassigned."
-        kind = "success"
+        return f"Merged into {kept_name}. {result.get('reassigned', 0)} records reassigned."
 
-    resp = _render_data_ops(request, user, db)
-    settings_toast(resp, message, kind=kind)
-    return resp
+    return _dedup_single_action(
+        request,
+        user,
+        db,
+        action_fn=lambda: _merge(keep_id, remove_id, db),
+        success_msg_fn=_msg,
+        error_prefix="Vendor merge failed",
+    )
 
 
 @router.post("/v2/partials/admin/company-merge", response_class=HTMLResponse)
@@ -823,27 +840,21 @@ async def admin_company_merge(
     db: Session = Depends(get_db),
 ):
     """Merge two companies via HTMX."""
-    from ...dependencies import is_admin
-
-    if not is_admin(user):
-        raise HTTPException(403, "Admin only")
-
     from ...services.company_merge_service import merge_companies
 
-    try:
-        result = merge_companies(keep_id, remove_id, db)
-        db.commit()
-    except Exception as e:
-        db.rollback()
-        message, kind = f"Company merge failed: {e}", "error"
-    else:
+    def _msg(result: dict) -> str:
         kept = db.get(Company, result.get("kept", keep_id))
         kept_name = kept.name if kept and kept.name else "company"
-        message, kind = f"Merged into {kept_name}.", "success"
+        return f"Merged into {kept_name}."
 
-    resp = _render_data_ops(request, user, db)
-    settings_toast(resp, message, kind=kind)
-    return resp
+    return _dedup_single_action(
+        request,
+        user,
+        db,
+        action_fn=lambda: merge_companies(keep_id, remove_id, db),
+        success_msg_fn=_msg,
+        error_prefix="Company merge failed",
+    )
 
 
 @router.post("/v2/partials/admin/vendor-delete-both", response_class=HTMLResponse)
@@ -855,26 +866,16 @@ async def admin_vendor_delete_both(
     db: Session = Depends(get_db),
 ):
     """Delete BOTH vendor cards in a dedup pair (neither is worth keeping)."""
-    from ...dependencies import is_admin
-
-    if not is_admin(user):
-        raise HTTPException(403, "Admin only")
-
     from ...services.vendor_merge_service import delete_vendor_cards
 
-    try:
-        result = delete_vendor_cards(id_a, id_b, db)
-        db.commit()
-    except Exception as e:
-        db.rollback()
-        message, kind = f"Vendor delete failed: {e}", "error"
-    else:
-        message = f"Deleted both vendors. {result.get('detached', 0)} records detached."
-        kind = "success"
-
-    resp = _render_data_ops(request, user, db)
-    settings_toast(resp, message, kind=kind)
-    return resp
+    return _dedup_single_action(
+        request,
+        user,
+        db,
+        action_fn=lambda: delete_vendor_cards(id_a, id_b, db),
+        success_msg_fn=lambda result: f"Deleted both vendors. {result.get('detached', 0)} records detached.",
+        error_prefix="Vendor delete failed",
+    )
 
 
 @router.post("/v2/partials/admin/company-delete-both", response_class=HTMLResponse)
@@ -886,26 +887,16 @@ async def admin_company_delete_both(
     db: Session = Depends(get_db),
 ):
     """Delete BOTH companies in a dedup pair (neither is worth keeping)."""
-    from ...dependencies import is_admin
-
-    if not is_admin(user):
-        raise HTTPException(403, "Admin only")
-
     from ...services.company_merge_service import delete_companies
 
-    try:
-        result = delete_companies(id_a, id_b, db)
-        db.commit()
-    except Exception as e:
-        db.rollback()
-        message, kind = f"Company delete failed: {e}", "error"
-    else:
-        message = f"Deleted both companies. {result.get('detached', 0)} records detached."
-        kind = "success"
-
-    resp = _render_data_ops(request, user, db)
-    settings_toast(resp, message, kind=kind)
-    return resp
+    return _dedup_single_action(
+        request,
+        user,
+        db,
+        action_fn=lambda: delete_companies(id_a, id_b, db),
+        success_msg_fn=lambda result: f"Deleted both companies. {result.get('detached', 0)} records detached.",
+        error_prefix="Company delete failed",
+    )
 
 
 # Mass dedup actions accept a comma-joined "pairs" token list where each token is
@@ -955,7 +946,7 @@ async def _dedup_bulk(request, user, db, entity: str) -> HTMLResponse:
         # Dismiss is purely client-side (the row was already hidden); just re-render.
         resp = _render_data_ops(request, user, db)
         if pairs:
-            settings_toast(resp, f"Dismissed {len(pairs)} pair(s) for now.", kind="success")
+            set_toast(resp, f"Dismissed {len(pairs)} pair(s) for now.", kind="success")
         return resp
 
     if entity == "vendor":
@@ -989,7 +980,7 @@ async def _dedup_bulk(request, user, db, entity: str) -> HTMLResponse:
         message += f" {failed} failed: {', '.join(failed_tokens)}."
     resp = _render_data_ops(request, user, db)
     # Any failure surfaces as an error toast — a partial failure must not look green.
-    settings_toast(resp, message, kind="error" if failed else "success")
+    set_toast(resp, message, kind="error" if failed else "success")
     return resp
 
 

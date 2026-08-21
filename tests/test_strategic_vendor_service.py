@@ -17,7 +17,6 @@ from app.models.strategic import StrategicVendor
 from app.services.strategic_vendor_service import (
     MAX_STRATEGIC_VENDORS,
     TTL_DAYS,
-    _ensure_utc,
     active_count,
     claim_vendor,
     drop_vendor,
@@ -30,6 +29,7 @@ from app.services.strategic_vendor_service import (
     record_offer,
     replace_vendor,
 )
+from app.utils.timezones import as_utc
 from tests.conftest import engine  # noqa: F401
 
 # ── Helpers ──────────────────────────────────────────────────────────────
@@ -83,22 +83,22 @@ def _make_strategic(
     return sv
 
 
-# ── _ensure_utc ──────────────────────────────────────────────────────────
+# ── as_utc (canonical naive→UTC coercion used by the service) ──────────────────────────────────────────────────────────
 
 
 class TestEnsureUtc:
     def test_none_passes_through(self):
-        assert _ensure_utc(None) is None
+        assert as_utc(None) is None
 
     def test_naive_datetime_gets_utc(self):
         naive = datetime(2025, 1, 1, 12, 0, 0)
-        result = _ensure_utc(naive)
+        result = as_utc(naive)
         assert result.tzinfo is not None
         assert result.year == 2025
 
     def test_aware_datetime_unchanged(self):
         aware = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
-        result = _ensure_utc(aware)
+        result = as_utc(aware)
         assert result == aware
 
 

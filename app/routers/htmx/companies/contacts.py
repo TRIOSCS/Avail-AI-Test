@@ -336,6 +336,54 @@ def _render_contacts_list(request: Request, user: User, company: Company, db: Se
     return template_response("htmx/partials/customers/tabs/_contacts_grouped_list.html", ctx)
 
 
+def _bool_flag(raw: str | None) -> bool:
+    """Inline-form boolean coercion: non-empty value → True, empty/absent → False."""
+    return bool((raw or "").strip())
+
+
+async def _set_contact_flag(
+    request: Request,
+    user: User,
+    db: Session,
+    company_id: int,
+    contact_id: int,
+    *,
+    field: str,
+    label: str,
+    coerce,
+) -> HTMLResponse:
+    """Shared skeleton for the per-contact toggle endpoints (role/DNC/priority/archive).
+
+    IDOR-safe scoped lookup (contact must belong to a site under this company),
+    owner-or-admin gate, single-field write of ``field`` = ``coerce(form value)``,
+    commit/refresh, audit log (``label`` names the field in the log line), then the
+    refreshed grouped contacts list.
+    """
+    contact = _contact_under_company(db, company_id, contact_id)
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    if not can_manage_account(user, company, db):
+        raise HTTPException(403, "Only the owner or an admin can edit this contact")
+
+    form = await request.form()
+    setattr(contact, field, coerce(form.get(field)))
+    db.commit()
+    db.refresh(contact)
+
+    logger.info(
+        "Contact {} {} set to {} by {} (company {})",
+        contact_id,
+        label,
+        getattr(contact, field),
+        user.email,
+        company_id,
+    )
+    return _render_contacts_list(request, user, company, db)
+
+
 @router.post(
     "/v2/partials/customers/{company_id}/contacts/{contact_id}/role",
     response_class=HTMLResponse,
@@ -353,35 +401,16 @@ async def set_contact_role(
     Invalid value → 400 (legacy values that pre-exist in the DB are not accepted via
     this endpoint; rep must choose a canonical role).
     """
-    contact = (
-        db.query(SiteContact)
-        .join(CustomerSite)
-        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
-        .first()
-    )
-    if not contact:
-        raise HTTPException(404, "Contact not found")
-
-    company = db.query(Company).filter(Company.id == company_id).first()
-    if not company:
-        raise HTTPException(404, "Company not found")
-
-    if not can_manage_account(user, company, db):
-        raise HTTPException(403, "Only the owner or an admin can edit this contact")
-
-    form = await request.form()
-    contact.contact_role = _validate_role(form.get("contact_role") or "")
-    db.commit()
-    db.refresh(contact)
-
-    logger.info(
-        "Contact {} role set to {} by {} (company {})",
-        contact_id,
-        contact.contact_role,
-        user.email,
+    return await _set_contact_flag(
+        request,
+        user,
+        db,
         company_id,
+        contact_id,
+        field="contact_role",
+        label="role",
+        coerce=lambda raw: _validate_role(raw or ""),
     )
-    return _render_contacts_list(request, user, company, db)
 
 
 @router.post(
@@ -400,37 +429,16 @@ async def set_contact_dnc(
     Accepts do_not_contact= from the inline form.  Non-empty value → True. Empty string
     → False (clear the flag).
     """
-    contact = (
-        db.query(SiteContact)
-        .join(CustomerSite)
-        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
-        .first()
-    )
-    if not contact:
-        raise HTTPException(404, "Contact not found")
-
-    company = db.query(Company).filter(Company.id == company_id).first()
-    if not company:
-        raise HTTPException(404, "Company not found")
-
-    if not can_manage_account(user, company, db):
-        raise HTTPException(403, "Only the owner or an admin can edit this contact")
-
-    form = await request.form()
-    dnc_raw = (form.get("do_not_contact") or "").strip()
-
-    contact.do_not_contact = bool(dnc_raw)
-    db.commit()
-    db.refresh(contact)
-
-    logger.info(
-        "Contact {} do_not_contact set to {} by {} (company {})",
-        contact_id,
-        contact.do_not_contact,
-        user.email,
+    return await _set_contact_flag(
+        request,
+        user,
+        db,
         company_id,
+        contact_id,
+        field="do_not_contact",
+        label="do_not_contact",
+        coerce=_bool_flag,
     )
-    return _render_contacts_list(request, user, company, db)
 
 
 @router.post(
@@ -449,35 +457,16 @@ async def set_contact_priority(
     IDOR-safe: the contact must belong to a site under this company. Non-empty
     is_priority= → True; empty → False (clear).
     """
-    contact = (
-        db.query(SiteContact)
-        .join(CustomerSite)
-        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
-        .first()
-    )
-    if not contact:
-        raise HTTPException(404, "Contact not found")
-
-    company = db.query(Company).filter(Company.id == company_id).first()
-    if not company:
-        raise HTTPException(404, "Company not found")
-
-    if not can_manage_account(user, company, db):
-        raise HTTPException(403, "Only the owner or an admin can edit this contact")
-
-    form = await request.form()
-    contact.is_priority = bool((form.get("is_priority") or "").strip())
-    db.commit()
-    db.refresh(contact)
-
-    logger.info(
-        "Contact {} is_priority set to {} by {} (company {})",
-        contact_id,
-        contact.is_priority,
-        user.email,
+    return await _set_contact_flag(
+        request,
+        user,
+        db,
         company_id,
+        contact_id,
+        field="is_priority",
+        label="is_priority",
+        coerce=_bool_flag,
     )
-    return _render_contacts_list(request, user, company, db)
 
 
 @router.post(
@@ -497,35 +486,16 @@ async def set_contact_archive(
     is_archived= → True; empty → False (restore). Archived contacts stay visible
     (sorted to the bottom) — is_active is never touched here.
     """
-    contact = (
-        db.query(SiteContact)
-        .join(CustomerSite)
-        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
-        .first()
-    )
-    if not contact:
-        raise HTTPException(404, "Contact not found")
-
-    company = db.query(Company).filter(Company.id == company_id).first()
-    if not company:
-        raise HTTPException(404, "Company not found")
-
-    if not can_manage_account(user, company, db):
-        raise HTTPException(403, "Only the owner or an admin can edit this contact")
-
-    form = await request.form()
-    contact.is_archived = bool((form.get("is_archived") or "").strip())
-    db.commit()
-    db.refresh(contact)
-
-    logger.info(
-        "Contact {} is_archived set to {} by {} (company {})",
-        contact_id,
-        contact.is_archived,
-        user.email,
+    return await _set_contact_flag(
+        request,
+        user,
+        db,
         company_id,
+        contact_id,
+        field="is_archived",
+        label="is_archived",
+        coerce=_bool_flag,
     )
-    return _render_contacts_list(request, user, company, db)
 
 
 # ── Contacts-tab management (C2) ───────────────────────────────────────
@@ -1096,14 +1066,7 @@ async def contact_field_edit_form(
     """Return the inline edit widget for a single contact field."""
     if field not in EDITABLE_CONTACT_FIELDS:
         raise HTTPException(404, f"Unknown editable contact field: {field!r}")
-    contact = (
-        db.query(SiteContact)
-        .join(CustomerSite)
-        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
-        .first()
-    )
-    if not contact:
-        raise HTTPException(404, "Contact not found")
+    contact = _contact_under_company(db, company_id, contact_id)
     company = db.get(Company, company_id)
     # 404 (not 403) to match contact_edit_form_company_scoped: this widget leaks the
     # contact field value, so out-of-scope accounts must be indistinguishable from missing.
@@ -1141,14 +1104,7 @@ async def contact_field_display(
     """Return the display span for a single contact field (cancel path)."""
     if field not in EDITABLE_CONTACT_FIELDS:
         raise HTTPException(404, f"Unknown editable contact field: {field!r}")
-    contact = (
-        db.query(SiteContact)
-        .join(CustomerSite)
-        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
-        .first()
-    )
-    if not contact:
-        raise HTTPException(404, "Contact not found")
+    contact = _contact_under_company(db, company_id, contact_id)
     company = db.get(Company, company_id)
     # 404 (not 403) to match contact_edit_form_company_scoped: this span leaks the
     # contact field value, so out-of-scope accounts must be indistinguishable from missing.
@@ -1183,14 +1139,7 @@ async def contact_field_post(
 
     IDOR-safe: the contact must belong to a site under {company_id}. Owner-or-admin only.
     """
-    contact = (
-        db.query(SiteContact)
-        .join(CustomerSite)
-        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
-        .first()
-    )
-    if not contact:
-        raise HTTPException(404, "Contact not found")
+    contact = _contact_under_company(db, company_id, contact_id)
     company = db.get(Company, company_id)
     if company is None or not can_manage_account(user, company, db):
         raise HTTPException(403, "Only the owner or an admin can edit this contact")
@@ -1273,14 +1222,7 @@ async def contact_move_form(
     if not company:
         raise HTTPException(404, "Company not found")
 
-    contact = (
-        db.query(SiteContact)
-        .join(CustomerSite)
-        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
-        .first()
-    )
-    if not contact:
-        raise HTTPException(404, "Contact not found")
+    contact = _contact_under_company(db, company_id, contact_id)
 
     if not can_manage_account(user, company, db):
         raise HTTPException(403, "Only the owner or an admin can move this contact")
@@ -1344,14 +1286,7 @@ async def contact_move(
     if not can_manage_account(user, source_company, db):
         raise HTTPException(403, "Only the owner or an admin can move this contact")
 
-    contact = (
-        db.query(SiteContact)
-        .join(CustomerSite)
-        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
-        .first()
-    )
-    if not contact:
-        raise HTTPException(404, "Contact not found")
+    contact = _contact_under_company(db, company_id, contact_id)
 
     # Target site validation
     target_site = db.query(CustomerSite).filter(CustomerSite.id == target_site_id).first()

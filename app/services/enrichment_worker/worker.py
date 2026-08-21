@@ -853,8 +853,6 @@ async def run_one_batch(
     # a billable fetch is only spent on cards nothing else could categorize. Gated by the
     # flag; bounded by partsurfer_fetch_per_batch. Same session, committed with the batch.
     if batch_ids:
-        from app.config import settings
-
         if settings.partsurfer_desc_enabled:
             try:
                 logger.info("ENRICH_WORKER: partsurfer-desc {}", await _partsurfer_desc_pass(db, batch))

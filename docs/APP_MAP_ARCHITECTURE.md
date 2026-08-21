@@ -351,14 +351,14 @@ aggregated internally by `htmx_views.py` itself so `main.py` needed zero new mou
   to a chosen rep; the O-rework successor to the retired reclaim/reassign controls). Owns the
   prospect-context helpers
   (`_prospect_card_ctx`/`_prospect_detail_ctx`/`_prospect_stats_ctx`/`_prospect_action_response`/
-  `_status_visible_under_filter`/`_wants_detail`/`_enrich_is_stale`/`_prospect_toast`).
+  `_status_visible_under_filter`/`_wants_detail`/`_enrich_is_stale`).
 - `app/routers/htmx/settings.py` — **tail split (settings/ops/user-mgmt slice)**: the
   `settings/ops-group|users|sources|system|profile|data-ops|connectors|api-keys` tabs,
   inbox scan-now, the `/api/user/*` toggle endpoints, connector test-all + card, and the CRM
   vendor/company merge + dedup admin actions (`/v2/partials/admin/*`) plus the admin api-health
   partial (real per-connector rows assembled by `app/services/connector_health.py`) +
-  data-ops partials. Owns `settings_toast` (re-imported by `routers/sources.py` and
-  `routers/admin/buy_plan_ops.py`) and `_run_inbox_scan_now` (imported by
+  data-ops partials. Toasts go through the shared `_shared.set_toast` (also used by
+  `routers/sources.py` and `routers/admin/buy_plan_ops.py`). Owns `_run_inbox_scan_now` (imported by
   `app/routers/htmx/requisitions_edit.py` because its poll-inbox route calls it).
 - `app/routers/htmx/materials.py` — **tail split (materials-partials slice; distinct from the
   domain router `app/routers/materials.py`)**: the faceted list + filter sidebars

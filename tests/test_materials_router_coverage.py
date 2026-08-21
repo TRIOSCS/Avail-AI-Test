@@ -608,7 +608,7 @@ class TestImportStock:
                 {"mpn": "TESTVEND001", "qty": "500", "price": "1.25", "manufacturer": "TI"},
             ]
         )
-        with patch("app.routers.materials.get_credential_cached", return_value=None):
+        with patch("app.services.credential_service.get_credential_cached", return_value=None):
             resp = client.post(
                 "/api/materials/import-stock",
                 files={"file": ("stock.csv", csv_data, "text/csv")},
@@ -621,7 +621,7 @@ class TestImportStock:
 
     def test_import_creates_vendor_card(self, client, db_session):
         csv_data = self._csv_bytes([{"mpn": "NEWVEND002", "qty": "10"}])
-        with patch("app.routers.materials.get_credential_cached", return_value=None):
+        with patch("app.services.credential_service.get_credential_cached", return_value=None):
             resp = client.post(
                 "/api/materials/import-stock",
                 files={"file": ("stock.csv", csv_data, "text/csv")},
@@ -642,7 +642,7 @@ class TestImportStock:
         db_session.commit()
 
         csv_data = self._csv_bytes([{"mpn": "EXISTVEND003", "qty": "200"}])
-        with patch("app.routers.materials.get_credential_cached", return_value=None):
+        with patch("app.services.credential_service.get_credential_cached", return_value=None):
             resp = client.post(
                 "/api/materials/import-stock",
                 files={"file": ("stock.csv", csv_data, "text/csv")},
@@ -662,7 +662,7 @@ class TestImportStock:
     def test_import_with_vendor_website(self, client, db_session):
         """Providing vendor_website sets domain on new VendorCard."""
         csv_data = self._csv_bytes([{"mpn": "WEBVEND004", "qty": "50"}])
-        with patch("app.routers.materials.get_credential_cached", return_value=None):
+        with patch("app.services.credential_service.get_credential_cached", return_value=None):
             resp = client.post(
                 "/api/materials/import-stock",
                 files={"file": ("stock.csv", csv_data, "text/csv")},
@@ -694,7 +694,7 @@ class TestImportStock:
         db_session.commit()
 
         csv_data = self._csv_bytes([{"mpn": "UPDATEPART", "qty": "999", "price": "0.99"}])
-        with patch("app.routers.materials.get_credential_cached", return_value=None):
+        with patch("app.services.credential_service.get_credential_cached", return_value=None):
             resp = client.post(
                 "/api/materials/import-stock",
                 files={"file": ("stock.csv", csv_data, "text/csv")},
@@ -1064,7 +1064,7 @@ class TestDirectHandlerCoverage:
         user = MagicMock()
         user.email = "test@test.com"
 
-        with patch("app.routers.materials.get_credential_cached", return_value=None):
+        with patch("app.services.credential_service.get_credential_cached", return_value=None):
             result = await import_stock_list_standalone(req, user=user, db=db_session)
 
         assert result["imported_rows"] >= 0
@@ -1129,7 +1129,7 @@ class TestDirectHandlerCoverage:
         req.form = AsyncMock(return_value=mock_form)
         user = MagicMock()
 
-        with patch("app.routers.materials.get_credential_cached", return_value=None):
+        with patch("app.services.credential_service.get_credential_cached", return_value=None):
             result = await import_stock_list_standalone(req, user=user, db=db_session)
 
         assert result["imported_rows"] >= 1
@@ -1160,7 +1160,7 @@ class TestDirectHandlerCoverage:
         req.form = AsyncMock(return_value=mock_form)
         user = MagicMock()
 
-        with patch("app.routers.materials.get_credential_cached", return_value=None):
+        with patch("app.services.credential_service.get_credential_cached", return_value=None):
             result = await import_stock_list_standalone(req, user=user, db=db_session)
 
         assert result["skipped_rows"] >= 0
@@ -1192,7 +1192,7 @@ class TestDirectHandlerCoverage:
         req.form = AsyncMock(return_value=mock_form)
         user = MagicMock()
 
-        with patch("app.routers.materials.get_credential_cached", return_value=None):
+        with patch("app.services.credential_service.get_credential_cached", return_value=None):
             result = await import_stock_list_standalone(req, user=user, db=db_session)
 
         assert result["vendor_name"] == "Domain Test Vendor"
@@ -1225,9 +1225,9 @@ class TestDirectHandlerCoverage:
         user = MagicMock()
 
         with (
-            patch("app.routers.materials.get_credential_cached", return_value="fake-api-key"),
-            patch("app.routers.materials.safe_background_task", new_callable=AsyncMock) as mock_bg,
-            patch("app.routers.materials._background_enrich_vendor", return_value=AsyncMock()),
+            patch("app.services.credential_service.get_credential_cached", return_value="fake-api-key"),
+            patch("app.utils.async_helpers.safe_background_task", new_callable=AsyncMock) as mock_bg,
+            patch("app.utils.vendor_helpers._background_enrich_vendor", return_value=AsyncMock()),
         ):
             mock_bg.return_value = None
             result = await import_stock_list_standalone(req, user=user, db=db_session)
@@ -1291,7 +1291,7 @@ class TestDirectHandlerCoverage:
         req.form = AsyncMock(return_value=mock_form)
         user = MagicMock()
 
-        with patch("app.routers.materials.get_credential_cached", return_value=None):
+        with patch("app.services.credential_service.get_credential_cached", return_value=None):
             result = await import_stock_list_standalone(req, user=user, db=db_session)
 
         assert result["imported_rows"] >= 1
@@ -1815,7 +1815,7 @@ class TestImportStockIntegrityErrors:
         db_session.commit()
 
         csv_content = b"mpn,qty\nINTEGVEND001,50\n"
-        with patch("app.routers.materials.get_credential_cached", return_value=None):
+        with patch("app.services.credential_service.get_credential_cached", return_value=None):
             # The vendor already exists, so the flush will raise IntegrityError.
             # We simulate this by patching db.flush to raise only for VendorCard.
             original_flush = db_session.flush
@@ -1842,7 +1842,7 @@ class TestImportStockIntegrityErrors:
         # Provide a CSV row that parse_tabular_file/normalize_stock_row gives us an MPN
         # that then fails the V3 gate
         csv_content = b"mpn,qty\nAB,10\n"
-        with patch("app.routers.materials.get_credential_cached", return_value=None):
+        with patch("app.services.credential_service.get_credential_cached", return_value=None):
             resp = self._post_stock(client, csv_content)
         assert resp.status_code == 200
         data = resp.json()
@@ -1878,7 +1878,7 @@ class TestImportStockIntegrityErrors:
             return original_flush(objects)
 
         with (
-            patch("app.routers.materials.get_credential_cached", return_value=None),
+            patch("app.services.credential_service.get_credential_cached", return_value=None),
             patch.object(db_session, "flush", side_effect=patched_flush),
         ):
             resp = self._post_stock(client, csv_content)
@@ -2367,7 +2367,7 @@ class TestImportStockDirectIntegrityErrors:
             return q
 
         with (
-            patch("app.routers.materials.get_credential_cached", return_value=None),
+            patch("app.services.credential_service.get_credential_cached", return_value=None),
             patch.object(db_session, "flush", side_effect=_patched_flush),
             patch.object(db_session, "query", side_effect=_patched_query),
         ):
@@ -2401,7 +2401,7 @@ class TestImportStockDirectIntegrityErrors:
 
         # normalize_stock_row must return a non-None dict with a short MPN to reach line 807
         with (
-            patch("app.routers.materials.get_credential_cached", return_value=None),
+            patch("app.services.credential_service.get_credential_cached", return_value=None),
             patch("app.file_utils.normalize_stock_row", return_value={"mpn": "AB", "qty": 5}),
         ):
             result = await import_stock_list_standalone(req, user=user, db=db_session)
@@ -2466,11 +2466,12 @@ class TestImportStockDirectIntegrityErrors:
 
                     mock_q = _MM()
                     mock_q.filter.return_value.first.return_value = None
+                    mock_q.filter.return_value.filter.return_value.first.return_value = None
                     return mock_q
             return q
 
         with (
-            patch("app.routers.materials.get_credential_cached", return_value=None),
+            patch("app.services.credential_service.get_credential_cached", return_value=None),
             patch.object(db_session, "flush", side_effect=_patched_flush),
             patch.object(db_session, "query", side_effect=_patched_query),
         ):
@@ -2524,11 +2525,12 @@ class TestImportStockDirectIntegrityErrors:
 
                 mock_q = _MM()
                 mock_q.filter.return_value.first.return_value = None
+                mock_q.filter.return_value.filter.return_value.first.return_value = None
                 return mock_q
             return q
 
         with (
-            patch("app.routers.materials.get_credential_cached", return_value=None),
+            patch("app.services.credential_service.get_credential_cached", return_value=None),
             patch.object(db_session, "flush", side_effect=_patched_flush),
             patch.object(db_session, "query", side_effect=_patched_query),
         ):

@@ -2,6 +2,7 @@
    AI-prefilled offer form (same component + save path as the edit modal) + the
    ask-the-vendor gap checklist + a compose pane for the drafted reply.
    Receives: requirement, offer, prefill, gap_items, confidence, vr. #}
+{% from "htmx/partials/shared/_macros.html" import close_modal_on_success -%}
 <div class="p-4">
   <h3 class="text-sm font-semibold text-gray-900 mb-2">Qualify with AI — {{ offer.vendor_name }}</h3>
 
@@ -18,7 +19,7 @@
   <form x-data='offerQualification({{ (prefill or {})|tojson }})'
         hx-post="/v2/partials/sightings/{{ requirement.id }}/offers/{{ offer.id }}"
         hx-target="#sightings-offers-panel" hx-swap="innerHTML"
-        hx-on::after-request="if(event.detail.successful) this.dispatchEvent(new CustomEvent('close-modal', {bubbles: true}))"
+        {{ close_modal_on_success() }}
         data-loading-disable class="space-y-3">
     {% set mpn_default = requirement.primary_mpn %}
     {% include "htmx/partials/offers/_offer_form_fields.html" %}

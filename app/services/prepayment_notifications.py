@@ -5,8 +5,8 @@ notify the (non-Avail) accounting + AP groups so the wire can be prepared / exec
 best-effort, fire-and-forget channels:
   - Email to the configured group DLs (``accounting_group_email`` + ``ap_group_email``)
     sent via a logged-in admin's DELEGATED Microsoft Graph token — there is NO app-token
-    mail path, so we borrow an admin who has a live token (copied from
-    buyplan_notifications.notify_stock_sale_approved).
+    mail path, so we borrow an admin who has a live token (shared policy in
+    app.services.admin_mailer, also used by buyplan_notifications.notify_stock_sale_approved).
   - A Teams Adaptive Card posted to the prepayment channel webhook
     (``prepayment_teams_webhook``).
 The REQUESTED notice is headed "PENDING APPROVAL — DO NOT PAY YET"; the APPROVED notice
@@ -32,8 +32,9 @@ Called by: app.routers.prepayments (request create), app.routers.htmx.buy_plans 
            app.services.prepayment_service (mark paid → paid), via run_prepayment_notify_bg.
 Depends on: app.database (SessionLocal), app.config (settings.admin_emails),
             app.services.admin_service (get_config_values),
+            app.services.admin_mailer (send_group_email_as_admin),
             app.services.teams_notifications (post_teams_channel_card),
-            app.utils.graph_client, app.utils.token_manager, app.utils.async_helpers,
+            app.utils.async_helpers,
             app.models (Prepayment, ApprovalRequest, ActivityLog, User).
 """
 
@@ -318,8 +319,15 @@ def _resolve_approval(db: Session, prepayment_id: int) -> tuple[str | None, obje
 # ── Field helpers ────────────────────────────────────────────────────
 
 
-def _beneficiary(prepayment: Prepayment) -> str:
-    """Banks need the legal name (finding #14): legal_name → snapshot → display_name."""
+def beneficiary_name(prepayment: Prepayment) -> str:
+    """Who is actually being paid — the legal payee, most-authoritative first.
+
+    Banks need the legal name (finding #14): vendor_card.legal_name → the request-time
+    vendor_name snapshot → vendor_card.display_name → "—". The approver/AP must never
+    see a blank payee. The ONE owner of this chain — the approvals queue rows and the
+    tokenized confirm page import it too, so the payee string can never diverge across
+    those compliance-sensitive surfaces.
+    """
     vc = prepayment.vendor_card
     legal: str | None = getattr(vc, "legal_name", None) if vc is not None else None
     if legal:
@@ -375,7 +383,7 @@ def _facts(prepayment: Prepayment, event: str, approver=None, decided_at=None) -
     """Ordered (label, value) pairs shared by the Teams card FactSet + the email
     table."""
     facts = [
-        ("Beneficiary", _beneficiary(prepayment)),
+        ("Beneficiary", beneficiary_name(prepayment)),
         ("Amount (incl. fees)", _format_amount(prepayment)),
         ("Payment method", prepayment.payment_method or "—"),
         ("PO #", _po_number(prepayment)),
@@ -502,49 +510,18 @@ async def _send_group_email(db: Session, to: list[str], subject: str, html: str)
     """Send *html* to each address in *to* using a logged-in admin's delegated Graph
     token.
 
-    Copies the delegated-admin send from
-    buyplan_notifications.notify_stock_sale_approved: there is NO app-token sendMail
-    path, so we borrow an admin who has a live token. If no admin has one, log + skip
-    and return False (the caller records the honest failure). Returns True if at least
-    one message was accepted.
+    Thin wrapper over the shared admin_mailer.send_group_email_as_admin policy: there is
+    NO app-token sendMail path, so we borrow an admin who has a live token
+    (buyplan_notifications.notify_stock_sale_approved shares the same helper). If no
+    admin has one, log + skip and return False (the caller records the honest failure).
+    Returns True if at least one message was accepted. Kept as a module-level seam
+    because callers and tests patch it here.
     """
-    from ..utils.graph_client import GraphClient
-    from ..utils.token_manager import get_valid_token
+    from .admin_mailer import send_group_email_as_admin
 
-    recipients = [a for a in to if a]
-    if not recipients:
-        return False
-
-    admin_users = db.query(User).filter(User.email.in_(settings.admin_emails)).all()
-    sender = next((a for a in admin_users if a.access_token), None)
-    if sender is None:
-        logger.warning("Prepayment email: no admin with a live Graph token — skipping send to {}", recipients)
-        return False
-    token = await get_valid_token(sender, db)
-    if not token:
-        logger.warning("Prepayment email: admin Graph token unavailable — skipping send to {}", recipients)
-        return False
-
-    gc = GraphClient(token)
-    sent_any = False
-    for addr in recipients:
-        try:
-            await gc.post_json(
-                "/me/sendMail",
-                {
-                    "message": {
-                        "subject": subject,
-                        "body": {"contentType": "HTML", "content": html},
-                        "toRecipients": [{"emailAddress": {"address": addr}}],
-                    },
-                    "saveToSentItems": "false",
-                },
-            )
-            sent_any = True
-            logger.info("Prepayment notice emailed to {}", addr)
-        except Exception as e:
-            logger.error("Prepayment notice email to {} failed: {}", addr, e)
-    return sent_any
+    return await send_group_email_as_admin(
+        db, to, subject, html, admin_emails=settings.admin_emails, log_label="Prepayment notice"
+    )
 
 
 def _write_failure_alert(db: Session, prepayment: Prepayment) -> None:
@@ -621,7 +598,7 @@ def _notify_paid_inner(db: Session, prepayment_id: int) -> dict:
 
     amount = prepayment.paid_amount if prepayment.paid_amount is not None else prepayment.total_incl_fees
     notes = (
-        f"{_beneficiary(prepayment)} {prepayment.currency or 'USD'} {(amount or Decimal('0')):,.2f} "
+        f"{beneficiary_name(prepayment)} {prepayment.currency or 'USD'} {(amount or Decimal('0')):,.2f} "
         f"wired for PO {_po_number(prepayment)} (plan #{prepayment.buy_plan_id})"
     )
     requisition_id = plan.requisition_id if plan is not None else None

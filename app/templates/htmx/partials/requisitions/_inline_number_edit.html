@@ -1,0 +1,50 @@
+{# _inline_number_edit.html — Click-to-edit inline number widget for requisition
+   header fields (the ONE source for the win-probability and opportunity-value
+   chips; a third numeric header field is one more call, not a clone).
+   Called by: requisitions/_win_probability.html, requisitions/_opportunity_value.html.
+   Depends on: Alpine.js (editing toggle), HTMX (PATCH + outerHTML swap).
+   Args:
+     target_id:   DOM id of the wrapper span (also the PATCH form's hx-target).
+     patch_url:   PATCH endpoint for the field.
+     field_name:  <input> name attribute.
+     title:       hover tooltip on the display span.
+     display:     pre-formatted display text when the value is set (None when unset).
+     empty:       display text when the value is unset.
+     value:       current raw value ('' when unset) — pre-fills the input.
+     width:       Tailwind width class for the input (w-16 / w-24).
+     max:         optional max attribute (win probability caps at 100).
+     step:        optional step attribute (dollar values use 0.01).
+     placeholder: input placeholder text.
+#}
+{% macro inline_number_edit(target_id, patch_url, field_name, title, display, empty, value, width, max=None, step=None, placeholder='') %}
+<span id="{{ target_id }}"
+      class="inline-flex items-center gap-1 text-sm text-gray-600"
+      x-data="{ editing: false }">
+  <span x-show="!editing" class="cursor-pointer hover:bg-brand-50 rounded px-1 transition-colors"
+        @click="editing = true"
+        title="{{ title }}">
+    {% if display is not none %}
+      <span class="font-medium text-gray-900">{{ display }}</span>
+    {% else %}
+      <span class="text-gray-400 italic">{{ empty }}</span>
+    {% endif %}
+  </span>
+  <form x-show="editing"
+        hx-patch="{{ patch_url }}"
+        hx-target="#{{ target_id }}"
+        hx-swap="outerHTML"
+        class="inline-flex items-center gap-1">
+    <input type="number"
+           name="{{ field_name }}"
+           min="0"
+           {% if max is not none %}max="{{ max }}"
+           {% endif %}{% if step is not none %}step="{{ step }}"
+           {% endif %}value="{{ value }}"
+           placeholder="{{ placeholder }}"
+           class="{{ width }} text-xs border border-gray-300 rounded px-1 py-0.5 input-focus"
+           @keydown.escape="editing = false">
+    <button type="submit" class="text-xs text-brand-600 hover:text-brand-800 font-medium">Save</button>
+    <button type="button" @click="editing = false" class="text-xs text-gray-400 hover:text-gray-600">Cancel</button>
+  </form>
+</span>
+{% endmacro %}

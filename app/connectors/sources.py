@@ -181,11 +181,19 @@ def _invalidate_token(cache_key: tuple[str, str]) -> None:
 class BaseConnector(ABC):
     source_name: str = "unknown"
 
+    # Set by OAuth client-credentials subclasses — only they call _token_cache_key.
+    client_id: str
+
     def __init__(self, timeout: float = 20.0, max_retries: int = 2):
         self.timeout = timeout
         self.max_retries = max_retries
         self._breaker = get_breaker(self.__class__.__name__)
         self._semaphore = _get_connector_semaphore(self.__class__.__name__)
+
+    def _token_cache_key(self) -> tuple[str, str]:
+        # Process-wide OAuth cache key (see `_get_cached_token`). A blank client_id
+        # never reaches token minting — each subclass's `_do_search` guards it first.
+        return (type(self).__name__, self.client_id)
 
     async def search(self, part_number: str) -> list[dict]:
         # Short-circuit if the breaker is open (service is known-down).
@@ -345,6 +353,23 @@ def _round_price(price) -> float | None:
     return round(value, 4) if value is not None else None
 
 
+def best_price_break(prices: list[dict]) -> dict | None:
+    """Return the price break with the smallest break quantity, or None if empty.
+
+    Coalesces a present-but-null break quantity (None < int → TypeError, erroring the
+    whole PN) to a large sentinel so a null row sorts last instead of crashing. Handles
+    the break-quantity key aliases used across Octopart/Mouser/DigiKey payloads.
+    """
+    if not prices:
+        return None
+    return min(
+        prices,
+        key=lambda p: (
+            p.get("Quantity") or p.get("BreakQuantity") or p.get("breakQuantity") or p.get("quantity") or 999999
+        ),
+    )
+
+
 def _octopart_search_url(pn: str) -> str:
     """Octopart search-page URL for a part number (fallback when no direct URL)."""
     return f"https://octopart.com/search?q={quote_plus(pn)}"
@@ -406,11 +431,6 @@ class NexarConnector(BaseConnector):
         self.client_id = client_id
         self.client_secret = client_secret
         self.octopart_api_key = octopart_api_key
-
-    def _token_cache_key(self) -> tuple[str, str]:
-        # Process-wide OAuth cache key (see `_get_cached_token`). A blank client_id
-        # never reaches token minting — `_do_search` guards it before `_run_query`.
-        return (type(self).__name__, self.client_id)
 
     async def _get_token(self) -> str:
         async def _mint() -> tuple[str, int]:
@@ -522,20 +542,10 @@ class NexarConnector(BaseConnector):
                     price, currency = None, "USD"
                     prices = offer.get("prices") or []
                     if isinstance(prices, list) and prices:
-                        # Coalesce a present-but-null break quantity (None < int →
-                        # TypeError, erroring the whole PN) to a large sentinel.
-                        best = min(
-                            prices,
-                            key=lambda p: (
-                                p.get("Quantity")
-                                or p.get("BreakQuantity")
-                                or p.get("breakQuantity")
-                                or p.get("quantity")
-                                or 999999
-                            ),
-                        )
-                        price = best.get("price")
-                        currency = best.get("currency", "USD")
+                        best = best_price_break(prices)
+                        if best is not None:
+                            price = best.get("price")
+                            currency = best.get("currency", "USD")
                     elif isinstance(prices, dict):
                         for curr_prices in prices.values():
                             if curr_prices:
@@ -682,20 +692,8 @@ class NexarConnector(BaseConnector):
                 for offer in offers:
                     qty = offer.get("inventoryLevel")
                     price, currency = None, "USD"
-                    prices = offer.get("prices") or []
-                    if prices:
-                        # Coalesce a present-but-null break quantity (None < int →
-                        # TypeError, erroring the whole PN) to a large sentinel.
-                        best = min(
-                            prices,
-                            key=lambda p: (
-                                p.get("Quantity")
-                                or p.get("BreakQuantity")
-                                or p.get("breakQuantity")
-                                or p.get("quantity")
-                                or 999999
-                            ),
-                        )
+                    best = best_price_break(offer.get("prices") or [])
+                    if best is not None:
                         price = best.get("price")
                         currency = best.get("currency", "USD")
 

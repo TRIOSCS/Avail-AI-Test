@@ -14,6 +14,12 @@ _jinja_env = Environment(
     autoescape=True,
 )
 
+# Share the canonical money-display filter with the app template env so the
+# document templates (quote_report/bid_report) format totals identically.
+from app.template_env import _money_filter  # noqa: E402
+
+_jinja_env.filters["money"] = _money_filter
+
 
 def _render_pdf(template_name: str, **context) -> bytes:
     """Render a document template to PDF, injecting the shared ``generated_at``

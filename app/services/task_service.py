@@ -18,19 +18,13 @@ from sqlalchemy.orm import Session, joinedload
 from app.constants import TaskStatus
 from app.models.crm import Company
 from app.models.task import RequisitionTask
+from app.utils.timezones import as_utc
 
 # How far back the My Day "Done" filter reaches, and the hard row cap on that query.
 # The completed-task list is otherwise unbounded (a long-tenured user could load
 # thousands of rows into one fragment) — cap it to a recent window plus a LIMIT.
 _DONE_WINDOW_DAYS = 30
 _DONE_LIMIT = 200
-
-
-def _as_utc(dt: datetime | None) -> datetime | None:
-    """Coerce a naive datetime to UTC-aware (SQLite can return naive values)."""
-    if dt is not None and dt.tzinfo is None:
-        return dt.replace(tzinfo=UTC)
-    return dt
 
 
 # ---------------------------------------------------------------------------
@@ -78,7 +72,7 @@ def create_task(
     # Belt-and-suspenders 24h check for manual tasks with an explicit due date.
     if source == "manual" and due_at:
         now = datetime.now(UTC)
-        if _as_utc(due_at) < now + timedelta(hours=24):
+        if as_utc(due_at) < now + timedelta(hours=24):
             raise ValueError("Due date must be at least 24 hours from now")
     task = _persist_task(
         db,
@@ -118,7 +112,8 @@ def create_requisition_task(
     """
     if assigned_to_id is None:
         raise ValueError("Assignee is required")
-    task = RequisitionTask(
+    task = _persist_task(
+        db,
         requisition_id=requisition_id,
         title=title,
         description=description,
@@ -129,9 +124,6 @@ def create_requisition_task(
         source="manual",
         due_at=due_at,
     )
-    db.add(task)
-    db.commit()
-    db.refresh(task)
     logger.info("Requisition task created: {} (req={}, type={})", task.id, requisition_id, task_type)
     return task
 
@@ -200,7 +192,8 @@ def create_personal_task(
     must pass an already-parsed aware ``due_at`` datetime (never a raw date string).
     """
     req = get_or_create_personal_requisition(db, user_id)
-    task = RequisitionTask(
+    task = _persist_task(
+        db,
         requisition_id=req.id,
         title=title,
         task_type="general",
@@ -211,9 +204,6 @@ def create_personal_task(
         source="manual",
         due_at=due_at,
     )
-    db.add(task)
-    db.commit()
-    db.refresh(task)
     logger.info("Personal task created: {} (user={}, req={})", task.id, user_id, req.id)
     return task
 

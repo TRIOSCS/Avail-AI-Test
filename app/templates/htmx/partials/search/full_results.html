@@ -11,6 +11,105 @@
 
 <title hx-swap-oob="true">Search Results — AvailAI</title>
 
+{# ── Result row cells — the ONE per-entity cell chain, shared by the All-tab
+   sections (first 10 per group) and the per-entity tabs (every match). ── #}
+{% macro result_row(group_key, item) %}
+  {% if group_key == "requisitions" %}
+  <td class="px-4 py-2.5">
+    <a href="/v2/requisitions/{{ item.id }}"
+       hx-get="/v2/partials/requisitions/{{ item.id }}"
+       hx-target="#main-content"
+       hx-push-url="/v2/requisitions/{{ item.id }}"
+       class="font-medium text-gray-900 hover:text-brand-600">{{ item.name }}</a>
+  </td>
+  <td class="px-4 py-2.5 text-gray-600">{{ item.customer_name|default("—") }}</td>
+  <td class="px-4 py-2.5 text-secondary">{{ item.status|default("") }}</td>
+
+  {% elif group_key == "companies" %}
+  <td class="px-4 py-2.5">
+    <a href="/v2/customers/{{ item.id }}"
+       hx-get="/v2/partials/customers/{{ item.id }}"
+       hx-target="#main-content"
+       hx-push-url="/v2/customers/{{ item.id }}"
+       class="font-medium text-gray-900 hover:text-brand-600">{{ item.name }}</a>
+  </td>
+  <td class="px-4 py-2.5 text-gray-600">{{ item.domain|default("—") }}</td>
+  <td class="px-4 py-2.5 text-secondary">{{ item.account_type|default("") }}</td>
+
+  {% elif group_key == "vendors" %}
+  <td class="px-4 py-2.5">
+    <a href="/v2/vendors/{{ item.id }}"
+       hx-get="/v2/partials/vendors/{{ item.id }}"
+       hx-target="#main-content"
+       hx-push-url="/v2/vendors/{{ item.id }}"
+       class="font-medium text-gray-900 hover:text-brand-600">{{ item.display_name }}</a>
+  </td>
+  <td class="px-4 py-2.5 text-gray-600">{{ item.domain|default("—") }}</td>
+
+  {% elif group_key == "vendor_contacts" %}
+  <td class="px-4 py-2.5">
+    <a href="/v2/vendors/{{ item.vendor_card_id|default(item.id) }}"
+       hx-get="/v2/partials/vendors/{{ item.vendor_card_id|default(item.id) }}"
+       hx-target="#main-content"
+       hx-push-url="/v2/vendors/{{ item.vendor_card_id|default(item.id) }}"
+       class="font-medium text-gray-900 hover:text-brand-600">{{ item.full_name }}</a>
+  </td>
+  <td class="px-4 py-2.5 text-gray-600">{{ item.email|default("—") }}</td>
+  <td class="px-4 py-2.5 text-secondary">{{ item.title|default("") }}</td>
+
+  {% elif group_key == "site_contacts" %}
+  <td class="px-4 py-2.5 font-medium text-gray-900">{{ item.full_name }}</td>
+  <td class="px-4 py-2.5 text-gray-600">{{ item.email|default("—") }}</td>
+
+  {% elif group_key == "parts" %}
+  <td class="px-4 py-2.5">
+    <a href="/v2/requisitions/{{ item.requisition_id|default('') }}"
+       hx-get="/v2/partials/requisitions/{{ item.requisition_id|default('') }}"
+       hx-target="#main-content"
+       hx-push-url="/v2/requisitions/{{ item.requisition_id|default('') }}"
+       class="font-medium font-mono text-gray-900 hover:text-brand-600">{{ item.primary_mpn }}</a>
+  </td>
+  <td class="px-4 py-2.5 text-gray-600">{{ item.brand|default("—") }}</td>
+
+  {% elif group_key == "offers" %}
+  <td class="px-4 py-2.5">
+    <a href="/v2/requisitions/{{ item.requisition_id|default('') }}"
+       hx-get="/v2/partials/requisitions/{{ item.requisition_id|default('') }}"
+       hx-target="#main-content"
+       hx-push-url="/v2/requisitions/{{ item.requisition_id|default('') }}"
+       class="font-medium font-mono text-gray-900 hover:text-brand-600">{{ item.mpn }}</a>
+  </td>
+  <td class="px-4 py-2.5 text-gray-600">{{ item.vendor_name|default("—") }}</td>
+  <td class="px-4 py-2.5 text-emerald-600 font-medium">
+    {% if item.unit_price %}${{ "%.2f"|format(item.unit_price) }}{% else %}—{% endif %}
+  </td>
+
+  {% elif group_key == "material_cards" %}
+  <td class="table-cell">
+    <a href="/v2/search?mpn={{ item.display_mpn|default(item.normalized_mpn|default(''))|urlencode }}"
+       hx-get="/v2/partials/search?mpn={{ item.display_mpn|default(item.normalized_mpn|default(''))|urlencode }}"
+       hx-target="#main-content"
+       hx-push-url="/v2/search?mpn={{ item.display_mpn|default(item.normalized_mpn|default(''))|urlencode }}"
+       class="font-medium font-mono text-gray-900 hover:text-brand-600">{{ item.display_mpn }}</a>
+  </td>
+  <td class="table-cell text-gray-600">{{ item.manufacturer|default("—") }}</td>
+  <td class="table-cell text-secondary truncate max-w-xs">{{ item.description|default("") }}</td>
+
+  {% elif group_key == "sightings" %}
+  <td class="table-cell">
+    <a href="/v2/requisitions/{{ item.requisition_id|default('') }}"
+       hx-get="/v2/partials/requisitions/{{ item.requisition_id|default('') }}"
+       hx-target="#main-content"
+       hx-push-url="/v2/requisitions/{{ item.requisition_id|default('') }}"
+       class="font-medium font-mono text-gray-900 hover:text-brand-600">{{ item.mpn_matched }}</a>
+  </td>
+  <td class="table-cell text-gray-600">{{ item.vendor_name|default("—") }}</td>
+  <td class="table-cell text-emerald-600 font-medium">
+    {% if item.unit_price %}${{ "%.2f"|format(item.unit_price) }}{% else %}—{% endif %}
+  </td>
+  {% endif %}
+{% endmacro %}
+
 <div class="page-fluid px-4 py-6" x-data="{ tab: 'all' }">
 
   {# ── Page header ── #}
@@ -66,24 +165,25 @@
 
   {% else %}
 
-  {# ── Tab counts ── #}
-  {% set tab_config = [
-    ("all", "All", results.total_count),
-    ("requisitions", "Requisitions", results.groups.get("requisitions", [])|length),
-    ("companies", "Customers", results.groups.get("companies", [])|length),
-    ("vendors", "Vendors", results.groups.get("vendors", [])|length),
-    ("vendor_contacts", "Vendor Contacts", results.groups.get("vendor_contacts", [])|length),
-    ("site_contacts", "Customer Contacts", results.groups.get("site_contacts", [])|length),
-    ("parts", "Parts", results.groups.get("parts", [])|length),
-    ("offers", "Offers", results.groups.get("offers", [])|length),
-    ("material_cards", "Material Hub", results.groups.get("material_cards", [])|length),
-    ("sightings", "Sightings", results.groups.get("sightings", [])|length),
+  {# ── Entity groups (key → label) — the ONE list driving the tab bar, the
+     All-tab sections, and the per-entity tabs. ── #}
+  {% set group_config = [
+    ("requisitions", "Requisitions"),
+    ("companies", "Customers"),
+    ("vendors", "Vendors"),
+    ("vendor_contacts", "Vendor Contacts"),
+    ("site_contacts", "Customer Contacts"),
+    ("parts", "Parts"),
+    ("offers", "Offers"),
+    ("material_cards", "Material Hub"),
+    ("sightings", "Sightings"),
   ] %}
 
   {# ── Tab bar ── #}
   <div class="mb-6 border-b border-gray-200 overflow-x-auto">
     <nav class="-mb-px flex gap-1" aria-label="Search result tabs">
-      {% for key, label, count in tab_config %}
+      {% for key, label in [("all", "All")] + group_config %}
+      {% set count = results.total_count if key == "all" else results.groups.get(key, [])|length %}
       {% if key == "all" or count > 0 %}
       <button @click="tab = '{{ key }}'"
               :class="tab === '{{ key }}' ? 'border-accent-500 text-accent-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
@@ -112,19 +212,11 @@
       "material_card": "/v2/search?mpn=" ~ (bm.display_mpn|default(bm.normalized_mpn|default(""))|urlencode),
       "sighting": "/v2/requisitions/" ~ (bm.requisition_id|default("", true))
     } %}
-    {% set bm_partials_map = {
-      "requisition": "/v2/partials/requisitions/" ~ bm.id,
-      "company": "/v2/partials/customers/" ~ bm.id,
-      "vendor": "/v2/partials/vendors/" ~ bm.id,
-      "vendor_contact": "/v2/partials/vendors/" ~ (bm.vendor_card_id|default(bm.id, true)),
-      "part": "/v2/partials/requisitions/" ~ (bm.requisition_id|default("", true)),
-      "offer": "/v2/partials/requisitions/" ~ (bm.requisition_id|default("", true)),
-      "material_card": "/v2/partials/search?mpn=" ~ (bm.display_mpn|default(bm.normalized_mpn|default(""))|urlencode),
-      "sighting": "/v2/partials/requisitions/" ~ (bm.requisition_id|default("", true))
-    } %}
-    {# Same dead-link guard as shared/search_results.html (nav audit #12). #}
+    {# Same dead-link guard as shared/search_results.html (nav audit #12). The partial
+       URL is the page URL with /v2/ → /v2/partials/ (every mapped type above follows
+       that rule; the urlencoded mpn can't contain a literal "/v2/"). #}
     {% set bm_url = bm_url_map.get(bm.type) %}
-    {% set bm_partial = bm_partials_map.get(bm.type) %}
+    {% set bm_partial = bm_url|replace('/v2/', '/v2/partials/', 1) if bm_url else none %}
     {% set bm_dead = (not bm_url) or bm_url.endswith('/') or bm_url.endswith('=') %}
     <a {% if not bm_dead %}href="{{ bm_url }}"
        hx-get="{{ bm_partial }}"
@@ -153,18 +245,6 @@
 
   {# ── All tab: grouped sections ── #}
   <div x-show="tab === 'all'" x-cloak class="space-y-6">
-    {% set group_config = [
-      ("requisitions", "Requisitions"),
-      ("companies", "Customers"),
-      ("vendors", "Vendors"),
-      ("vendor_contacts", "Vendor Contacts"),
-      ("site_contacts", "Customer Contacts"),
-      ("parts", "Parts"),
-      ("offers", "Offers"),
-      ("material_cards", "Material Hub"),
-      ("sightings", "Sightings"),
-    ] %}
-
     {% for group_key, group_label in group_config %}
     {% set items = results.groups.get(group_key, []) %}
     {% if items %}
@@ -175,102 +255,7 @@
           <tbody class="divide-y divide-gray-100">
             {% for item in items[:10] %}
             <tr class="hover:bg-brand-50 transition-colors">
-
-              {% if group_key == "requisitions" %}
-              <td class="px-4 py-2.5">
-                <a href="/v2/requisitions/{{ item.id }}"
-                   hx-get="/v2/partials/requisitions/{{ item.id }}"
-                   hx-target="#main-content"
-                   hx-push-url="/v2/requisitions/{{ item.id }}"
-                   class="font-medium text-gray-900 hover:text-brand-600">{{ item.name }}</a>
-              </td>
-              <td class="px-4 py-2.5 text-gray-600">{{ item.customer_name|default("—") }}</td>
-              <td class="px-4 py-2.5 text-secondary">{{ item.status|default("") }}</td>
-
-              {% elif group_key == "companies" %}
-              <td class="px-4 py-2.5">
-                <a href="/v2/customers/{{ item.id }}"
-                   hx-get="/v2/partials/customers/{{ item.id }}"
-                   hx-target="#main-content"
-                   hx-push-url="/v2/customers/{{ item.id }}"
-                   class="font-medium text-gray-900 hover:text-brand-600">{{ item.name }}</a>
-              </td>
-              <td class="px-4 py-2.5 text-gray-600">{{ item.domain|default("—") }}</td>
-              <td class="px-4 py-2.5 text-secondary">{{ item.account_type|default("") }}</td>
-
-              {% elif group_key == "vendors" %}
-              <td class="px-4 py-2.5">
-                <a href="/v2/vendors/{{ item.id }}"
-                   hx-get="/v2/partials/vendors/{{ item.id }}"
-                   hx-target="#main-content"
-                   hx-push-url="/v2/vendors/{{ item.id }}"
-                   class="font-medium text-gray-900 hover:text-brand-600">{{ item.display_name }}</a>
-              </td>
-              <td class="px-4 py-2.5 text-gray-600">{{ item.domain|default("—") }}</td>
-
-              {% elif group_key == "vendor_contacts" %}
-              <td class="px-4 py-2.5">
-                <a href="/v2/vendors/{{ item.vendor_card_id|default(item.id) }}"
-                   hx-get="/v2/partials/vendors/{{ item.vendor_card_id|default(item.id) }}"
-                   hx-target="#main-content"
-                   hx-push-url="/v2/vendors/{{ item.vendor_card_id|default(item.id) }}"
-                   class="font-medium text-gray-900 hover:text-brand-600">{{ item.full_name }}</a>
-              </td>
-              <td class="px-4 py-2.5 text-gray-600">{{ item.email|default("—") }}</td>
-              <td class="px-4 py-2.5 text-secondary">{{ item.title|default("") }}</td>
-
-              {% elif group_key == "site_contacts" %}
-              <td class="px-4 py-2.5 font-medium text-gray-900">{{ item.full_name }}</td>
-              <td class="px-4 py-2.5 text-gray-600">{{ item.email|default("—") }}</td>
-
-              {% elif group_key == "parts" %}
-              <td class="px-4 py-2.5">
-                <a href="/v2/requisitions/{{ item.requisition_id|default('') }}"
-                   hx-get="/v2/partials/requisitions/{{ item.requisition_id|default('') }}"
-                   hx-target="#main-content"
-                   hx-push-url="/v2/requisitions/{{ item.requisition_id|default('') }}"
-                   class="font-medium font-mono text-gray-900 hover:text-brand-600">{{ item.primary_mpn }}</a>
-              </td>
-              <td class="px-4 py-2.5 text-gray-600">{{ item.brand|default("—") }}</td>
-
-              {% elif group_key == "offers" %}
-              <td class="px-4 py-2.5">
-                <a href="/v2/requisitions/{{ item.requisition_id|default('') }}"
-                   hx-get="/v2/partials/requisitions/{{ item.requisition_id|default('') }}"
-                   hx-target="#main-content"
-                   hx-push-url="/v2/requisitions/{{ item.requisition_id|default('') }}"
-                   class="font-medium font-mono text-gray-900 hover:text-brand-600">{{ item.mpn }}</a>
-              </td>
-              <td class="px-4 py-2.5 text-gray-600">{{ item.vendor_name|default("—") }}</td>
-              <td class="px-4 py-2.5 text-emerald-600 font-medium">
-                {% if item.unit_price %}${{ "%.2f"|format(item.unit_price) }}{% else %}—{% endif %}
-              </td>
-
-              {% elif group_key == "material_cards" %}
-              <td class="table-cell">
-                <a href="/v2/search?mpn={{ item.display_mpn|default(item.normalized_mpn|default(''))|urlencode }}"
-                   hx-get="/v2/partials/search?mpn={{ item.display_mpn|default(item.normalized_mpn|default(''))|urlencode }}"
-                   hx-target="#main-content"
-                   hx-push-url="/v2/search?mpn={{ item.display_mpn|default(item.normalized_mpn|default(''))|urlencode }}"
-                   class="font-medium font-mono text-gray-900 hover:text-brand-600">{{ item.display_mpn }}</a>
-              </td>
-              <td class="table-cell text-gray-600">{{ item.manufacturer|default("—") }}</td>
-              <td class="table-cell text-secondary truncate max-w-xs">{{ item.description|default("") }}</td>
-
-              {% elif group_key == "sightings" %}
-              <td class="table-cell">
-                <a href="/v2/requisitions/{{ item.requisition_id|default('') }}"
-                   hx-get="/v2/partials/requisitions/{{ item.requisition_id|default('') }}"
-                   hx-target="#main-content"
-                   hx-push-url="/v2/requisitions/{{ item.requisition_id|default('') }}"
-                   class="font-medium font-mono text-gray-900 hover:text-brand-600">{{ item.mpn_matched }}</a>
-              </td>
-              <td class="table-cell text-gray-600">{{ item.vendor_name|default("—") }}</td>
-              <td class="table-cell text-emerald-600 font-medium">
-                {% if item.unit_price %}${{ "%.2f"|format(item.unit_price) }}{% else %}—{% endif %}
-              </td>
-              {% endif %}
-
+              {{ result_row(group_key, item) }}
             </tr>
             {% endfor %}
             {% if items|length > 10 %}
@@ -341,102 +326,7 @@
         <tbody class="divide-y divide-gray-100">
           {% for item in items %}
           <tr class="hover:bg-brand-50 transition-colors">
-
-            {% if group_key == "requisitions" %}
-            <td class="px-4 py-2.5">
-              <a href="/v2/requisitions/{{ item.id }}"
-                 hx-get="/v2/partials/requisitions/{{ item.id }}"
-                 hx-target="#main-content"
-                 hx-push-url="/v2/requisitions/{{ item.id }}"
-                 class="font-medium text-gray-900 hover:text-brand-600">{{ item.name }}</a>
-            </td>
-            <td class="px-4 py-2.5 text-gray-600">{{ item.customer_name|default("—") }}</td>
-            <td class="px-4 py-2.5 text-secondary">{{ item.status|default("") }}</td>
-
-            {% elif group_key == "companies" %}
-            <td class="px-4 py-2.5">
-              <a href="/v2/customers/{{ item.id }}"
-                 hx-get="/v2/partials/customers/{{ item.id }}"
-                 hx-target="#main-content"
-                 hx-push-url="/v2/customers/{{ item.id }}"
-                 class="font-medium text-gray-900 hover:text-brand-600">{{ item.name }}</a>
-            </td>
-            <td class="px-4 py-2.5 text-gray-600">{{ item.domain|default("—") }}</td>
-            <td class="px-4 py-2.5 text-secondary">{{ item.account_type|default("") }}</td>
-
-            {% elif group_key == "vendors" %}
-            <td class="px-4 py-2.5">
-              <a href="/v2/vendors/{{ item.id }}"
-                 hx-get="/v2/partials/vendors/{{ item.id }}"
-                 hx-target="#main-content"
-                 hx-push-url="/v2/vendors/{{ item.id }}"
-                 class="font-medium text-gray-900 hover:text-brand-600">{{ item.display_name }}</a>
-            </td>
-            <td class="px-4 py-2.5 text-gray-600">{{ item.domain|default("—") }}</td>
-
-            {% elif group_key == "vendor_contacts" %}
-            <td class="px-4 py-2.5">
-              <a href="/v2/vendors/{{ item.vendor_card_id|default(item.id) }}"
-                 hx-get="/v2/partials/vendors/{{ item.vendor_card_id|default(item.id) }}"
-                 hx-target="#main-content"
-                 hx-push-url="/v2/vendors/{{ item.vendor_card_id|default(item.id) }}"
-                 class="font-medium text-gray-900 hover:text-brand-600">{{ item.full_name }}</a>
-            </td>
-            <td class="px-4 py-2.5 text-gray-600">{{ item.email|default("—") }}</td>
-            <td class="px-4 py-2.5 text-secondary">{{ item.title|default("") }}</td>
-
-            {% elif group_key == "site_contacts" %}
-            <td class="px-4 py-2.5 font-medium text-gray-900">{{ item.full_name }}</td>
-            <td class="px-4 py-2.5 text-gray-600">{{ item.email|default("—") }}</td>
-
-            {% elif group_key == "parts" %}
-            <td class="px-4 py-2.5">
-              <a href="/v2/requisitions/{{ item.requisition_id|default('') }}"
-                 hx-get="/v2/partials/requisitions/{{ item.requisition_id|default('') }}"
-                 hx-target="#main-content"
-                 hx-push-url="/v2/requisitions/{{ item.requisition_id|default('') }}"
-                 class="font-medium font-mono text-gray-900 hover:text-brand-600">{{ item.primary_mpn }}</a>
-            </td>
-            <td class="px-4 py-2.5 text-gray-600">{{ item.brand|default("—") }}</td>
-
-            {% elif group_key == "offers" %}
-            <td class="px-4 py-2.5">
-              <a href="/v2/requisitions/{{ item.requisition_id|default('') }}"
-                 hx-get="/v2/partials/requisitions/{{ item.requisition_id|default('') }}"
-                 hx-target="#main-content"
-                 hx-push-url="/v2/requisitions/{{ item.requisition_id|default('') }}"
-                 class="font-medium font-mono text-gray-900 hover:text-brand-600">{{ item.mpn }}</a>
-            </td>
-            <td class="px-4 py-2.5 text-gray-600">{{ item.vendor_name|default("—") }}</td>
-            <td class="px-4 py-2.5 text-emerald-600 font-medium">
-              {% if item.unit_price %}${{ "%.2f"|format(item.unit_price) }}{% else %}—{% endif %}
-            </td>
-
-            {% elif group_key == "material_cards" %}
-            <td class="table-cell">
-              <a href="/v2/search?mpn={{ item.display_mpn|default(item.normalized_mpn|default(''))|urlencode }}"
-                 hx-get="/v2/partials/search?mpn={{ item.display_mpn|default(item.normalized_mpn|default(''))|urlencode }}"
-                 hx-target="#main-content"
-                 hx-push-url="/v2/search?mpn={{ item.display_mpn|default(item.normalized_mpn|default(''))|urlencode }}"
-                 class="font-medium font-mono text-gray-900 hover:text-brand-600">{{ item.display_mpn }}</a>
-            </td>
-            <td class="table-cell text-gray-600">{{ item.manufacturer|default("—") }}</td>
-            <td class="table-cell text-secondary truncate max-w-xs">{{ item.description|default("") }}</td>
-
-            {% elif group_key == "sightings" %}
-            <td class="table-cell">
-              <a href="/v2/requisitions/{{ item.requisition_id|default('') }}"
-                 hx-get="/v2/partials/requisitions/{{ item.requisition_id|default('') }}"
-                 hx-target="#main-content"
-                 hx-push-url="/v2/requisitions/{{ item.requisition_id|default('') }}"
-                 class="font-medium font-mono text-gray-900 hover:text-brand-600">{{ item.mpn_matched }}</a>
-            </td>
-            <td class="table-cell text-gray-600">{{ item.vendor_name|default("—") }}</td>
-            <td class="table-cell text-emerald-600 font-medium">
-              {% if item.unit_price %}${{ "%.2f"|format(item.unit_price) }}{% else %}—{% endif %}
-            </td>
-            {% endif %}
-
+            {{ result_row(group_key, item) }}
           </tr>
           {% endfor %}
         </tbody>

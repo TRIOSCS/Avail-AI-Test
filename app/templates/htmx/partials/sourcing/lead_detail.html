@@ -5,7 +5,7 @@
    Depends on: partials/shared/source_badge.html, partials/shared/safety_review.html
    Context vars: lead, evidence, evidence_by_category, category_labels, requirement,
                  vendor_card, best_sighting #}
-{% from "htmx/partials/shared/_macros.html" import status_badge, badge %}
+{% from "htmx/partials/shared/_macros.html" import status_badge, badge, risk_badge %}
 
 <div class="space-y-6 page-readable">
 
@@ -32,14 +32,9 @@
           </span>
           <p class="text-xs text-gray-400">confidence</p>
         </div>
-        {# Safety badge #}
-        {% set _safety_map = {
-          'low_risk': 'bg-emerald-50 text-emerald-700 border-emerald-200',
-          'medium_risk': 'bg-amber-50 text-amber-700 border-amber-200',
-          'high_risk': 'bg-rose-50 text-rose-700 border-rose-200',
-          'unknown': 'bg-gray-100 text-gray-600 border-gray-200'
-        } %}
-        {{ status_badge(lead.vendor_safety_band or 'unknown', status_map=_safety_map) }}
+        {# Safety badge — shared risk_badge (same colors/labels; lead_card.html
+           already uses it for this field) #}
+        {{ risk_badge(lead.vendor_safety_band or 'unknown') }}
         {# Buyer status badge #}
         {% set _buyer_status_map = {
           'new': 'bg-brand-100 text-brand-600 border-brand-200',

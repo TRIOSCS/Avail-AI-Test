@@ -4,6 +4,7 @@
   Receives: companies.
   Called by: resell.resell_create_form.
 #}
+{% from "htmx/partials/shared/_macros.html" import close_modal_toast -%}
 <div class="p-5">
   <h2 class="h2 mb-5">New excess list</h2>
 
@@ -11,7 +12,7 @@
         hx-target="#resell-list-body"
         hx-swap="innerHTML"
         data-loading-disable
-        @htmx:after-request.camel="if(event.detail.successful){ $dispatch('close-modal'); $store.toast.message='List created'; $store.toast.type='success'; $store.toast.show=true; }"
+        {{ close_modal_toast('List created') }}
         class="space-y-4">
     <div>
       <label class="form-label">Title <span class="text-rose-500">*</span></label>

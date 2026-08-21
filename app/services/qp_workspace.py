@@ -169,12 +169,9 @@ def apply_qp_purchasing(
     updates = _collect_updates(QP_PURCHASING_FIELDS, fields)
 
     vendor_card_id = line.offer.vendor_card_id if line.offer is not None else None
-    qp = None
-    stmt = select(QualityPlan).where(QualityPlan.buy_plan_id == plan.id)
-    if vendor_card_id is not None:
-        qp = db.scalars(stmt.where(QualityPlan.vendor_card_id == vendor_card_id).order_by(QualityPlan.id)).first()
-    if qp is None and vendor_card_id is None:
-        qp = db.scalars(stmt.order_by(QualityPlan.id)).first()
+    # Same vendor-scoped resolution as the confirm-PO prefill — by construction, so the
+    # prefill and the save can never desync (the cross-vendor-answer-leak guard).
+    qp = qp_for_line(db, plan, line)
     if qp is None:
         qp = QualityPlan(buy_plan_id=plan.id, vendor_card_id=vendor_card_id, created_by_id=user.id)
         db.add(qp)

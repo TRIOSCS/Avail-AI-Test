@@ -11,7 +11,6 @@ Depends on: app.models, app.dependencies, app.database, app.services, ._shared
 """
 
 import html as html_mod
-import json
 import os
 from datetime import UTC, date, datetime, timedelta
 
@@ -36,6 +35,7 @@ from ...models import (
     User,
 )
 from ...services.crm_service import quote_base_number, revision_quote_number
+from ...services.quote_builder_service import recalc_quote_totals
 from ...services.quote_requisitions import (
     link_quote_to_requisitions,
     requisition_ids_for_quote,
@@ -44,85 +44,15 @@ from ...services.quote_requisitions import (
 from ...services.quote_send import (
     QuoteSendDNCBlocked,
     QuoteSendError,
+    quote_valid_until,
     send_quote_email,
+    validity_days_from_valid_until,
 )
 from ...services.status_machine import require_valid_transition
 from ...template_env import template_response
-from ._shared import _base_ctx, _parse_date_safe
+from ._shared import _base_ctx, _parse_date_safe, toast_error_response
 
 router = APIRouter(tags=["htmx-views"])
-
-
-def _recalc_quote_totals(db: Session, quote: Quote) -> None:
-    """Recompute quote header totals (subtotal/cost/margin) from its QuoteLine rows.
-
-    The detail header (quotes/detail.html) and the sent-email/PDF total (quote_send.py)
-    all read quote.subtotal / total_cost / total_margin_pct, so every line mutation (add
-    / edit / delete / add-offer / apply-markup) must refresh them or the stored totals
-    drift from the visible lines and the customer is emailed a stale subtotal (OQ-12).
-    Single arbitration point — every mutation handler calls this before commit.
-    """
-    db.flush()
-    lines = db.query(QuoteLine).filter(QuoteLine.quote_id == quote.id).order_by(QuoteLine.id).all()
-    subtotal = sum(float(ln.sell_price or 0) * (ln.qty or 1) for ln in lines)
-    total_cost = sum(float(ln.cost_price or 0) * (ln.qty or 1) for ln in lines)
-    quote.subtotal = subtotal
-    quote.total_cost = total_cost
-    quote.total_margin_pct = ((subtotal - total_cost) / subtotal * 100) if subtotal else 0
-
-    # Rebuild quote.line_items (the JSON the sent email + PDF render their ROWS from —
-    # quote_send.py:220, quote_builder_service) from the QuoteLine rows, so an edited /
-    # added / deleted line stays consistent with the recomputed total. Without this the
-    # OQ-12 fix only corrected the header total: the email rows still showed stale prices
-    # and no longer summed to the stated total (edit-then-send self-contradiction). The
-    # display-only fields (condition/date_code/…) live on the linked Offer, not QuoteLine.
-    new_line_items = []
-    for ln in lines:
-        offer = db.get(Offer, ln.offer_id) if ln.offer_id else None
-        new_line_items.append(
-            {
-                "mpn": ln.mpn or "",
-                "manufacturer": ln.manufacturer or "",
-                "qty": ln.qty or 1,
-                "cost_price": float(ln.cost_price or 0),
-                "sell_price": float(ln.sell_price or 0),
-                "margin_pct": float(ln.margin_pct or 0),
-                "lead_time": offer.lead_time if offer else None,
-                "date_code": offer.date_code if offer else None,
-                "condition": offer.condition if offer else None,
-                "packaging": offer.packaging if offer else None,
-                "moq": offer.moq if offer else None,
-                "offer_id": ln.offer_id,
-            }
-        )
-    quote.line_items = new_line_items
-
-
-def _quote_expiry_anchor(quote: Quote) -> date:
-    """The date validity_days counts from — the SINGLE place this anchor is defined.
-
-    quote_send.py anchors the emailed expiry to the send date if the quote was sent,
-    else "now" (UTC). Both directions below must use this identical anchor or the editor
-    default, the preview, and the real outbound email would drift apart, so it lives
-    here once. UTC (not date.today()) matches quote_send.py exactly.
-    """
-    return quote.sent_at.date() if quote.sent_at else datetime.now(UTC).date()
-
-
-def _quote_valid_until(quote: Quote) -> date:
-    """Return the quote's "valid until" calendar date, derived from validity_days.
-
-    The Quote model has NO valid_until column — validity_days is the single source of
-    truth (also read by quote_send.py, crm/_helpers.py, quote_report.html).
-    """
-    valid_days: int = quote.validity_days or 7  # legacy Column read is untyped
-    return _quote_expiry_anchor(quote) + timedelta(days=valid_days)
-
-
-def _validity_days_from_valid_until(quote: Quote, target: date) -> int:
-    """Convert a chosen "valid until" date back into validity_days (inverse of
-    _quote_valid_until, same anchor)."""
-    return (target - _quote_expiry_anchor(quote)).days
 
 
 # ── Sprint 5: Quote Workflow Completion ────────────────────────────────
@@ -140,7 +70,7 @@ async def preview_quote(
 
     return template_response(
         "htmx/partials/quotes/preview.html",
-        {"request": request, "quote": quote, "valid_until_date": _quote_valid_until(quote)},
+        {"request": request, "quote": quote, "valid_until_date": quote_valid_until(quote)},
     )
 
 
@@ -263,7 +193,7 @@ async def edit_terms_form(
     """Render the Edit Terms modal (payment/shipping terms, valid-until, notes).
 
     Loaded into #modal-content by $dispatch('open-modal', {url: ...}) from the quote
-    detail action bar. "Valid Until" is prefilled from validity_days via _quote_valid_until
+    detail action bar. "Valid Until" is prefilled from validity_days via quote_valid_until
     so the picker default matches what the customer would see on the sent quote.
     """
     quote = get_quote_for_user(db, user, quote_id)
@@ -276,7 +206,7 @@ async def edit_terms_form(
         {
             "request": request,
             "quote": quote,
-            "valid_until_date": _quote_valid_until(quote),
+            "valid_until_date": quote_valid_until(quote),
             "min_valid_until": min_valid_until,
         },
     )
@@ -330,7 +260,7 @@ async def edit_quote_metadata(
         # but after sent_at passed while the message promised "a date in the future".
         if target <= datetime.now(UTC).date():
             raise HTTPException(400, "Valid Until must be a date in the future.")
-        quote.validity_days = _validity_days_from_valid_until(quote, target)
+        quote.validity_days = validity_days_from_valid_until(quote, target)
 
     quote.updated_at = datetime.now(UTC)
     db.commit()
@@ -415,7 +345,7 @@ async def update_quote_line(
             raise HTTPException(400, "sell_price must be a number") from e
     if line.sell_price and float(line.sell_price) > 0 and line.cost_price is not None:
         line.margin_pct = round((float(line.sell_price) - float(line.cost_price)) / float(line.sell_price) * 100, 2)
-    _recalc_quote_totals(db, quote)
+    recalc_quote_totals(db, quote)
     db.commit()
     ctx = _base_ctx(request, user, "quotes")
     ctx["line"] = line
@@ -437,7 +367,7 @@ async def delete_quote_line(
     # Scope the parent quote through ownership (raises 404 for SALES accessing other users' quotes).
     quote = get_quote_for_user(db, user, line.quote_id)
     db.delete(line)
-    _recalc_quote_totals(db, quote)
+    recalc_quote_totals(db, quote)
     db.commit()
     return HTMLResponse("")
 
@@ -470,7 +400,7 @@ async def add_quote_line(
         margin_pct=margin_pct,
     )
     db.add(line)
-    _recalc_quote_totals(db, quote)
+    recalc_quote_totals(db, quote)
     db.commit()
     db.refresh(line)
     ctx = _base_ctx(request, user, "quotes")
@@ -507,7 +437,7 @@ async def add_offer_to_quote(
         margin_pct=0,
     )
     db.add(line)
-    _recalc_quote_totals(db, quote)
+    recalc_quote_totals(db, quote)
     db.commit()
     db.refresh(line)
     ctx = _base_ctx(request, user, "quotes")
@@ -540,28 +470,15 @@ async def send_quote_htmx(
     try:
         await send_quote_email(db, quote, user, token=token, testing=testing)
     except QuoteSendDNCBlocked:
-        # Surface the failure as a toast WITHOUT swapping — the Send button targets
-        # #main-content, so swapping any error body would replace the whole quote
-        # detail / Build-Quote workspace (OQ-07). HX-Reswap=none keeps the workspace
-        # intact; the showToast HX-Trigger bridges to $store.toast (htmx_app.js).
-        return _send_error_toast("This recipient is do-not-contact — quote not sent.")
+        # Surface the failure as a toast WITHOUT swapping — the Send buttons
+        # (quotes/detail.html, requisitions/tabs/build_quote.html) target #main-content,
+        # so swapping any error body would replace the whole quote detail / Build-Quote
+        # workspace (OQ-07). HX-Reswap=none keeps the workspace intact; the showToast
+        # HX-Trigger bridges to $store.toast (htmx_app.js).
+        return toast_error_response("This recipient is do-not-contact — quote not sent.")
     except QuoteSendError as exc:
-        return _send_error_toast(exc.detail)
+        return toast_error_response(exc.detail)
     return await quote_detail_partial(request, quote_id, user, db)
-
-
-def _send_error_toast(message: str) -> HTMLResponse:
-    """Return a no-swap response that surfaces a send failure as a toast.
-
-    The quote Send buttons (quotes/detail.html, requisitions/tabs/build_quote.html)
-    target #main-content, so any swapped error body wipes the whole workspace (OQ-07).
-    HX-Reswap=none suppresses the swap; the showToast HX-Trigger (htmx_app.js) shows the
-    error and the user stays where they are to retry.
-    """
-    resp = HTMLResponse("")
-    resp.headers["HX-Reswap"] = "none"
-    resp.headers["HX-Trigger"] = json.dumps({"showToast": {"message": message, "type": "error"}})
-    return resp
 
 
 @router.post("/v2/partials/quotes/{quote_id}/result", response_class=HTMLResponse)
@@ -672,7 +589,7 @@ async def apply_markup_htmx(
             multiplier = 1 + (markup_pct / 100)
             line.sell_price = round(float(line.cost_price) * multiplier, 4)
             line.margin_pct = round(markup_pct / multiplier, 2)
-    _recalc_quote_totals(db, quote)
+    recalc_quote_totals(db, quote)
     db.commit()
     return await quote_detail_partial(request, quote_id, user, db)
 
@@ -730,7 +647,7 @@ async def add_offers_to_draft_quote(
         )
         db.add(line)
 
-    _recalc_quote_totals(db, quote)
+    recalc_quote_totals(db, quote)
     db.commit()
 
     logger.info("Added {} offers to quote {} by {}", len(offers), quote.quote_number, user.email)

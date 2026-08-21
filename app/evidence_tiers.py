@@ -23,6 +23,12 @@ from .source_trust import (
     AUTHORIZED_SOURCES as _AUTHORIZED_SOURCES,
 )
 from .source_trust import (
+    EMAIL_SOURCES as _EMAIL_SOURCES,
+)
+from .source_trust import (
+    HISTORY_SOURCES as _HISTORY_SOURCES,
+)
+from .source_trust import (
     MARKETPLACE_SOURCES as _MARKETPLACE_SOURCES,
 )
 
@@ -42,7 +48,7 @@ def tier_for_sighting(source_type: str | None, is_authorized: bool) -> str:
     if src in _MARKETPLACE_SOURCES:
         return "T3"
 
-    if src in ("email_parse", "email_auto_import", "email"):
+    if src in _EMAIL_SOURCES:
         return "T5"  # Default to high-confidence; caller can override to T4
 
     # A resell excess-mirror posting ("customer_excess") is a live, in-hand internal
@@ -51,7 +57,7 @@ def tier_for_sighting(source_type: str | None, is_authorized: bool) -> str:
     if src in ("manual", "customer_excess", ""):
         return "T6"
 
-    if src in ("material_history", "stock_list", "excess_list"):
+    if src in _HISTORY_SOURCES:
         return "T7"
 
     # Unknown source — treat as marketplace-level trust

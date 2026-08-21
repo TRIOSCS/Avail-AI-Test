@@ -12,7 +12,6 @@ import json
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from loguru import logger
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -30,12 +29,9 @@ from ..utils.column_limits import ensure_fits_column
 from ..utils.phone_utils import format_phone_e164
 from ..utils.vendor_helpers import (
     _background_enrich_vendor,
-    clean_emails,
-    clean_phones,
     find_vendor_card_by_name,
     get_or_create_card,
-    merge_contact_into_card,
-    scrape_website_contacts,
+    lookup_vendor_contact_waterfall,
     sync_card_emails_on_contact_change,
 )
 from ..vendor_utils import GENERIC_EMAIL_DOMAINS as _GENERIC_EMAIL_DOMAINS
@@ -56,17 +52,6 @@ def _lookup_response(card, vendor_name, source, tier, **extra):
         "tier": tier,
         **extra,
     }
-
-
-def _coalesce_contact_list(values, single):
-    """Normalize an AI-returned list field, prepending an optional single value."""
-    if isinstance(values, str):
-        values = [values]
-    else:
-        values = list(values or [])
-    if single and single not in values:
-        values.insert(0, single)
-    return values
 
 
 # -- 3-Tier Vendor Contact Lookup ---------------------------------------------
@@ -92,75 +77,39 @@ async def lookup_vendor_contact(
             db.rollback()
             card = find_vendor_card_by_name(vendor_name, db)
 
-    # TIER 1: Cache check (free, instant)
-    if card.emails:
-        return _lookup_response(card, card.display_name, "cached", 1)
-
-    # TIER 2: Website scrape (free, ~1-2 sec)
-    if card.website:
-        logger.info(f"Tier 2: Scraping {card.website} for {vendor_name}")
-        try:
-            scraped = await scrape_website_contacts(card.website)
-            if scraped["emails"] or scraped["phones"]:
-                merge_contact_into_card(card, scraped["emails"], scraped["phones"], source="website_scrape")
-                db.commit()
-                if card.emails:
-                    return _lookup_response(card, card.display_name, "website_scrape", 2)
-        except Exception as e:
-            logger.warning(f"Tier 2 scrape failed for {vendor_name}: {e}")
-
-    # TIER 3: AI lookup (expensive, last resort)
-    if not get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"):
-        return _lookup_response(card, vendor_name, None, 0, error="No API key configured")
-
-    logger.info(f"Tier 3: AI lookup for {vendor_name}")
-    try:
-        website_hint = f" Their website may be {card.website}." if card.website else ""
-
-        from ..utils.claude_client import claude_json
-
-        info = await claude_json(
-            prompt=(
-                f"Find ALL contact information for '{vendor_name}', an electronic "
-                f"component distributor/broker.{website_hint}\n\n"
-                f"Search these sources:\n"
-                f"1. Their company website -- look for contact, about, sales pages\n"
-                f"2. LinkedIn company page -- phone numbers, website\n"
-                f"3. Industry directories (FindChips, IC Source, TrustedParts)\n"
-                f"4. Google Maps / business listings\n\n"
-                f"I need EVERY email you can find:\n"
-                f"- General: info@, contact@, support@\n"
-                f"- Sales: sales@, rfq@, quotes@, purchasing@\n"
-                f"- Individual salespeople: firstname@, firstname.lastname@\n\n"
-                f"And ALL phone numbers -- main line, sales direct, fax.\n\n"
-                f"Return ONLY a JSON object:\n"
-                f'{{"emails": [...], "phones": [...], "website": "..."}}\n'
-                f"No explanation, no markdown, just the JSON."
-            ),
-            model_tier="fast",
-            max_tokens=1024,
-            tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}],
-            timeout=60,
-        )
-
-        if not info or not isinstance(info, dict):
-            info = {}
-
-        ai_emails = clean_emails(_coalesce_contact_list(info.get("emails"), info.get("email")))
-        ai_phones = clean_phones(_coalesce_contact_list(info.get("phones"), info.get("phone")))
-        website = info.get("website")
-
-        merge_contact_into_card(card, ai_emails, ai_phones, website, source="ai_lookup")
-        db.commit()
-
-        return _lookup_response(card, card.display_name, "ai_lookup", 3)
-
-    except Exception as e:
-        logger.warning(f"Tier 3 AI lookup failed for {vendor_name}: {e}")
-        return _lookup_response(card, vendor_name, None, 0, error=str(e)[:200])
+    source, tier, error = await lookup_vendor_contact_waterfall(db, card, vendor_name)
+    # Success tiers echo the card's display name; the tier-0 paths echo the input name.
+    name = card.display_name if source else vendor_name
+    extra = {"error": error} if error else {}
+    return _lookup_response(card, name, source, tier, **extra)
 
 
 # -- Structured Vendor Contact CRUD -------------------------------------------
+
+
+def _contact_dict(c: VendorContact) -> dict:
+    """Shared JSON projection of a VendorContact — the fields common to the bulk and
+    per-vendor list endpoints (each adds its own extras on top)."""
+    return {
+        "id": c.id,
+        "contact_type": c.contact_type,
+        "full_name": c.full_name,
+        "first_name": c.first_name,
+        "last_name": c.last_name,
+        "title": c.title,
+        "label": c.label,
+        "email": c.email,
+        "phone": c.phone,
+        "phone_mobile": c.phone_mobile,
+        "source": c.source,
+        "is_verified": c.is_verified,
+        "confidence": c.confidence,
+        "interaction_count": c.interaction_count,
+        "relationship_score": c.relationship_score,
+        "activity_trend": c.activity_trend,
+        "last_interaction_at": c.last_interaction_at.isoformat() if c.last_interaction_at else None,
+        "first_seen_at": c.first_seen_at.isoformat() if c.first_seen_at else None,
+    }
 
 
 @router.get("/api/vendor-contacts/bulk")
@@ -188,26 +137,9 @@ async def bulk_vendor_contacts(
     contacts = query.offset(offset).limit(limit).all()
     items = [
         {
-            "id": c.id,
+            **_contact_dict(c),
             "vendor_id": c.vendor_card_id,
             "vendor_name": c.vendor_card.display_name if c.vendor_card else "Unknown",
-            "contact_type": c.contact_type,
-            "full_name": c.full_name,
-            "first_name": c.first_name,
-            "last_name": c.last_name,
-            "title": c.title,
-            "label": c.label,
-            "email": c.email,
-            "phone": c.phone,
-            "phone_mobile": c.phone_mobile,
-            "source": c.source,
-            "is_verified": c.is_verified,
-            "confidence": c.confidence,
-            "interaction_count": c.interaction_count,
-            "relationship_score": c.relationship_score,
-            "activity_trend": c.activity_trend,
-            "last_interaction_at": c.last_interaction_at.isoformat() if c.last_interaction_at else None,
-            "first_seen_at": c.first_seen_at.isoformat() if c.first_seen_at else None,
         }
         for c in contacts
     ]
@@ -225,26 +157,9 @@ async def list_vendor_contacts(card_id: int, user: User = Depends(require_user),
     )
     return [
         {
-            "id": c.id,
-            "contact_type": c.contact_type,
-            "full_name": c.full_name,
-            "first_name": c.first_name,
-            "last_name": c.last_name,
-            "title": c.title,
-            "label": c.label,
-            "email": c.email,
-            "phone": c.phone,
-            "phone_mobile": c.phone_mobile,
+            **_contact_dict(c),
             "phone_type": c.phone_type,
-            "source": c.source,
-            "is_verified": c.is_verified,
-            "confidence": c.confidence,
-            "interaction_count": c.interaction_count,
-            "relationship_score": c.relationship_score,
-            "activity_trend": c.activity_trend,
             "score_computed_at": c.score_computed_at.isoformat() if c.score_computed_at else None,
-            "last_interaction_at": c.last_interaction_at.isoformat() if c.last_interaction_at else None,
-            "first_seen_at": c.first_seen_at.isoformat() if c.first_seen_at else None,
         }
         for c in contacts
     ]

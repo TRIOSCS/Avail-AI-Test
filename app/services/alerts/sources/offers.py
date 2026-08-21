@@ -43,7 +43,6 @@ class OfferConfirmedSource(AlertSource):
         """
 
         floor = self.recency_floor()
-        seen = self.seen_ref_ids(db, user)
 
         query = (
             db.query(Offer)
@@ -61,10 +60,11 @@ class OfferConfirmedSource(AlertSource):
                         Requisition.created_by == user.id,
                     ),
                 ),
+                # Anti-join against alert_seen in SQL — the seen history is permanent,
+                # so it must never be materialized into a Python IN-list.
+                Offer.id.notin_(self.seen_subquery(user)),
             )
         )
-        if seen:
-            query = query.filter(Offer.id.notin_(seen))
         return query.order_by(Offer.approved_at.asc())
 
     def count_for_user(self, db: Session, user: User) -> int:

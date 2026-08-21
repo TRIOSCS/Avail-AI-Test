@@ -135,7 +135,7 @@ async def send_batch_rfq(
     keeps the payload byte-identical to the pre-attachment behaviour (no
     ``message.attachments`` key injected).
     """
-    from app.utils.graph_client import GraphClient
+    from app.utils.graph_client import GraphClient, build_sendmail_payload
 
     # The two requisition inputs are a sum type, not independent kwargs: EITHER
     # single-requisition mode (scalar requisition_id, parts from each vendor group) OR
@@ -177,6 +177,24 @@ async def send_batch_rfq(
     send_tasks = []
     send_groups = []  # Track which groups we're sending for
 
+    # DNC lookup — ONE query for the whole batch (not one per vendor group): any
+    # email address that belongs to a do-not-contact SiteContact is skipped below.
+    # Case-insensitive comparison (func.lower on both sides) matches the advisory
+    # check in _dnc_emails_for_cards so advisory ⊆ send-time. Compliance: the
+    # address must never appear in sendMail.
+    candidate_emails = {g["vendor_email"].lower() for g in vendor_groups if g.get("vendor_email")}
+    dnc_emails: set[str] = set()
+    if candidate_emails:
+        dnc_emails = {
+            row[0]
+            for row in db.query(sqla_func.lower(SiteContact.email))
+            .filter(
+                sqla_func.lower(SiteContact.email).in_(candidate_emails),
+                SiteContact.do_not_contact.is_(True),
+            )
+            .all()
+        }
+
     for group in vendor_groups:
         email = group.get("vendor_email")
         if not email:
@@ -197,19 +215,8 @@ async def send_batch_rfq(
             )
             continue
 
-        # DNC check — skip any email address that belongs to a do-not-contact
-        # SiteContact. Case-insensitive comparison (func.lower on both sides)
-        # matches the advisory check in _dnc_emails_for_cards so advisory ⊆
-        # send-time. Compliance: the address must never appear in sendMail.
-        dnc_match = (
-            db.query(SiteContact)
-            .filter(
-                sqla_func.lower(SiteContact.email) == email.lower(),
-                SiteContact.do_not_contact.is_(True),
-            )
-            .first()
-        )
-        if dnc_match:
+        # DNC check — membership in the batch do-not-contact set built above.
+        if email.lower() in dnc_emails:
             logger.warning(
                 "RFQ skipped — do-not-contact flag set for vendor '{}' ({})",
                 group.get("vendor_name"),
@@ -230,18 +237,12 @@ async def send_batch_rfq(
         tagged_subject = f"{raw_subject} {avail_token}" if avail_token not in raw_subject else raw_subject
         group["_tagged_subject"] = tagged_subject
 
-        message: dict = {
-            "subject": tagged_subject,
-            "body": {"contentType": "HTML", "content": html_body},
-            "toRecipients": [{"emailAddress": {"address": email}}],
-            "isReadReceiptRequested": False,
-            "isDeliveryReceiptRequested": False,
-        }
         # Attach datasheets when provided — same list for every vendor (part-scoped, not
-        # vendor-scoped). Only inject the key when there are actual attachments; omitting it
-        # keeps the payload byte-identical to pre-attachment behaviour (regression-safe).
-        if attachments:
-            message["attachments"] = [
+        # vendor-scoped). The helper only injects the key when there are actual attachments;
+        # omitting it keeps the payload byte-identical to pre-attachment behaviour
+        # (regression-safe).
+        graph_attachments = (
+            [
                 {
                     "@odata.type": "#microsoft.graph.fileAttachment",
                     "name": att.name,
@@ -250,7 +251,20 @@ async def send_batch_rfq(
                 }
                 for att in attachments
             ]
-        payload = {"message": message, "saveToSentItems": "true"}
+            if attachments
+            else None
+        )
+        payload = build_sendmail_payload(
+            tagged_subject,
+            html_body,
+            email,
+            save_to_sent="true",
+            attachments=graph_attachments,
+            extra_message_fields={
+                "isReadReceiptRequested": False,
+                "isDeliveryReceiptRequested": False,
+            },
+        )
         send_tasks.append(gc.post_json("/me/sendMail", payload))
         send_groups.append(group)
 

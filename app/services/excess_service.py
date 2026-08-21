@@ -10,11 +10,10 @@ Depends on: models (ExcessList, ExcessLineItem, ExcessOffer, Company), database
 """
 
 from datetime import UTC, datetime
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 
 from fastapi import HTTPException
 from loguru import logger
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..constants import (
@@ -33,6 +32,9 @@ from ..models.excess import ExcessLineItem, ExcessList, ExcessOffer, ExcessOffer
 from ..utils.normalization import normalize_mpn_key
 from ..vendor_utils import normalize_vendor_name
 from .buyer_affinity_service import recompute_buyer_score_on_win
+
+# One commit→IntegrityError→409 policy across the requisition + resell modules.
+from .requisition_service import safe_commit as _safe_commit
 
 # ---------------------------------------------------------------------------
 # Resell capabilities — role-derived powers (spec §"Roles & capabilities")
@@ -116,16 +118,6 @@ _HEADER_MAP: dict[str, str] = {
 # ---------------------------------------------------------------------------
 
 
-def _safe_commit(db: Session, *, entity: str = "record") -> None:
-    """Commit the session, mapping IntegrityError to HTTP 409."""
-    try:
-        db.commit()
-    except IntegrityError as exc:
-        db.rollback()
-        logger.warning("IntegrityError on {}: {}", entity, exc)
-        raise HTTPException(409, f"Duplicate or conflicting {entity}") from exc
-
-
 def _normalize_row(raw: dict) -> dict:
     """Map flexible header names to canonical field names."""
     result: dict[str, str | None] = {}
@@ -153,16 +145,27 @@ def _parse_quantity(value) -> int | None:
     return qty if 0 < qty <= PG_INT4_MAX else None
 
 
-def _parse_price(value) -> Decimal | None:
-    """Parse a price value, returning None if invalid."""
+def parse_money(value) -> Decimal | None:
+    """Strip ``$``/thousands separators and coerce to Decimal; None when blank/invalid.
+
+    Sign-policy-free — the ONE money parser shared with
+    ``bid_back_service._to_decimal``; each call site applies its own negative-value
+    policy (excess import skips negatives, bid overrides accept any Decimal).
+    """
     if value is None or str(value).strip() == "":
         return None
     try:
-        cleaned = str(value).strip().lstrip("$").replace(",", "")
-        price = Decimal(cleaned)
-        return price if price >= 0 else None
-    except (InvalidOperation, ValueError, TypeError):
+        return Decimal(str(value).strip().lstrip("$").replace(",", ""))
+    except (ArithmeticError, ValueError, TypeError):
         return None
+
+
+def _parse_price(value) -> Decimal | None:
+    """Parse a price value, returning None if invalid or negative."""
+    price = parse_money(value)
+    if price is None or price < 0:
+        return None
+    return price
 
 
 def _parse_import_row(raw_row: dict) -> tuple[dict | None, str | None]:

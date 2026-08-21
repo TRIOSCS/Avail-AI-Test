@@ -79,11 +79,11 @@
       <div class="flex gap-4 sm:gap-6">
         <div class="text-center">
           <p class="text-secondary uppercase tracking-wider mb-1">Subtotal</p>
-          <p class="text-lg font-semibold text-gray-900">${{ '{:,.2f}'.format(quote.subtotal|float) if quote.subtotal else '0.00' }}</p>
+          <p class="text-lg font-semibold text-gray-900">${{ quote.subtotal|float|money if quote.subtotal else '0.00' }}</p>
         </div>
         <div class="text-center">
           <p class="text-secondary uppercase tracking-wider mb-1">Cost</p>
-          <p class="text-lg font-semibold text-gray-900">${{ '{:,.2f}'.format(quote.total_cost|float) if quote.total_cost else '0.00' }}</p>
+          <p class="text-lg font-semibold text-gray-900">${{ quote.total_cost|float|money if quote.total_cost else '0.00' }}</p>
         </div>
         <div class="text-center">
           <p class="text-secondary uppercase tracking-wider mb-1">Margin</p>

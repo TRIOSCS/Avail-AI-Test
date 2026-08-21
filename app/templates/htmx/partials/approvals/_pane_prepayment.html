@@ -38,7 +38,7 @@
     </div>
     <div class="text-right flex-shrink-0">
       <div class="text-[11px] uppercase tracking-wide text-gray-400">Amount incl. fees</div>
-      <div class="text-lg font-semibold tabular-nums text-gray-900">{{ pp.currency }} {{ '{:,.2f}'.format(pp.total_incl_fees | float) }}</div>
+      <div class="text-lg font-semibold tabular-nums text-gray-900">{{ pp.currency }} {{ pp.total_incl_fees|float|money }}</div>
     </div>
   </div>
 

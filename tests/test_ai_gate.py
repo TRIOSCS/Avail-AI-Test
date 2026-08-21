@@ -87,14 +87,18 @@ class TestClassifyPartsBatch:
     @pytest.mark.asyncio
     async def test_returns_none_on_api_exception(self):
         gate = AIGate(MagicMock(), "ICsource", "search_ics")
-        with patch("app.utils.llm_router.routed_structured", new_callable=AsyncMock, side_effect=Exception("API down")):
+        with patch(
+            "app.utils.claude_client.claude_structured", new_callable=AsyncMock, side_effect=Exception("API down")
+        ):
             result = await gate.classify_parts_batch([{"mpn": "LM358", "manufacturer": "TI", "description": "op-amp"}])
             assert result is None
 
     @pytest.mark.asyncio
     async def test_returns_none_on_unexpected_response(self):
         gate = AIGate(MagicMock(), "ICsource", "search_ics")
-        with patch("app.utils.llm_router.routed_structured", new_callable=AsyncMock, return_value={"bad": "response"}):
+        with patch(
+            "app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value={"bad": "response"}
+        ):
             result = await gate.classify_parts_batch([{"mpn": "LM358", "manufacturer": "TI", "description": "op-amp"}])
             assert result is None
 
@@ -103,7 +107,7 @@ class TestClassifyPartsBatch:
         gate = AIGate(MagicMock(), "ICsource", "search_ics")
         classifications = [{"mpn": "LM358", "search_ics": True, "commodity": "semiconductor", "reason": "op-amp"}]
         with patch(
-            "app.utils.llm_router.routed_structured",
+            "app.utils.claude_client.claude_structured",
             new_callable=AsyncMock,
             return_value={"classifications": classifications},
         ):

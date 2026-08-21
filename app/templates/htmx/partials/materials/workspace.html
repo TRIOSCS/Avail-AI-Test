@@ -5,6 +5,29 @@
 
 <title hx-swap-oob="true">Materials — AvailAI</title>
 {% from "htmx/partials/materials/filters/_macros.html" import disclosure_header, removable_chip %}
+
+{# ── Shared active-filter param set — the ONE list of workspace filter lookups.
+   Interpolated into the hx-vals of #subfilters-container, #global-filter-container,
+   and #materials-results (which appends its own limit/offset) so the three requests
+   can never drift apart. Every hx-vals stays `js:{ ... }` — a PURE object literal
+   (htmx wraps any value not starting with "{" in {…}, so an IIFE would silently
+   break the request; see the #materials-results comment). #}
+{% set _filter_vals_js -%}
+"commodity": Alpine.evaluate(document.querySelector("#materials-workspace"), "commodity") || "",
+           "sub_filters": JSON.stringify(Alpine.evaluate(document.querySelector("#materials-workspace"), "subFilters") || {}),
+           "q": Alpine.evaluate(document.querySelector("#materials-workspace"), "q") || "",
+           "statuses": (Alpine.evaluate(document.querySelector("#materials-workspace"), "statuses") || []).join(","),
+           "lifecycle": (Alpine.evaluate(document.querySelector("#materials-workspace"), "lifecycle") || []).join(","),
+           "rohs": (Alpine.evaluate(document.querySelector("#materials-workspace"), "rohs") || []).join(","),
+           "condition": (Alpine.evaluate(document.querySelector("#materials-workspace"), "condition") || []).join(","),
+           "has_datasheet": Alpine.evaluate(document.querySelector("#materials-workspace"), "hasDatasheet") || false,
+           "has_stock": Alpine.evaluate(document.querySelector("#materials-workspace"), "hasStock") || false,
+           "has_price": Alpine.evaluate(document.querySelector("#materials-workspace"), "hasPrice") || false,
+           "has_crosses": Alpine.evaluate(document.querySelector("#materials-workspace"), "hasCrosses") || false,
+           "internal": Alpine.evaluate(document.querySelector("#materials-workspace"), "internal") || "all",
+           "searched_within": Alpine.evaluate(document.querySelector("#materials-workspace"), "searchedWithin") || "any",
+           "min_searches": Alpine.evaluate(document.querySelector("#materials-workspace"), "minSearches") || 0
+{%- endset %}
 <div id="materials-workspace" x-data="materialsFilter"
      data-display-names='{{ display_names|tojson }}' class="flex h-full">
 
@@ -103,21 +126,7 @@
            hx-target="this"
            hx-get="/v2/partials/materials/filters/sub"
            hx-trigger="commodity-changed from:body, filters-changed from:body"
-           hx-vals='js:{
-             "commodity": Alpine.evaluate(document.querySelector("#materials-workspace"), "commodity") || "",
-             "sub_filters": JSON.stringify(Alpine.evaluate(document.querySelector("#materials-workspace"), "subFilters") || {}),
-             "q": Alpine.evaluate(document.querySelector("#materials-workspace"), "q") || "",
-             "statuses": (Alpine.evaluate(document.querySelector("#materials-workspace"), "statuses") || []).join(","),
-             "lifecycle": (Alpine.evaluate(document.querySelector("#materials-workspace"), "lifecycle") || []).join(","),
-             "rohs": (Alpine.evaluate(document.querySelector("#materials-workspace"), "rohs") || []).join(","),
-             "condition": (Alpine.evaluate(document.querySelector("#materials-workspace"), "condition") || []).join(","),
-             "has_datasheet": Alpine.evaluate(document.querySelector("#materials-workspace"), "hasDatasheet") || false,
-             "has_stock": Alpine.evaluate(document.querySelector("#materials-workspace"), "hasStock") || false,
-             "has_price": Alpine.evaluate(document.querySelector("#materials-workspace"), "hasPrice") || false,
-             "has_crosses": Alpine.evaluate(document.querySelector("#materials-workspace"), "hasCrosses") || false,
-             "internal": Alpine.evaluate(document.querySelector("#materials-workspace"), "internal") || "all",
-             "searched_within": Alpine.evaluate(document.querySelector("#materials-workspace"), "searchedWithin") || "any",
-             "min_searches": Alpine.evaluate(document.querySelector("#materials-workspace"), "minSearches") || 0
+           hx-vals='js:{ {{ _filter_vals_js }}
            }'
            hx-swap="innerHTML"
            hx-sync="this:replace">
@@ -235,21 +244,7 @@
                hx-get="/v2/partials/materials/filters/global"
                hx-target="this"
                hx-trigger="load, commodity-changed from:body, filters-changed from:body"
-               hx-vals='js:{
-                 "commodity": Alpine.evaluate(document.querySelector("#materials-workspace"), "commodity") || "",
-                 "sub_filters": JSON.stringify(Alpine.evaluate(document.querySelector("#materials-workspace"), "subFilters") || {}),
-                 "q": Alpine.evaluate(document.querySelector("#materials-workspace"), "q") || "",
-                 "statuses": (Alpine.evaluate(document.querySelector("#materials-workspace"), "statuses") || []).join(","),
-                 "lifecycle": (Alpine.evaluate(document.querySelector("#materials-workspace"), "lifecycle") || []).join(","),
-                 "rohs": (Alpine.evaluate(document.querySelector("#materials-workspace"), "rohs") || []).join(","),
-                 "condition": (Alpine.evaluate(document.querySelector("#materials-workspace"), "condition") || []).join(","),
-                 "has_datasheet": Alpine.evaluate(document.querySelector("#materials-workspace"), "hasDatasheet") || false,
-                 "has_stock": Alpine.evaluate(document.querySelector("#materials-workspace"), "hasStock") || false,
-                 "has_price": Alpine.evaluate(document.querySelector("#materials-workspace"), "hasPrice") || false,
-                 "has_crosses": Alpine.evaluate(document.querySelector("#materials-workspace"), "hasCrosses") || false,
-                 "internal": Alpine.evaluate(document.querySelector("#materials-workspace"), "internal") || "all",
-                 "searched_within": Alpine.evaluate(document.querySelector("#materials-workspace"), "searchedWithin") || "any",
-                 "min_searches": Alpine.evaluate(document.querySelector("#materials-workspace"), "minSearches") || 0
+               hx-vals='js:{ {{ _filter_vals_js }}
                }'
                hx-swap="innerHTML"
                hx-sync="this:replace">
@@ -410,28 +405,14 @@
     {# hx-vals js: MUST be an object-literal expression. htmx wraps any value not starting
        with "{" in {…} (htmx.js getValuesForElement), so an IIFE becomes invalid
        `{(function(){…})()}` → Function() throws → the request silently never fires (the
-       results spinner hangs forever). Keep it a pure object literal, inlining the workspace
-       lookups, exactly like the sub-filters container above. #}
+       results spinner hangs forever). Keep it a pure object literal: the shared
+       _filter_vals_js entries plus this container's own limit/offset. #}
     <div id="materials-results"
          hx-target="this"
          hx-get="/v2/partials/materials/faceted"
          hx-trigger="load, filters-changed from:body"
          hx-indicator="#materials-results-spinner"
-         hx-vals='js:{
-           "commodity": Alpine.evaluate(document.querySelector("#materials-workspace"), "commodity") || "",
-           "q": Alpine.evaluate(document.querySelector("#materials-workspace"), "q") || "",
-           "sub_filters": JSON.stringify(Alpine.evaluate(document.querySelector("#materials-workspace"), "subFilters") || {}),
-           "statuses": (Alpine.evaluate(document.querySelector("#materials-workspace"), "statuses") || []).join(","),
-           "lifecycle": (Alpine.evaluate(document.querySelector("#materials-workspace"), "lifecycle") || []).join(","),
-           "rohs": (Alpine.evaluate(document.querySelector("#materials-workspace"), "rohs") || []).join(","),
-           "condition": (Alpine.evaluate(document.querySelector("#materials-workspace"), "condition") || []).join(","),
-           "has_datasheet": Alpine.evaluate(document.querySelector("#materials-workspace"), "hasDatasheet") || false,
-           "has_stock": Alpine.evaluate(document.querySelector("#materials-workspace"), "hasStock") || false,
-           "has_price": Alpine.evaluate(document.querySelector("#materials-workspace"), "hasPrice") || false,
-           "has_crosses": Alpine.evaluate(document.querySelector("#materials-workspace"), "hasCrosses") || false,
-           "internal": Alpine.evaluate(document.querySelector("#materials-workspace"), "internal") || "all",
-           "searched_within": Alpine.evaluate(document.querySelector("#materials-workspace"), "searchedWithin") || "any",
-           "min_searches": Alpine.evaluate(document.querySelector("#materials-workspace"), "minSearches") || 0,
+         hx-vals='js:{ {{ _filter_vals_js }},
            "limit": 50,
            "offset": (Alpine.evaluate(document.querySelector("#materials-workspace"), "page") || 0) * 50
          }'

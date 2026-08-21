@@ -4,6 +4,7 @@
    Context: suggested_vendors, coverage (card id → {count, avg_score, mpns}),
             requirement_ids, parts
 #}
+{% from "htmx/partials/shared/_macros.html" import spinner -%}
 
 {# The component logic lives in the rfqVendorModal() factory in app/static/htmx_app.js.
    The vendor-name list and requirement ids are passed via |tojson inside a SINGLE-quoted
@@ -139,10 +140,7 @@
                 hx-indicator="#rfq-affinity-spinner"
                 class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-accent-200 text-accent-700 text-xs font-medium rounded-lg hover:bg-accent-50 transition-colors">
           <span id="rfq-affinity-spinner" class="htmx-indicator">
-            <svg class="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
-              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-            </svg>
+            {{ spinner('h-3.5 w-3.5 animate-spin') }}
           </span>
           Suggest more vendors
         </button>
@@ -156,10 +154,7 @@
          see _addComposerVendor). #}
       <div id="rfq-added-vendors"></div>
       <span id="rfq-added-vendors-spinner" class="htmx-indicator mt-1 inline-flex items-center text-gray-400">
-        <svg class="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
-          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-        </svg>
+        {{ spinner('h-3.5 w-3.5 animate-spin') }}
       </span>
 
       {# Find any vendor: P5.2 server-rendered debounced dropdown against

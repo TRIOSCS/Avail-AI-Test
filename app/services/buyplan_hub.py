@@ -24,6 +24,7 @@ from ..models.buy_plan import BuyPlan, BuyPlanLine
 from ..models.crm import CustomerSite
 from ..models.quotes import Quote
 from ..models.sourcing import Requisition
+from ..utils.timezones import as_utc
 
 
 def _customer_name(plan: BuyPlan) -> str | None:
@@ -58,9 +59,7 @@ def _age_hours(since: datetime | None) -> float:
     """
     if since is None:
         return 0.0
-    if since.tzinfo is None:
-        since = since.replace(tzinfo=UTC)
-    return max(0.0, (datetime.now(UTC) - since).total_seconds() / 3600.0)
+    return max(0.0, (datetime.now(UTC) - as_utc(since)).total_seconds() / 3600.0)
 
 
 def _line_mpn(line: BuyPlanLine) -> str | None:

@@ -6,6 +6,7 @@
   Called by: htmx_views.py material_detail_partial endpoint.
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
+{% from "htmx/partials/shared/_macros.html" import spinner -%}
 
 <div class="page-fluid" x-data="{ editing: false }">
 
@@ -60,10 +61,7 @@
                 hx-swap="innerHTML"
                 data-loading-disable
                 class="mt-1 inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-accent-600 bg-accent-50 border border-accent-200 rounded-lg hover:bg-accent-100 transition-colors">
-          <svg class="h-3.5 w-3.5 htmx-indicator animate-spin" fill="none" viewBox="0 0 24 24">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-          </svg>
+          {{ spinner('h-3.5 w-3.5 htmx-indicator animate-spin') }}
           Enrich
         </button>
       </div>
@@ -238,10 +236,7 @@
     </div>
     <div id="material-tab-content" class="bg-white border border-t-0 border-line-base rounded-b-lg p-4">
       <div class="flex items-center justify-center py-8 text-gray-400 text-sm">
-        <svg class="animate-spin h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24">
-          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-        </svg>
+        {{ spinner('animate-spin h-4 w-4 mr-2') }}
         Loading...
       </div>
     </div>

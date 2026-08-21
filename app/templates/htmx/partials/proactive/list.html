@@ -5,6 +5,7 @@
   Called by: htmx_views.py proactive_list_partial endpoint.
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
+{% from "htmx/partials/shared/_macros.html" import spinner, lazy_body -%}
 
 <title hx-swap-oob="true">Proactive — AvailAI</title>
 {%- from "htmx/partials/proactive/_macros.html" import company_header, empty_state, margin_badge %}
@@ -57,10 +58,7 @@
        hx-target="this"
        hx-indicator="#proactive-scorecard-spinner">
     <div id="proactive-scorecard-spinner" class="htmx-indicator flex items-center justify-center py-6 text-sm text-gray-400">
-      <svg class="animate-spin h-4 w-4 mr-2 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-      </svg>
+      {{ spinner('animate-spin h-4 w-4 mr-2 text-gray-400') }}
       Loading scorecard...
     </div>
   </div>
@@ -116,11 +114,7 @@
   {% if tab == 'matches' %}
   {# ═══════════════ Matches tab ═══════════════ #}
   {# Top-picks strip — lazy, 24h-cached per user, hx-target pinned to itself #}
-  <div hx-get="/v2/partials/proactive/picks"
-       hx-trigger="load"
-       hx-target="this"
-       hx-swap="innerHTML"
-       hx-push-url="false"></div>
+  {% call lazy_body(url='/v2/partials/proactive/picks', target='this', extra_attrs='hx-push-url="false"') %}{% endcall %}
 
   {# Scope toggle — managers/admins can work every rep's matches #}
   {% if can_see_all %}
@@ -279,7 +273,7 @@
               </td>
               <td class="text-sm text-right tabular-nums">
                 {% if offer.total_sell %}
-                <span class="font-medium text-gray-900">${{ "{:,.2f}".format(offer.total_sell) }}</span>
+                <span class="font-medium text-gray-900">${{ offer.total_sell|money }}</span>
                 {% else %}--{% endif %}
               </td>
               <td>

@@ -49,7 +49,7 @@ from ..constants import (
     SOVerificationStatus,
 )
 from ..database import UTCDateTime
-from .base import Base
+from .base import AttachmentColumnsMixin, Base, validate_enum_member
 
 # Re-export enums so existing `from app.models.buy_plan import BuyPlanStatus` still works
 __all__ = [
@@ -171,17 +171,11 @@ class BuyPlan(Base):
 
     @validates("status")
     def _validate_status(self, _key, value):
-        valid = {e.value for e in BuyPlanStatus}
-        if value and value not in valid:
-            raise ValueError(f"Invalid buy plan status: {value!r}. Valid: {valid}")
-        return value
+        return validate_enum_member(BuyPlanStatus, value, "buy plan status")
 
     @validates("order_type")
     def _validate_order_type(self, _key, value):
-        valid = {e.value for e in SalesOrderType}
-        if value and value not in valid:
-            raise ValueError(f"Invalid order type: {value!r}. Valid: {valid}")
-        return value
+        return validate_enum_member(SalesOrderType, value, "order type")
 
     __table_args__ = (
         # Derived from the enum so the constraint can never lag it again (the pre-212
@@ -306,24 +300,15 @@ class BuyPlanLine(Base):
 
     @validates("status")
     def _validate_status(self, _key, value):
-        valid = {e.value for e in BuyPlanLineStatus}
-        if value and value not in valid:
-            raise ValueError(f"Invalid buy plan line status: {value!r}. Valid: {valid}")
-        return value
+        return validate_enum_member(BuyPlanLineStatus, value, "buy plan line status")
 
     @validates("issue_type")
     def _validate_issue_type(self, _key, value):
-        valid = {e.value for e in LineIssueType}
-        if value and value not in valid:
-            raise ValueError(f"Invalid line issue type: {value!r}. Valid: {valid}")
-        return value
+        return validate_enum_member(LineIssueType, value, "line issue type")
 
     @validates("payment_method")
     def _validate_payment_method(self, _key, value):
-        valid = {e.value for e in PaymentMethod}
-        if value and value not in valid:
-            raise ValueError(f"Invalid payment method: {value!r}. Valid: {valid}")
-        return value
+        return validate_enum_member(PaymentMethod, value, "payment method")
 
     __table_args__ = (
         Index("ix_bpl_buy_plan", "buy_plan_id"),
@@ -339,17 +324,15 @@ class BuyPlanLine(Base):
 # ── Buy Plan Attachment ─────────────────────────────────────────────
 
 
-class BuyPlanAttachment(Base):
+class BuyPlanAttachment(AttachmentColumnsMixin, Base):
     """File attachment on a buy plan, a buy-plan line, or a prepayment (stored in
-    OneDrive or the company SharePoint library — mirrors CompanyAttachment).
+    OneDrive or the company SharePoint library — shared payload columns on
+    AttachmentColumnsMixin).
 
     One table, three nullable subject FKs — EXACTLY ONE must be set (app-validated;
     call validate_subject() before insert — the attachment routes and
     attachment_service.store_and_attach writers own enforcement, there is no DB CHECK).
     All three FKs cascade: an attachment row has no meaning once its subject is gone.
-
-    library_drive_id NULL  → OneDrive fallback row (user token, item in /me/drive)
-    library_drive_id set   → company SharePoint library row (app token)
 
     Called by: app/services/attachment_service.py, approvals-workspace attachment
                routes (Phase 2.4)
@@ -365,20 +348,9 @@ class BuyPlanAttachment(Base):
     buy_plan_line_id = Column(Integer, ForeignKey("buy_plan_lines.id", ondelete="CASCADE"), nullable=True)
     prepayment_id = Column(Integer, ForeignKey("prepayments.id", ondelete="CASCADE"), nullable=True)
 
-    file_name = Column(String(500), nullable=False)
-    library_item_id = Column(String(500))
-    library_drive_id = Column(String(200))
-    library_web_url = Column(Text)
-    thumbnail_url = Column(Text)
-    content_type = Column(String(100))
-    size_bytes = Column(Integer)
-    uploaded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
-
     buy_plan = relationship("BuyPlan", foreign_keys=[buy_plan_id])
     buy_plan_line = relationship("BuyPlanLine", foreign_keys=[buy_plan_line_id])
     prepayment = relationship("Prepayment", foreign_keys=[prepayment_id])
-    uploaded_by = relationship("User", foreign_keys=[uploaded_by_id])
 
     def validate_subject(self) -> None:
         """Raise ValueError unless EXACTLY ONE subject FK is set.

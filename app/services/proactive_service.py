@@ -44,6 +44,11 @@ from ..models import (
 from ..vendor_utils import normalize_vendor_name
 from .activity_service import log_activity
 
+# Default sell-price markup over cost when no seeded/entered price exists — the ONE
+# home for the rule (service line items, the prepare page's suggested prices, and the
+# AI-draft fallback all read it).
+DEFAULT_PROACTIVE_MARKUP = 1.3
+
 # ── Match Retrieval ──────────────────────────────────────────────────────
 
 
@@ -193,7 +198,7 @@ def get_matches_for_user(
                 "overall_win_rate": round(vc.overall_win_rate * 100, 1) if vc and vc.overall_win_rate else None,
                 "vendor_total_wins": vc.total_wins if vc else 0,
                 # Buyer info
-                "entered_by_name": (entered_by.name or entered_by.email.split("@")[0]) if entered_by else "",
+                "entered_by_name": entered_by.display_name if entered_by else "",
                 "entered_by_id": offer.entered_by_id if offer else None,
             }
         )
@@ -298,6 +303,42 @@ def get_top_picks(db: Session, user_id: int, *, limit: int = 10) -> list[dict]:
 # ── Send Proactive Offer ──────────────────────────────────────────────────
 
 
+def _upsert_throttles(db: Session, matches: list, site_id: int, po_id: int, now: datetime) -> None:
+    """Refresh-or-create the per-(mpn, site) ProactiveThrottle rows for one sent offer.
+
+    The ONE customer-contact throttle write shared by the prepare-page send and the
+    draft send: batch-load the site's existing rows for these MPNs in one query, stamp
+    last_offered_at + proactive_offer_id, and insert rows for new MPNs (a later match
+    with the same MPN updates the just-added row via the local map). Caller commits.
+    """
+    mpns = {m.mpn for m in matches}
+    if not mpns:
+        return
+    throttle_by_mpn = {
+        t.mpn: t
+        for t in db.scalars(
+            select(ProactiveThrottle).where(
+                ProactiveThrottle.mpn.in_(mpns),
+                ProactiveThrottle.customer_site_id == site_id,
+            )
+        )
+    }
+    for m in matches:
+        existing_throttle = throttle_by_mpn.get(m.mpn)
+        if existing_throttle:
+            existing_throttle.last_offered_at = now
+            existing_throttle.proactive_offer_id = po_id
+        else:
+            new_throttle = ProactiveThrottle(
+                mpn=m.mpn,
+                customer_site_id=site_id,
+                last_offered_at=now,
+                proactive_offer_id=po_id,
+            )
+            db.add(new_throttle)
+            throttle_by_mpn[m.mpn] = new_throttle
+
+
 def _build_line_items(matches: list, sell_prices: dict) -> tuple[list, Decimal, Decimal]:
     """Line items + totals for a customer offer email.
 
@@ -319,7 +360,7 @@ def _build_line_items(matches: list, sell_prices: dict) -> tuple[list, Decimal, 
         # resurfaces — a proactive customer offer must carry a real price.
         sell = sell_prices.get(str(m.id))
         if sell is None and cost:
-            sell = cost * 1.3
+            sell = cost * DEFAULT_PROACTIVE_MARKUP
         if not sell or float(sell) <= 0:
             logger.warning("Proactive: skipping match {} ({}) — no positive sell price", m.id, m.mpn)
             continue
@@ -473,7 +514,7 @@ async def send_proactive_offer(
 
     # QC 2026-08-10 P0-1: the parts table ALWAYS renders. An AI-drafted / edited
     # body becomes the intro; it no longer replaces (and drops) the whole email.
-    salesperson_name = owner.name or owner.email.split("@")[0]
+    salesperson_name = owner.display_name
     html_body = _template_email_html(salesperson_name, contacts, line_items, notes, intro_html=email_html)
 
     # Create ProactiveOffer record first to get ID for subject tag
@@ -497,20 +538,12 @@ async def send_proactive_offer(
 
     # Send email via Graph API
     try:
-        from ..utils.graph_client import GraphClient
+        from ..utils.graph_client import GraphClient, build_sendmail_payload
 
         gc = GraphClient(token)
-        to_recipients = [{"emailAddress": {"address": e}} for e in recipient_emails]
         await gc.post_json(
             "/me/sendMail",
-            {
-                "message": {
-                    "subject": tagged_subject,
-                    "body": {"contentType": "HTML", "content": html_body},
-                    "toRecipients": to_recipients,
-                },
-                "saveToSentItems": "true",
-            },
+            build_sendmail_payload(tagged_subject, html_body, recipient_emails, save_to_sent="true"),
         )
         logger.info(f"Proactive offer #{po.id} sent to {', '.join(recipient_emails)}")
         # Update match statuses only on successful send
@@ -530,31 +563,7 @@ async def send_proactive_offer(
 
     # Upsert throttle entries only if the email was actually sent
     if send_succeeded:
-        now = datetime.now(UTC)
-        # Batch-load existing throttles for these MPNs (one query instead of N).
-        mpns = {m.mpn for m in matches}
-        throttle_by_mpn = {
-            t.mpn: t
-            for t in db.query(ProactiveThrottle).filter(
-                ProactiveThrottle.mpn.in_(mpns),
-                ProactiveThrottle.customer_site_id == site_id,
-            )
-        }
-        for m in matches:
-            existing_throttle = throttle_by_mpn.get(m.mpn)
-            if existing_throttle:
-                existing_throttle.last_offered_at = now
-                existing_throttle.proactive_offer_id = po.id
-            else:
-                new_throttle = ProactiveThrottle(
-                    mpn=m.mpn,
-                    customer_site_id=site_id,
-                    last_offered_at=now,
-                    proactive_offer_id=po.id,
-                )
-                db.add(new_throttle)
-                # Mirror autoflush: a later match with the same MPN updates this row.
-                throttle_by_mpn[m.mpn] = new_throttle
+        _upsert_throttles(db, matches, site_id, po.id, datetime.now(UTC))
 
         # A full prepare-page send supersedes any staged Process draft that
         # references the same matches — drop it so nothing double-sends.
@@ -672,7 +681,7 @@ def build_draft_offers(db: Session, user: User, match_ids: list[int], *, allow_a
 
         owner_id = site_matches[0].salesperson_id or user.id
         owner = user if owner_id == user.id else (db.get(User, owner_id) or user)
-        owner_name = owner.name or owner.email.split("@")[0]
+        owner_name = owner.display_name
         contacts = [contact] if contact else []
 
         db.add(
@@ -714,7 +723,8 @@ def list_draft_offers(db: Session, user: User, *, allow_all: bool = False) -> li
         .unique()
         .all()
     )
-    rep_names = dict(db.execute(select(User.id, User.name)).all())
+    rep_ids = {po.salesperson_id for po in drafts if po.salesperson_id}
+    rep_names = dict(db.execute(select(User.id, User.name).where(User.id.in_(rep_ids))).all()) if rep_ids else {}
     out = []
     for po in drafts:
         site = po.customer_site
@@ -743,7 +753,7 @@ async def send_draft_offer(db: Session, user: User, token: str, po_id: int, *, a
     entries as the prepare-page send. Raises ValueError on wrong status / no recipients
     / no permission.
     """
-    from ..utils.graph_client import GraphAPIError, GraphClient
+    from ..utils.graph_client import GraphAPIError, GraphClient, build_sendmail_payload
 
     po = db.get(ProactiveOffer, po_id)
     if not po or po.status != ProactiveOfferStatus.DRAFT:
@@ -777,14 +787,7 @@ async def send_draft_offer(db: Session, user: User, token: str, po_id: int, *, a
     try:
         await gc.post_json(
             "/me/sendMail",
-            {
-                "message": {
-                    "subject": tagged_subject,
-                    "body": {"contentType": "HTML", "content": po.email_body_html},
-                    "toRecipients": [{"emailAddress": {"address": e}} for e in recipient_emails],
-                },
-                "saveToSentItems": "true",
-            },
+            build_sendmail_payload(tagged_subject, po.email_body_html, recipient_emails, save_to_sent="true"),
         )
     except GraphAPIError as exc:
         # Revert the claim so the draft can be retried with one click.
@@ -797,30 +800,9 @@ async def send_draft_offer(db: Session, user: User, token: str, po_id: int, *, a
 
     match_ids = [li.get("match_id") for li in (po.line_items or []) if li.get("match_id")]
     matches = list(db.scalars(select(ProactiveMatch).where(ProactiveMatch.id.in_(match_ids)))) if match_ids else []
-    throttle_by_mpn = {
-        t.mpn: t
-        for t in db.scalars(
-            select(ProactiveThrottle).where(
-                ProactiveThrottle.mpn.in_({m.mpn for m in matches} or {""}),
-                ProactiveThrottle.customer_site_id == po.customer_site_id,
-            )
-        )
-    }
     for m in matches:
         m.status = ProactiveMatchStatus.SENT
-        existing_throttle = throttle_by_mpn.get(m.mpn)
-        if existing_throttle:
-            existing_throttle.last_offered_at = now
-            existing_throttle.proactive_offer_id = po.id
-        else:
-            new_throttle = ProactiveThrottle(
-                mpn=m.mpn,
-                customer_site_id=po.customer_site_id,
-                last_offered_at=now,
-                proactive_offer_id=po.id,
-            )
-            db.add(new_throttle)
-            throttle_by_mpn[m.mpn] = new_throttle
+    _upsert_throttles(db, matches, po.customer_site_id, po.id, now)
 
     logger.info("Proactive draft #{} sent to {} by {}", po.id, ", ".join(recipient_emails), user.email)
     db.commit()
@@ -1105,7 +1087,7 @@ def get_scorecard(db: Session, salesperson_id: int | None = None) -> dict:
         # Fetch user names
         sp_ids = [r.salesperson_id for r in breakdown_rows]
         salespeople = db.query(User).filter(User.id.in_(sp_ids)).all() if sp_ids else []
-        sales_map = {u.id: u.name or u.email.split("@")[0] for u in salespeople}
+        sales_map = {u.id: u.display_name for u in salespeople}
 
         # Batch quoted counts per salesperson (avoids N+1)
         quoted_by_sp = dict(

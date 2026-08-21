@@ -74,6 +74,81 @@ def is_safe_validation_token(token: str) -> bool:
 # ═══════════════════════════════════════════════════════════════════════
 
 
+def _active_subscription(db: Session, user_id: int, resource: str | None = None) -> GraphSubscription | None:
+    """First unexpired GraphSubscription row for *user_id*, optionally filtered to one
+    Graph *resource*.
+
+    The single existing-row query behind both create_* paths and
+    ``ensure_all_users_subscribed``. NOTE: the mail create path deliberately passes no
+    resource (its historical check matches ANY active row for the user); every other
+    caller filters by resource.
+    """
+    q = db.query(GraphSubscription).filter(
+        GraphSubscription.user_id == user_id,
+        GraphSubscription.expiration_dt > datetime.now(UTC),
+    )
+    if resource is not None:
+        q = q.filter(GraphSubscription.resource == resource)
+    return q.first()
+
+
+async def _create_graph_subscription(
+    user: User,
+    db: Session,
+    token: str,
+    *,
+    resource: str,
+    webhook_path: str,
+    err_label: str,
+    created_log: str,
+) -> GraphSubscription | None:
+    """POST a new Graph webhook subscription and persist its GraphSubscription row.
+
+    The shared tail of ``create_mail_subscription`` / ``create_teams_subscription`` —
+    identical apart from the resource, webhook path, and log wording (*err_label*
+    prefixes the failure logs; *created_log* is a format template taking
+    ``sub_id``/``email``/``expiration``). Callers have already taken the per-user
+    lock and checked for an existing active row.
+    """
+    from app.utils.graph_client import GraphClient
+
+    client_state = secrets.token_hex(16)
+    expiration = datetime.now(UTC) + timedelta(hours=SUBSCRIPTION_LIFETIME_HOURS)
+
+    payload = {
+        "changeType": "created",
+        "notificationUrl": f"{settings.app_url}{webhook_path}",
+        "resource": resource,
+        "expirationDateTime": expiration.strftime("%Y-%m-%dT%H:%M:%S.0000000Z"),
+        "clientState": client_state,
+    }
+
+    gc = GraphClient(token)
+    try:
+        result = await gc.post_json("/subscriptions", payload)
+    except Exception as e:
+        logger.error(f"Failed to create {err_label}subscription for {user.email}: {e}")
+        return None
+
+    sub_id = result.get("id")
+    if not sub_id:
+        logger.error(f"No subscription ID in {err_label}response for {user.email}: {result}")
+        return None
+
+    record = GraphSubscription(
+        user_id=user.id,
+        subscription_id=sub_id,
+        resource=resource,
+        change_type="created",
+        expiration_dt=expiration,
+        client_state=client_state,
+    )
+    db.add(record)
+    db.commit()
+    logger.info(created_log.format(sub_id=sub_id, email=user.email, expiration=expiration))
+    return record
+
+
 async def create_mail_subscription(user: User, db: Session) -> GraphSubscription | None:
     """Create a Graph webhook subscription for a user's mailbox.
 
@@ -81,7 +156,6 @@ async def create_mail_subscription(user: User, db: Session) -> GraphSubscription
     and received emails.
     """
     from app.scheduler import get_valid_token
-    from app.utils.graph_client import GraphClient
 
     token = await get_valid_token(user, db)
     if not token:
@@ -92,76 +166,31 @@ async def create_mail_subscription(user: User, db: Session) -> GraphSubscription
     db.query(User).filter(User.id == user.id).with_for_update().first()
 
     # Check for existing active subscription
-    existing = (
-        db.query(GraphSubscription)
-        .filter(
-            GraphSubscription.user_id == user.id,
-            GraphSubscription.expiration_dt > datetime.now(UTC),
-        )
-        .first()
-    )
+    existing = _active_subscription(db, user.id)
     if existing:
         logger.debug(f"Active subscription exists for {user.email}: {existing.subscription_id}")
         return existing
 
-    client_state = secrets.token_hex(16)
-    expiration = datetime.now(UTC) + timedelta(hours=SUBSCRIPTION_LIFETIME_HOURS)
-
-    notification_url = f"{settings.app_url}/api/webhooks/graph"
-
-    payload = {
-        "changeType": "created",
-        "notificationUrl": notification_url,
-        "resource": "/me/messages",
-        "expirationDateTime": expiration.strftime("%Y-%m-%dT%H:%M:%S.0000000Z"),
-        "clientState": client_state,
-    }
-
-    gc = GraphClient(token)
-    try:
-        result = await gc.post_json("/subscriptions", payload)
-    except Exception as e:
-        logger.error(f"Failed to create subscription for {user.email}: {e}")
-        return None
-
-    sub_id = result.get("id")
-    if not sub_id:
-        logger.error(f"No subscription ID in response for {user.email}: {result}")
-        return None
-
-    record = GraphSubscription(
-        user_id=user.id,
-        subscription_id=sub_id,
+    return await _create_graph_subscription(
+        user,
+        db,
+        token,
         resource="/me/messages",
-        change_type="created",
-        expiration_dt=expiration,
-        client_state=client_state,
+        webhook_path="/api/webhooks/graph",
+        err_label="",
+        created_log="Created Graph subscription {sub_id} for {email}, expires {expiration}",
     )
-    db.add(record)
-    db.commit()
-
-    logger.info(f"Created Graph subscription {sub_id} for {user.email}, expires {expiration}")
-    return record
 
 
 async def create_teams_subscription(user: User, db: Session) -> GraphSubscription | None:
     """Create a Graph webhook subscription for Teams chat messages for this user."""
     from app.scheduler import get_valid_token
-    from app.utils.graph_client import GraphClient
 
     # Advisory lock to prevent duplicate subscription creation under concurrent calls
     db.query(User).filter(User.id == user.id).with_for_update().first()
 
     # Check for existing active Teams subscription
-    existing = (
-        db.query(GraphSubscription)
-        .filter(
-            GraphSubscription.user_id == user.id,
-            GraphSubscription.resource == "/me/chats/getAllMessages",
-            GraphSubscription.expiration_dt > datetime.now(UTC),
-        )
-        .first()
-    )
+    existing = _active_subscription(db, user.id, resource="/me/chats/getAllMessages")
     if existing:
         logger.debug(f"Active Teams subscription exists for {user.email}: {existing.subscription_id}")
         return existing
@@ -171,43 +200,15 @@ async def create_teams_subscription(user: User, db: Session) -> GraphSubscriptio
         logger.warning(f"No valid token for {user.email}, skipping Teams subscription")
         return None
 
-    client_state = secrets.token_hex(16)
-    expiration = datetime.now(UTC) + timedelta(hours=SUBSCRIPTION_LIFETIME_HOURS)
-
-    notification_url = f"{settings.app_url}/api/webhooks/teams"
-
-    payload = {
-        "changeType": "created",
-        "notificationUrl": notification_url,
-        "resource": "/me/chats/getAllMessages",
-        "expirationDateTime": expiration.strftime("%Y-%m-%dT%H:%M:%S.0000000Z"),
-        "clientState": client_state,
-    }
-
-    gc = GraphClient(token)
-    try:
-        result = await gc.post_json("/subscriptions", payload)
-    except Exception as e:
-        logger.error(f"Failed to create Teams subscription for {user.email}: {e}")
-        return None
-
-    sub_id = result.get("id")
-    if not sub_id:
-        logger.error(f"No subscription ID in Teams response for {user.email}: {result}")
-        return None
-
-    record = GraphSubscription(
-        user_id=user.id,
-        subscription_id=sub_id,
+    return await _create_graph_subscription(
+        user,
+        db,
+        token,
         resource="/me/chats/getAllMessages",
-        change_type="created",
-        expiration_dt=expiration,
-        client_state=client_state,
+        webhook_path="/api/webhooks/teams",
+        err_label="Teams ",
+        created_log="Created Teams subscription {sub_id} for {email}",
     )
-    db.add(record)
-    db.commit()
-    logger.info(f"Created Teams subscription {sub_id} for {user.email}")
-    return record
 
 
 async def renew_subscription(sub: GraphSubscription, db: Session) -> bool:
@@ -304,30 +305,12 @@ async def ensure_all_users_subscribed(db: Session):
 
     for user in users:
         # Mail subscription
-        mail_sub = (
-            db.query(GraphSubscription)
-            .filter(
-                GraphSubscription.user_id == user.id,
-                GraphSubscription.resource == "/me/messages",
-                GraphSubscription.expiration_dt > datetime.now(UTC),
-            )
-            .first()
-        )
-        if not mail_sub:
+        if not _active_subscription(db, user.id, resource="/me/messages"):
             await create_mail_subscription(user, db)
 
         # Teams subscription (skip in MVP mode)
         if not settings.mvp_mode:
-            teams_sub = (
-                db.query(GraphSubscription)
-                .filter(
-                    GraphSubscription.user_id == user.id,
-                    GraphSubscription.resource == "/me/chats/getAllMessages",
-                    GraphSubscription.expiration_dt > datetime.now(UTC),
-                )
-                .first()
-            )
-            if not teams_sub:
+            if not _active_subscription(db, user.id, resource="/me/chats/getAllMessages"):
                 await create_teams_subscription(user, db)
 
 
@@ -421,9 +404,11 @@ def validate_notifications(payload: dict, db: Session) -> list[dict]:
 async def handle_notification(payload: dict, db: Session, validated: list[dict] | None = None):
     """Process a Graph webhook notification payload.
 
-    When *validated* is provided (from ``validate_notifications``), skip
-    the per-notification validation loop and process the pre-validated
-    list directly.  Falls back to inline validation for backward compat.
+    When *validated* is provided (from ``validate_notifications``), process the
+    pre-validated list directly. Otherwise the payload is validated here via the same
+    ``validate_notifications`` — one canonical copy of the security-relevant
+    subscription/clientState/replay checks (the production caller always
+    pre-validates; the fallback exists for direct/back-compat callers).
 
     Graph sends a list of notifications. For each, we fetch the message
     from Graph, log it as an activity, and trigger inbox poll for RFQ
@@ -434,44 +419,7 @@ async def handle_notification(payload: dict, db: Session, validated: list[dict] 
     from app.services.activity_service import log_email_activity
     from app.utils.graph_client import GraphClient
 
-    # Use pre-validated list when available; otherwise fall back to
-    # inline validation for backward compatibility with existing callers.
-    if validated is not None:
-        items = validated
-    else:
-        notifications = payload.get("value", [])
-        if not notifications:
-            return
-
-        items = []
-        for notif in notifications:
-            client_state = notif.get("clientState")
-            sub_id = notif.get("subscriptionId")
-
-            sub = db.query(GraphSubscription).filter(GraphSubscription.subscription_id == sub_id).first()
-            if not sub:
-                logger.warning(f"Unknown subscription {sub_id}, ignoring")
-                continue
-            if sub.client_state:
-                if not hmac.compare_digest(sub.client_state, client_state or ""):
-                    logger.warning(f"Client state mismatch for {sub_id}, ignoring")
-                    continue
-            else:
-                # Fail-open with a loud, Sentry-captured alert — see validate_notifications.
-                logger.error(
-                    f"Graph subscription {sub_id} has no stored clientState — processing "
-                    "notification WITHOUT clientState authentication (fail-open). "
-                    "Re-provision the subscription to restore validation."
-                )
-
-            user = db.get(User, sub.user_id)
-            if not user:
-                continue
-
-            notif["_subscription"] = sub
-            notif["_user"] = user
-            items.append(notif)
-
+    items = validated if validated is not None else validate_notifications(payload, db)
     if not items:
         return
 

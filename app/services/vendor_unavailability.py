@@ -54,6 +54,7 @@ from ..models.intelligence import ActivityLog
 from ..models.sourcing import Requirement, Sighting
 from ..models.vendor_part_unavailability import VendorPartUnavailability
 from ..utils.normalization import normalize_condition, normalize_mpn_key
+from ..utils.timezones import as_utc
 from ..vendor_utils import normalize_vendor_name
 
 # ── Temporal-policy constants ─────────────────────────────────────────────────
@@ -111,12 +112,6 @@ class UnavailabilityIntel:
 # ── Policy helpers ────────────────────────────────────────────────────────────
 
 
-def _as_utc(dt: datetime) -> datetime:
-    """Tag naive datetimes (SQLite/legacy rows) as UTC so comparisons never mix naive
-    and aware values."""
-    return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
-
-
 def _window_days(reason: UnavailabilityReason) -> int | None:
     """Active-window length for a reason class; None ⇒ never expires."""
     if reason in LOT_REASONS:
@@ -144,7 +139,7 @@ def is_active(record: VendorPartUnavailability, now: datetime | None = None) -> 
         # this branch covers the just-created, pre-flush window and nothing else.
         return True
     now = now or datetime.now(UTC)
-    return _as_utc(record.created_at) >= now - timedelta(days=window)
+    return bool(as_utc(record.created_at) >= now - timedelta(days=window))
 
 
 def _source_class(sighting: Sighting) -> SourceClass:
@@ -574,7 +569,7 @@ def unavailability_for_requirement(
             (rec for rec in matching if rec.condition is None and is_active(rec, now)),
             matching[0],
         )
-        age = (now - _as_utc(preferred.created_at)).days if preferred.created_at else 0
+        age = (now - as_utc(preferred.created_at)).days if preferred.created_at else 0
         result[display] = UnavailabilityIntel(
             record=preferred,
             is_active=is_active(preferred, now),

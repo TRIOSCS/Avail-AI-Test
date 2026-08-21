@@ -3,13 +3,11 @@ import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
-from loguru import logger
 from sqlalchemy import String
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ...cache.decorators import cached_endpoint, invalidate_prefix
-from ...config import settings
 from ...constants import RequisitionStatus
 from ...database import get_db
 from ...dependencies import can_manage_account, is_manager_or_admin, require_user
@@ -17,6 +15,7 @@ from ...models import Company, CustomerSite, Requisition, User
 from ...schemas.crm import CompanyCreate, CompanyUpdate
 from ...services.credential_service import get_credential_cached
 from ...utils.async_helpers import safe_background_task
+from ...utils.normalization import strip_website_to_domain
 from ...utils.search_builder import SearchBuilder
 
 router = APIRouter()
@@ -83,6 +82,42 @@ def _load_company_tags(company_id: int, db: Session) -> list[dict]:
     ]
 
 
+def _company_core_dict(c: Company) -> dict:
+    """Company fields shared by the list and detail serializations.
+
+    ``list_companies`` merges its stats/counts on top; ``get_company`` merges
+    tags/sites/source/timestamps. Add shared Company fields HERE so the two
+    payloads cannot drift.
+    """
+    return {
+        "id": c.id,
+        "name": c.name,
+        "website": c.website,
+        "industry": c.industry,
+        "notes": c.notes,
+        "domain": c.domain,
+        "linkedin_url": c.linkedin_url,
+        "legal_name": c.legal_name,
+        "employee_size": c.employee_size,
+        "hq_city": c.hq_city,
+        "hq_state": c.hq_state,
+        "hq_country": c.hq_country,
+        "last_enriched_at": c.last_enriched_at.isoformat() if c.last_enriched_at else None,
+        "enrichment_source": c.enrichment_source,
+        "account_type": c.account_type,
+        "phone": c.phone,
+        "credit_terms": c.credit_terms,
+        "tax_id": c.tax_id,
+        "currency": c.currency,
+        "preferred_carrier": c.preferred_carrier,
+        "is_strategic": c.is_strategic,
+        "brand_tags": c.brand_tags or [],
+        "commodity_tags": c.commodity_tags or [],
+        "account_owner_id": c.account_owner_id,
+        "account_owner_name": (c.account_owner.name if c.account_owner else None) if c.account_owner_id else None,
+    }
+
+
 # ── Companies ────────────────────────────────────────────────────────────
 
 
@@ -147,34 +182,8 @@ async def list_companies(
         for c in companies:
             st = stats_map.get(c.id, {})
             items.append(
-                {
-                    "id": c.id,
-                    "name": c.name,
-                    "website": c.website,
-                    "industry": c.industry,
-                    "notes": c.notes,
-                    "domain": c.domain,
-                    "linkedin_url": c.linkedin_url,
-                    "legal_name": c.legal_name,
-                    "employee_size": c.employee_size,
-                    "hq_city": c.hq_city,
-                    "hq_state": c.hq_state,
-                    "hq_country": c.hq_country,
-                    "last_enriched_at": c.last_enriched_at.isoformat() if c.last_enriched_at else None,
-                    "enrichment_source": c.enrichment_source,
-                    "account_type": c.account_type,
-                    "phone": c.phone,
-                    "credit_terms": c.credit_terms,
-                    "tax_id": c.tax_id,
-                    "currency": c.currency,
-                    "preferred_carrier": c.preferred_carrier,
-                    "is_strategic": c.is_strategic,
-                    "brand_tags": c.brand_tags or [],
-                    "commodity_tags": c.commodity_tags or [],
-                    "account_owner_id": c.account_owner_id,
-                    "account_owner_name": (c.account_owner.name if c.account_owner else None)
-                    if c.account_owner_id
-                    else None,
+                _company_core_dict(c)
+                | {
                     "customer_enrichment_status": c.customer_enrichment_status,
                     "customer_enrichment_at": c.customer_enrichment_at.isoformat()
                     if c.customer_enrichment_at
@@ -299,35 +308,8 @@ async def get_company(
                     "contacts": contacts,
                 }
             )
-        return {
-            "id": company.id,
-            "name": company.name,
-            "website": company.website,
-            "industry": company.industry,
-            "notes": company.notes,
-            "domain": company.domain,
-            "linkedin_url": company.linkedin_url,
-            "legal_name": company.legal_name,
-            "employee_size": company.employee_size,
-            "hq_city": company.hq_city,
-            "hq_state": company.hq_state,
-            "hq_country": company.hq_country,
-            "last_enriched_at": company.last_enriched_at.isoformat() if company.last_enriched_at else None,
-            "enrichment_source": company.enrichment_source,
-            "account_type": company.account_type,
-            "phone": company.phone,
-            "credit_terms": company.credit_terms,
-            "tax_id": company.tax_id,
-            "currency": company.currency,
-            "preferred_carrier": company.preferred_carrier,
-            "is_strategic": company.is_strategic,
-            "brand_tags": company.brand_tags or [],
-            "commodity_tags": company.commodity_tags or [],
+        return _company_core_dict(company) | {
             "tags": _load_company_tags(company.id, db),
-            "account_owner_id": company.account_owner_id,
-            "account_owner_name": (company.account_owner.name if company.account_owner else None)
-            if company.account_owner_id
-            else None,
             "source": company.source,
             "created_at": company.created_at.isoformat() if company.created_at else None,
             "updated_at": company.updated_at.isoformat() if company.updated_at else None,
@@ -372,9 +354,7 @@ async def create_company(
                 )
     # Extract domain from website if no explicit domain
     if not clean_domain and payload.website:
-        clean_domain = (
-            payload.website.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0].lower()
-        )
+        clean_domain = strip_website_to_domain(payload.website).lower()
     company = Company(
         name=stored_name,
         website=payload.website,
@@ -422,59 +402,10 @@ async def create_company(
         # enrichment path does (connectors-table credential, env fallback).
         or get_credential_cached("hunter_enrichment", "HUNTER_API_KEY")
     ):
-        from ...enrichment_service import apply_enrichment_to_company, enrich_entity
-
-        async def _enrich_company_bg(cid, sid, d, n, uid):
-            from ...database import SessionLocal
-            from ...services.sse_broker import broker
-
-            try:
-                enrichment = await enrich_entity(d, n)
-                s = SessionLocal()
-                try:
-                    if enrichment:
-                        c = s.get(Company, cid)
-                        if c:
-                            apply_enrichment_to_company(c, enrichment)
-                            s.commit()
-
-                    # Run customer enrichment waterfall for immediate contact discovery
-                    if settings.customer_enrichment_enabled:  # pragma: no cover
-                        try:
-                            from ...services.customer_enrichment_service import enrich_customer_account
-
-                            waterfall = await enrich_customer_account(cid, s, force=True)
-                            # Commit on ANY successful run so both the discovered contacts
-                            # and the enrichment_at/status stamp (the cooldown clock) persist
-                            # — even when the run added 0 contacts (providers degraded, or the
-                            # account was already covered). Previously only >0 committed, so a
-                            # degraded run left no cooldown and re-enriched on every trigger.
-                            if waterfall.get("ok"):
-                                s.commit()
-                                added = waterfall.get("contacts_added", 0)
-                                if added:
-                                    logger.info(
-                                        "Auto-enriched company {}: {} contacts via waterfall",
-                                        cid,
-                                        added,
-                                    )
-                        except Exception as we:
-                            logger.warning("Waterfall auto-enrich error for company {}: {}", cid, we)
-                            s.rollback()
-                finally:
-                    s.close()
-
-                # Notify user via SSE that enrichment is done
-                await broker.publish(
-                    f"user:{uid}",
-                    "enrichment_complete",
-                    '{"entity_type": "company", "company_id": ' + str(cid) + "}",
-                )
-            except Exception:
-                logger.exception("Background enrichment failed for company {}", cid)
+        from ...services.customer_enrichment_service import run_company_creation_enrichment
 
         await safe_background_task(
-            _enrich_company_bg(result["id"], result["default_site_id"], domain, result["name"], user.id),
+            run_company_creation_enrichment(result["id"], domain, result["name"], user.id),
             task_name="enrich_company_bg",
         )
         result["enrich_triggered"] = True

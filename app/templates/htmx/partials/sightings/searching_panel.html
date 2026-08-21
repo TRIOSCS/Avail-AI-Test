@@ -10,13 +10,10 @@
 
    Called by: sightings_refresh (app/routers/sightings.py, source=user)
    Depends on: nothing (self-contained; carries X-Rendered-Req-Id via the router). #}
+{% from "htmx/partials/shared/_macros.html" import spinner -%}
 <div class="flex flex-col items-center justify-center h-full gap-3 py-16 px-6 text-center"
      data-searching-req-id="{{ requirement.id }}">
-  <svg class="h-8 w-8 animate-spin text-accent-500" fill="none" viewBox="0 0 24 24" aria-hidden="true">
-    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-    <path class="opacity-75" fill="currentColor"
-          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-  </svg>
+  {{ spinner('h-8 w-8 animate-spin text-accent-500', attrs='aria-hidden="true"') }}
   <p class="text-sm font-medium text-gray-700">Searching suppliers for {{ requirement.primary_mpn }}…</p>
   <p class="text-xs text-gray-500">Results appear here automatically when the search completes.</p>
 </div>

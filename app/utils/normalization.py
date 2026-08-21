@@ -50,6 +50,18 @@ def parse_website_domain(website: str) -> str:
     return host
 
 
+def strip_website_to_domain(value: str) -> str:
+    """Strip scheme, "www.", and any path from a domain/website string.
+
+    The historical replace-chain shared by the CRM routers (company create, offer
+    vendor create, enrichment domain resolution). Unlike ``parse_website_domain``
+    it neither validates nor lowercases — junk input passes through unchanged, and
+    call sites that store lowercase append ``.lower()`` themselves. Prefer
+    ``parse_website_domain`` for new code that wants a validated bare domain.
+    """
+    return value.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0]
+
+
 # ── Price normalization ───────────────────────────────────────────────
 
 _CURRENCY_SYMBOLS = {

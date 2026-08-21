@@ -57,7 +57,7 @@
   {# Risk face: the amount and payee ARE the card (spec §6 — money out before goods). #}
   {% if is_risk %}
   <div class="mt-1.5 rounded border border-amber-300 bg-amber-50 px-2 py-1">
-    <div class="text-sm font-semibold tabular-nums text-amber-900">${{ '{:,.2f}'.format(card.prepay_amount) if card.prepay_amount is not none else '—' }} paid</div>
+    <div class="text-sm font-semibold tabular-nums text-amber-900">${{ card.prepay_amount|money if card.prepay_amount is not none else '—' }} paid</div>
     <div class="text-[11px] text-amber-800 truncate" title="{{ card.prepay_payee or '' }}">to {{ card.prepay_payee or '—' }}</div>
   </div>
   {% endif %}

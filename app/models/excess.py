@@ -52,7 +52,7 @@ from ..constants import (
     OfferLineMatchStatus,
 )
 from ..database import UTCDateTime
-from .base import Base
+from .base import Base, validate_enum_member
 
 
 class ExcessList(Base):
@@ -91,10 +91,7 @@ class ExcessList(Base):
     # --- Validators ---
     @validates("status")
     def _validate_status(self, _key, value):
-        valid = {e.value for e in ExcessListStatus}
-        if value and value not in valid:
-            raise ValueError(f"Invalid ExcessList status: {value!r}")
-        return value
+        return validate_enum_member(ExcessListStatus, value, "ExcessList status")
 
     __table_args__ = (
         Index("ix_excess_lists_company", "company_id"),
@@ -144,10 +141,7 @@ class ExcessLineItem(Base):
 
     @validates("status")
     def _validate_status(self, _key, value):
-        valid = {e.value for e in ExcessLineItemStatus}
-        if value and value not in valid:
-            raise ValueError(f"Invalid ExcessLineItem status: {value!r}")
-        return value
+        return validate_enum_member(ExcessLineItemStatus, value, "ExcessLineItem status")
 
     __table_args__ = (
         CheckConstraint("asking_price >= 0", name="ck_excess_line_items_asking_price_nonneg"),
@@ -191,17 +185,11 @@ class ExcessOffer(Base):
     # --- Validators ---
     @validates("scope")
     def _validate_scope(self, _key, value):
-        valid = {e.value for e in ExcessOfferScope}
-        if value and value not in valid:
-            raise ValueError(f"Invalid ExcessOffer scope: {value!r}")
-        return value
+        return validate_enum_member(ExcessOfferScope, value, "ExcessOffer scope")
 
     @validates("status")
     def _validate_status(self, _key, value):
-        valid = {e.value for e in ExcessOfferStatus}
-        if value and value not in valid:
-            raise ValueError(f"Invalid ExcessOffer status: {value!r}")
-        return value
+        return validate_enum_member(ExcessOfferStatus, value, "ExcessOffer status")
 
     __table_args__ = (
         Index("ix_excess_offers_list", "excess_list_id"),
@@ -244,10 +232,7 @@ class ExcessOfferLine(Base):
 
     @validates("match_status")
     def _validate_match_status(self, _key, value):
-        valid = {e.value for e in OfferLineMatchStatus}
-        if value and value not in valid:
-            raise ValueError(f"Invalid OfferLine match_status: {value!r}")
-        return value
+        return validate_enum_member(OfferLineMatchStatus, value, "OfferLine match_status")
 
     __table_args__ = (
         Index("ix_excess_offer_lines_offer", "offer_id"),
@@ -293,10 +278,7 @@ class CustomerBid(Base):
     # --- Validators ---
     @validates("status")
     def _validate_status(self, _key, value):
-        valid = {e.value for e in CustomerBidStatus}
-        if value and value not in valid:
-            raise ValueError(f"Invalid CustomerBid status: {value!r}")
-        return value
+        return validate_enum_member(CustomerBidStatus, value, "CustomerBid status")
 
     __table_args__ = (
         Index("ix_customer_bids_list", "excess_list_id"),
@@ -394,17 +376,11 @@ class ExcessOutreach(Base):
     # --- Validators ---
     @validates("channel")
     def _validate_channel(self, _key, value):
-        valid = {e.value for e in ExcessOutreachChannel}
-        if value and value not in valid:
-            raise ValueError(f"Invalid ExcessOutreach channel: {value!r}")
-        return value
+        return validate_enum_member(ExcessOutreachChannel, value, "ExcessOutreach channel")
 
     @validates("status")
     def _validate_status(self, _key, value):
-        valid = {e.value for e in ExcessOutreachStatus}
-        if value and value not in valid:
-            raise ValueError(f"Invalid ExcessOutreach status: {value!r}")
-        return value
+        return validate_enum_member(ExcessOutreachStatus, value, "ExcessOutreach status")
 
     __table_args__ = (
         Index("ix_excess_outreach_list", "excess_list_id"),

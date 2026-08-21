@@ -10,10 +10,12 @@ Usage:
 
 import argparse
 import sys
+from pathlib import Path
 
 from loguru import logger
 
-sys.path.insert(0, "/root/availai")
+# Ensure project root is on sys.path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.database import SessionLocal
 from app.models import MaterialCard, Offer, Requirement, Sighting

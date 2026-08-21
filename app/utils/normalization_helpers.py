@@ -1,7 +1,6 @@
 """Additional normalization helpers — phone, contact names, country/state codes.
 
 Pure Python, no AI. Used by:
-  - scripts/data_cleanup.py (one-time bulk cleanup)
   - schemas/*.py (write-path validation)
 """
 

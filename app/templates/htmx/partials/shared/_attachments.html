@@ -24,6 +24,7 @@
              customers/_contact_macros.html (modal), requisitions/tabs/req_row
              files row, shared/offer_card.html.
 #}
+{% from "htmx/partials/shared/_macros.html" import spinner -%}
 {% macro attachments_panel(kind, entity_id) %}
   {% set _urls = {
     'requisition':   {'list': '/api/requisitions/' ~ entity_id ~ '/attachments'},
@@ -68,10 +69,7 @@
         <p class="mt-0.5 text-xs text-gray-400">PDFs, images, sheets and docs up to 10&nbsp;MB</p>
       </div>
       <div x-show="busy" x-cloak class="flex items-center justify-center gap-2 py-1.5 text-sm text-gray-600">
-        <svg class="h-4 w-4 animate-spin text-brand-500" fill="none" viewBox="0 0 24 24">
-          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-        </svg>
+        {{ spinner('h-4 w-4 animate-spin text-brand-500') }}
         <span x-text="busyLabel"></span>
       </div>
     </form>
@@ -83,10 +81,7 @@
          hx-target="this"
          hx-swap="innerHTML">
       <div class="flex items-center justify-center py-6 text-sm text-gray-400">
-        <svg class="h-4 w-4 mr-2 animate-spin" fill="none" viewBox="0 0 24 24">
-          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-        </svg>
+        {{ spinner('h-4 w-4 mr-2 animate-spin') }}
         Loading files…
       </div>
     </div>

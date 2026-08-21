@@ -75,6 +75,23 @@ def normalize_hq_state_value(v: str | None) -> str | None:
     return normalize_us_state(v) or v
 
 
+def normalize_phone_value(v: str | None) -> str | None:
+    """Normalize a company phone to E.164 (shared by CompanyCreate and CompanyUpdate so
+    create/edit stay in parity).
+
+    Preserves the raw input when it can't be parsed to E.164 (e.g. a 7-digit local
+    number) rather than 422-ing the whole company write — mirrors hq_state/hq_country
+    here and the contact-phone path in routers/htmx/companies.py, which also fall back
+    to raw. Empty/whitespace collapses to None.
+    """
+    if v is None:
+        return v
+    result = normalize_phone_e164(v)
+    if result:
+        return result
+    return v.strip() or None
+
+
 # ── Companies ────────────────────────────────────────────────────────
 
 
@@ -125,16 +142,7 @@ class CompanyCreate(BaseModel):
     @field_validator("phone")
     @classmethod
     def normalize_phone(cls, v: str | None) -> str | None:
-        if v is None:
-            return v
-        # Preserve the raw input when it can't be parsed to E.164 (e.g. a 7-digit local
-        # number) rather than 422-ing the whole company write — mirrors hq_state/hq_country
-        # here and the contact-phone path in routers/htmx/companies.py, which also fall
-        # back to raw. Empty/whitespace collapses to None.
-        result = normalize_phone_e164(v)
-        if result:
-            return result
-        return v.strip() or None
+        return normalize_phone_value(v)
 
 
 class CompanyUpdate(BaseModel):
@@ -174,16 +182,7 @@ class CompanyUpdate(BaseModel):
     @field_validator("phone")
     @classmethod
     def normalize_phone(cls, v: str | None) -> str | None:
-        if v is None:
-            return v
-        # Preserve the raw input when it can't be parsed to E.164 (e.g. a 7-digit local
-        # number) rather than 422-ing the whole company write — mirrors hq_state/hq_country
-        # here and the contact-phone path in routers/htmx/companies.py, which also fall
-        # back to raw. Empty/whitespace collapses to None.
-        result = normalize_phone_e164(v)
-        if result:
-            return result
-        return v.strip() or None
+        return normalize_phone_value(v)
 
 
 # ── Offers ───────────────────────────────────────────────────────────

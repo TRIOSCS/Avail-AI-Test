@@ -27,7 +27,7 @@ class TestParseVendorResponseErrorPaths:
         from app.services.response_parser import parse_vendor_response
 
         with patch(
-            "app.services.response_parser.routed_structured",
+            "app.services.response_parser.claude_structured",
             new_callable=AsyncMock,
             side_effect=ClaudeUnavailableError("Claude not configured"),
         ):
@@ -45,7 +45,7 @@ class TestParseVendorResponseErrorPaths:
         from app.services.response_parser import parse_vendor_response
 
         with patch(
-            "app.services.response_parser.routed_structured",
+            "app.services.response_parser.claude_structured",
             new_callable=AsyncMock,
             side_effect=ClaudeError("API call failed"),
         ):
@@ -71,7 +71,7 @@ class TestParseVendorResponseErrorPaths:
         }
 
         with patch(
-            "app.services.response_parser.routed_structured",
+            "app.services.response_parser.claude_structured",
             new_callable=AsyncMock,
             return_value=invalid_result,
         ):
@@ -97,25 +97,18 @@ class TestParseVendorResponseErrorPaths:
             "parts": [{"mpn": "LM317T", "status": "follow_up"}],
         }
 
-        with (
-            patch(
-                "app.services.response_parser.routed_structured",
-                new_callable=AsyncMock,
-                return_value=first_result,
-            ),
-            patch(
-                "app.services.response_parser.claude_structured",
-                new_callable=AsyncMock,
-                side_effect=ClaudeError("Retry failed"),
-            ) as mock_retry,
-        ):
+        with patch(
+            "app.services.response_parser.claude_structured",
+            new_callable=AsyncMock,
+            side_effect=[first_result, ClaudeError("Retry failed")],
+        ) as mock_claude:
             result = await parse_vendor_response(
                 email_body="Ambiguous vendor email",
                 email_subject="RE: RFQ",
                 vendor_name="Vendor Inc",
             )
 
-        mock_retry.assert_called_once()
+        assert mock_claude.call_count == 2  # Primary parse + extended-thinking retry
         # Original result kept since retry raised ClaudeError (retry=None)
         assert result is not None
         assert result.get("confidence") == 0.65
@@ -139,25 +132,18 @@ class TestParseVendorResponseErrorPaths:
             # Missing required: overall_sentiment, overall_classification
         }
 
-        with (
-            patch(
-                "app.services.response_parser.routed_structured",
-                new_callable=AsyncMock,
-                return_value=first_result,
-            ),
-            patch(
-                "app.services.response_parser.claude_structured",
-                new_callable=AsyncMock,
-                return_value=retry_result,
-            ) as mock_retry,
-        ):
+        with patch(
+            "app.services.response_parser.claude_structured",
+            new_callable=AsyncMock,
+            side_effect=[first_result, retry_result],
+        ) as mock_claude:
             result = await parse_vendor_response(
                 email_body="Ambiguous vendor email",
                 email_subject="RE: RFQ",
                 vendor_name="Vendor Inc",
             )
 
-        mock_retry.assert_called_once()
+        assert mock_claude.call_count == 2  # Primary parse + extended-thinking retry
         # ValidationError on retry validation → result = retry (raw dict)
         assert result is not None
         assert result.get("confidence") == 0.85

@@ -41,7 +41,7 @@ from ...services.credential_service import get_credential_cached
 from ...services.status_machine import require_valid_transition
 from ...services.vendor_unavailability import maybe_release_on_offer
 from ...utils.async_helpers import safe_background_task
-from ...utils.normalization import normalize_mpn_key
+from ...utils.normalization import normalize_mpn_key, strip_website_to_domain
 from ...utils.sql_helpers import escape_like
 from ...vendor_utils import normalize_vendor_name
 from ._helpers import _preload_last_quoted_prices, record_changes
@@ -399,13 +399,7 @@ async def create_offer(
     if not card:
         domain = ""
         if payload.vendor_website:
-            domain = (
-                payload.vendor_website.replace("https://", "")
-                .replace("http://", "")
-                .replace("www.", "")
-                .split("/")[0]
-                .lower()
-            )
+            domain = strip_website_to_domain(payload.vendor_website).lower()
         card = VendorCard(
             normalized_name=norm_name,
             display_name=payload.vendor_name,

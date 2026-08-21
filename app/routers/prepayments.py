@@ -15,24 +15,22 @@ Depends on: app.services.prepayment_service, app.services.buyplan_workflow (_lin
             app.template_env (template_response).
 """
 
-import json
-import secrets
 from decimal import Decimal, InvalidOperation
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from sqlalchemy.orm import Session
 from starlette.responses import HTMLResponse
 
-from ..constants import PREPAYMENT_METHODS, ActivityType, PaymentMethod, PrepaymentStatus
+from ..constants import PREPAYMENT_METHODS, PaymentMethod, PrepaymentStatus
 from ..database import get_db
 from ..dependencies import get_buyplan_for_user, is_manager_or_admin, require_user
-from ..models import ActivityLog
 from ..models.buy_plan import BuyPlanLine
 from ..models.quality_plan import Prepayment
 from ..services.approvals.routing import NoEligibleApproverError
 from ..services.buyplan_workflow import _line_amount
-from ..services.prepayment_service import create_prepayment, mark_prepayment_paid
+from ..services.prepayment_service import create_prepayment, mark_prepayment_paid, unmark_prepayment_paid
 from ..template_env import template_response
+from .htmx._shared import set_toast, toast_error_response
 
 router = APIRouter(tags=["prepayments"])
 
@@ -53,55 +51,19 @@ _PAYMENT_METHOD_CHOICES: list[tuple[str, str]] = [
 _TRUTHY = {"true", "on", "1", "yes"}
 
 
-def _prepayment_toast(response: HTMLResponse, message: str, kind: str = "success") -> None:
-    """Attach a showToast HX-Trigger so the Alpine $store.toast surfaces feedback.
-
-    MERGES with any HX-Trigger already on the response (bare event name or JSON dict)
-    instead of clobbering it — the create route sets awListRefresh before toasting.
-    """
-    trigger: dict = {"showToast": {"message": message, "type": kind}}
-    existing = response.headers.get("HX-Trigger")
-    if existing:
-        try:
-            parsed = json.loads(existing)
-        except ValueError:
-            parsed = None
-        if isinstance(parsed, dict):
-            trigger.update({k: v for k, v in parsed.items() if k != "showToast"})
-        else:
-            # htmx's bare form: one event name, or several comma-separated.
-            for event in str(existing).split(","):
-                if event.strip():
-                    trigger[event.strip()] = True
-    response.headers["HX-Trigger"] = json.dumps(trigger)
-
-
 def _cod_guard_response(message: str) -> HTMLResponse:
     """The friendly 400 for a blocked prepayment request (COD line / bad method).
 
     A small inline partial (rendered into the modal body via response-targets or read
     by tests) + a toast, with a REAL 400 status so callers and tests see the refusal —
-    unlike ``_prepayment_error_toast``'s 200-no-swap, this is a hard guard, not a
+    unlike ``toast_error_response``'s 200-no-swap, this is a hard guard, not a
     transient service error.
     """
     resp = HTMLResponse(
         f'<div class="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">{message}</div>',
         status_code=400,
     )
-    _prepayment_toast(resp, message, "error")
-    return resp
-
-
-def _prepayment_error_toast(message: str) -> HTMLResponse:
-    """Honest error feedback for the request modal, which has no surface to re-render.
-
-    Mirrors prospecting._prospect_error_toast: HTMX suppresses non-2xx swaps and the
-    JSON HTTPException handler carries no showToast, so a raw 4xx would leave zero
-    feedback. Return a 200 that swaps nothing (HX-Reswap: none) but fires an error
-    showToast.
-    """
-    resp = HTMLResponse("", headers={"HX-Reswap": "none"})
-    _prepayment_toast(resp, message, "error")
+    set_toast(resp, message, "error", merge=True)
     return resp
 
 
@@ -179,7 +141,7 @@ async def prepayment_request_create(
     try:
         amount = Decimal(total_incl_fees)
     except (InvalidOperation, TypeError):
-        return _prepayment_error_toast("Enter a valid prepayment amount.")
+        return toast_error_response("Enter a valid prepayment amount.")
 
     # Method must be one of the frozen prepayment methods (COD is not in the list — a
     # forged/stale form can't smuggle it in).
@@ -213,10 +175,10 @@ async def prepayment_request_create(
         db.commit()
     except NoEligibleApproverError as exc:
         db.rollback()
-        return _prepayment_error_toast(str(exc))
+        return toast_error_response(str(exc))
     except ValueError as exc:
         db.rollback()
-        return _prepayment_error_toast(str(exc))
+        return toast_error_response(str(exc))
 
     # Notify accounting/AP (email + Teams) that a prepayment was requested — DO NOT PAY YET.
     # Fire-and-forget: the runner isolates every error so a failed notice never breaks the
@@ -244,7 +206,7 @@ async def prepayment_request_create(
         resp = render_plan_pane(request, current_user, db, buy_plan_id)
         resp.headers["HX-Trigger"] = "awListRefresh"
 
-    _prepayment_toast(resp, "Prepayment request submitted for approval.", "success")
+    set_toast(resp, "Prepayment request submitted for approval.", "success", merge=True)
     return resp
 
 
@@ -328,7 +290,7 @@ async def prepayment_mark_paid(
     try:
         amount = Decimal(paid_amount) if paid_amount else pp.total_incl_fees
     except (InvalidOperation, TypeError):
-        return _prepayment_error_toast("Enter a valid paid amount.")
+        return toast_error_response("Enter a valid paid amount.")
 
     try:
         mark_prepayment_paid(
@@ -341,10 +303,10 @@ async def prepayment_mark_paid(
             paid_by_label=current_user.name,
         )
     except ValueError as exc:
-        return _prepayment_error_toast(str(exc))
+        return toast_error_response(str(exc))
 
     resp = _render_prepayment_tab(request, current_user, db, scope)
-    _prepayment_toast(resp, "Prepayment marked paid.", "success")
+    set_toast(resp, "Prepayment marked paid.", "success", merge=True)
     return resp
 
 
@@ -365,32 +327,12 @@ async def prepayment_unmark_paid(
     pp = db.get(Prepayment, prepayment_id)
     if pp is None:
         raise HTTPException(status_code=404, detail="Prepayment not found")
-    if pp.status != PrepaymentStatus.PAID.value:
-        return _prepayment_error_toast("Only a paid prepayment can be reversed.")
 
-    pp.status = PrepaymentStatus.APPROVED.value
-    pp.paid_at = None
-    pp.paid_by_id = None
-    pp.paid_by_label = None
-    pp.paid_via = None
-    pp.wire_reference = None
-    pp.paid_amount = None
-    pp.pay_token = secrets.token_urlsafe(32)
-
-    requisition_id = pp.buy_plan.requisition_id if pp.buy_plan is not None else None
-    db.add(
-        ActivityLog(
-            user_id=current_user.id,
-            activity_type=ActivityType.NOTE,
-            channel="system",
-            requisition_id=requisition_id,
-            buy_plan_id=pp.buy_plan_id,
-            subject="Prepayment payment reversed",
-            notes=f"Prepayment #{pp.id} reverted paid → approved by {current_user.name or current_user.email}",
-        )
-    )
-    db.commit()
+    try:
+        unmark_prepayment_paid(db, pp, current_user)
+    except ValueError as exc:
+        return toast_error_response(str(exc))
 
     resp = _render_prepayment_tab(request, current_user, db, scope)
-    _prepayment_toast(resp, "Payment reversed — prepayment returned to approved.", "success")
+    set_toast(resp, "Payment reversed — prepayment returned to approved.", "success", merge=True)
     return resp

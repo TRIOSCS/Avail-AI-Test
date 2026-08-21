@@ -33,13 +33,7 @@ from app.services.prospect_scoring import (
     calculate_fit_score,
     calculate_readiness_score,
 )
-
-
-def _ensure_utc(dt: datetime | None) -> datetime | None:
-    """Ensure datetime is tz-aware UTC (SQLite returns naive datetimes)."""
-    if dt is not None and dt.tzinfo is None:
-        return dt.replace(tzinfo=UTC)
-    return dt
+from app.utils.timezones import as_utc
 
 
 def _has_strong_intent(signals: dict) -> bool:
@@ -448,7 +442,7 @@ async def job_expire_and_resurface() -> dict:
         expired_count = 0
         for p in candidates:
             # Don't expire if enriched recently
-            if p.last_enriched_at and _ensure_utc(p.last_enriched_at) > enrich_cutoff:
+            if p.last_enriched_at and as_utc(p.last_enriched_at) > enrich_cutoff:
                 continue
             # Don't expire high-readiness
             if (p.readiness_score or 0) > 60:

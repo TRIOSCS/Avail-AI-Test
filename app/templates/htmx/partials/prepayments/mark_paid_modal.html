@@ -10,6 +10,7 @@
   Receives: pp (Prepayment), amount (Decimal, prefill), scope ('all'|'mine').
   Depends on: HTMX, Alpine.js ($dispatch close-modal), Tailwind CSS.
 #}
+{% from "htmx/partials/shared/_macros.html" import close_modal_on_success -%}
 <div class='p-5'>
   <h3 id='modal-title' class='text-sm font-semibold text-gray-900 mb-1'>Mark prepayment paid</h3>
   <p class='text-secondary mb-4'>
@@ -27,7 +28,7 @@
         hx-target='#ap-hub-body'
         hx-swap='innerHTML'
         hx-push-url='false'
-        hx-on::after-request='if(event.detail.successful) this.dispatchEvent(new CustomEvent("close-modal", {bubbles: true}))'
+        {{ close_modal_on_success() }}
         data-loading-disable
         class='space-y-3'>
     <input type='hidden' name='scope' value='{{ scope }}'>

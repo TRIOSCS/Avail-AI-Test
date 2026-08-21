@@ -27,13 +27,26 @@ from ..models import ApiSource
 
 _LEGACY_CREDENTIAL_SALT = b"availai-credential-salt-v1"
 
+# Memoized Fernet, keyed by its (secret_key, encryption_salt) inputs: the PBKDF2
+# derivation runs 100k SHA-256 iterations (~50-100ms of CPU), so re-deriving per
+# encrypt/decrypt call burned real event-loop time on every credential read. The
+# inputs are process-constant in production; the key guard keeps a mid-process
+# change (tests, salt rotation) correct.
+_fernet_cache: tuple[tuple[str, str], Fernet] | None = None
+
 
 def _get_fernet() -> Fernet:
     """Derive a Fernet key from the app secret and return a Fernet instance.
 
     Uses settings.encryption_salt if set (defense-in-depth), otherwise falls back to the
-    legacy static salt for backward compatibility.
+    legacy static salt for backward compatibility. Memoized per (secret_key,
+    encryption_salt) so the expensive KDF runs once, not per call.
     """
+    global _fernet_cache
+    cache_key = (settings.secret_key, settings.encryption_salt or "")
+    if _fernet_cache is not None and _fernet_cache[0] == cache_key:
+        return _fernet_cache[1]
+
     if settings.encryption_salt:
         salt = settings.encryption_salt.encode()
     else:
@@ -50,7 +63,9 @@ def _get_fernet() -> Fernet:
         iterations=100_000,
     )
     key = base64.urlsafe_b64encode(kdf.derive(settings.secret_key.encode()))
-    return Fernet(key)
+    fernet = Fernet(key)
+    _fernet_cache = (cache_key, fernet)
+    return fernet
 
 
 def encrypt_value(plaintext: str) -> str:

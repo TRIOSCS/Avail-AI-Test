@@ -22,7 +22,7 @@ from sqlalchemy.orm import relationship, validates
 
 from ..constants import QuoteStatus
 from ..database import UTCDateTime
-from .base import Base
+from .base import Base, validate_enum_member
 
 
 class Quote(Base):
@@ -84,10 +84,7 @@ class Quote(Base):
     def _validate_status(self, _key, value):
         from ..constants import QuoteStatus
 
-        valid = {e.value for e in QuoteStatus}
-        if value and value not in valid:
-            raise ValueError(f"Invalid quote status: {value!r}. Valid: {valid}")
-        return value
+        return validate_enum_member(QuoteStatus, value, "quote status")
 
     __table_args__ = (
         # Mirrors the migration-owned DB constraint (fresh create_all parity — the

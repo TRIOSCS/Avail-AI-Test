@@ -1,0 +1,34 @@
+{# vendors/tabs/analytics_tab.html — vendor detail "Analytics" tab.
+
+   Rendered by app/routers/htmx/_shared_tabs.py::vendor_tab (tab == "analytics").
+   Context: vendor — the VendorCard. Number formatting mirrors the former Python
+   f-string block exactly (whole-number percentages/scores, 0 fallbacks). #}
+<div class="space-y-6">
+  <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
+    <div class="bg-white rounded-lg border border-gray-200 p-4 text-center">
+      <p class="text-2xl font-bold text-brand-500">{{ "%.0f"|format((vendor.overall_win_rate or 0) * 100) }}%</p>
+      <p class="text-xs text-gray-500 mt-1">Win Rate</p>
+    </div>
+    <div class="bg-white rounded-lg border border-gray-200 p-4 text-center">
+      <p class="text-2xl font-bold text-brand-500">{{ "%.0f"|format((vendor.response_rate or 0) * 100) }}%</p>
+      <p class="text-xs text-gray-500 mt-1">Response Rate</p>
+    </div>
+    <div class="bg-white rounded-lg border border-gray-200 p-4 text-center">
+      <p class="text-2xl font-bold text-brand-500">{{ "%.0f"|format(vendor.vendor_score or 0) }}</p>
+      <p class="text-xs text-gray-500 mt-1">Vendor Score</p>
+    </div>
+    <div class="bg-white rounded-lg border border-gray-200 p-4 text-center">
+      <p class="text-2xl font-bold text-gray-900">{{ vendor.sighting_count or 0 }}</p>
+      <p class="text-xs text-gray-500 mt-1">Sightings</p>
+    </div>
+    <div class="bg-white rounded-lg border border-gray-200 p-4 text-center">
+      <p class="text-2xl font-bold text-gray-900">{{ "%.0f"|format(vendor.avg_response_hours or 0) }}</p>
+      <p class="text-xs text-gray-500 mt-1">Avg Response Hours</p>
+    </div>
+    <div class="bg-white rounded-lg border border-gray-200 p-4 text-center">
+      <p class="text-2xl font-bold text-gray-900">{{ "%.0f"|format(vendor.engagement_score or 0) }}</p>
+      <p class="text-xs text-gray-500 mt-1">Engagement Score</p>
+    </div>
+  </div>
+  <p class="text-sm text-gray-500 text-center">Analytics data builds as you interact with this vendor.</p>
+</div>

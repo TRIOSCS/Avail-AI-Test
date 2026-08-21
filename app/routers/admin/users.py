@@ -381,6 +381,68 @@ async def set_user_active(
     return _render(db, request)
 
 
+def _set_approver_flag(
+    db: Session,
+    request: Request,
+    admin: User,
+    user_id: int,
+    can_approve: str,
+    *,
+    flag_attr: str,
+    label: str,
+    gate: str | None = None,
+    limit_attr: str | None = None,
+    limit: str = "",
+):
+    """Shared body of the five approver-toggle routes.
+
+    Truthy-parses `can_approve`, optionally validates the dollar `limit` (only when
+    `limit_attr` names a User column), no-ops when nothing changes, else sets the
+    flag (+ limit), writes an APPROVAL_GRANT / APPROVAL_REVOKE audit row (detail
+    carries `gate`, and `limit` when applicable), commits, logs, and re-renders the
+    Users partial.
+    """
+    target = _editable_target(db, user_id)
+    grant = str(can_approve).strip().lower() in {"true", "1", "on", "yes"}
+
+    # Parse the optional dollar limit
+    new_limit: Decimal | None = None
+    if limit_attr is not None:
+        limit_str = (limit or "").strip()
+        if limit_str not in {"", "unlimited"}:
+            try:
+                new_limit = Decimal(limit_str)
+                if new_limit <= 0:
+                    return _render(db, request, error="Dollar limit must be a positive number.", status_code=400)
+            except InvalidOperation:
+                return _render(db, request, error="Enter a valid dollar limit (e.g. 1000.00).", status_code=400)
+
+    # No-op guard
+    if getattr(target, flag_attr) == grant and (limit_attr is None or getattr(target, limit_attr) == new_limit):
+        return _render(db, request)  # no-op, nothing to audit
+
+    setattr(target, flag_attr, grant)
+    detail: dict | None = {"gate": gate} if gate is not None else None
+    if limit_attr is not None:
+        setattr(target, limit_attr, new_limit)
+        detail["limit"] = str(new_limit) if new_limit is not None else None
+    action = UserAuditAction.APPROVAL_GRANT if grant else UserAuditAction.APPROVAL_REVOKE
+    record_user_audit(db, actor_id=admin.id, target_user_id=target.id, action=action, detail=detail)
+    db.commit()
+    if limit_attr is not None:
+        logger.info(
+            "User {} {} {} (limit={}) by {}",
+            target.email,
+            label,
+            "granted" if grant else "revoked",
+            new_limit,
+            admin.email,
+        )
+    else:
+        logger.info("User {} {} {} by {}", target.email, label, "granted" if grant else "revoked", admin.email)
+    return _render(db, request)
+
+
 @router.post("/api/admin/users/{user_id}/buyplan-approver", response_class=HTMLResponse)
 async def set_buyplan_approver(
     request: Request,
@@ -397,18 +459,9 @@ async def set_buyplan_approver(
     writes an APPROVAL_GRANT / APPROVAL_REVOKE audit row. A no-op (state unchanged) re-
     renders without auditing, mirroring change_user_role / set_user_active.
     """
-    target = _editable_target(db, user_id)
-    grant = str(can_approve).strip().lower() in {"true", "1", "on", "yes"}
-
-    if target.can_approve_buy_plans == grant:
-        return _render(db, request)  # no-op, nothing to audit
-
-    target.can_approve_buy_plans = grant
-    action = UserAuditAction.APPROVAL_GRANT if grant else UserAuditAction.APPROVAL_REVOKE
-    record_user_audit(db, actor_id=admin.id, target_user_id=target.id, action=action)
-    db.commit()
-    logger.info("User {} buy-plan approval {} by {}", target.email, "granted" if grant else "revoked", admin.email)
-    return _render(db, request)
+    return _set_approver_flag(
+        db, request, admin, user_id, can_approve, flag_attr="can_approve_buy_plans", label="buy-plan approval"
+    )
 
 
 @router.post("/api/admin/users/{user_id}/prepayment-approver", response_class=HTMLResponse)
@@ -427,44 +480,18 @@ async def set_prepayment_approver(
     change writes an APPROVAL_GRANT / APPROVAL_REVOKE audit row. A no-op (state
     unchanged) re-renders without auditing.
     """
-    target = _editable_target(db, user_id)
-    grant = str(can_approve).strip().lower() in {"true", "1", "on", "yes"}
-
-    # Parse the optional dollar limit
-    limit_str = (limit or "").strip()
-    if limit_str in {"", "unlimited"}:
-        new_limit: Decimal | None = None
-    else:
-        try:
-            new_limit = Decimal(limit_str)
-            if new_limit <= 0:
-                return _render(db, request, error="Dollar limit must be a positive number.", status_code=400)
-        except InvalidOperation:
-            return _render(db, request, error="Enter a valid dollar limit (e.g. 1000.00).", status_code=400)
-
-    # No-op guard
-    if target.can_approve_prepayments == grant and target.prepayment_approval_limit == new_limit:
-        return _render(db, request)
-
-    target.can_approve_prepayments = grant
-    target.prepayment_approval_limit = new_limit
-    action = UserAuditAction.APPROVAL_GRANT if grant else UserAuditAction.APPROVAL_REVOKE
-    record_user_audit(
+    return _set_approver_flag(
         db,
-        actor_id=admin.id,
-        target_user_id=target.id,
-        action=action,
-        detail={"gate": "prepayment", "limit": str(new_limit) if new_limit is not None else None},
+        request,
+        admin,
+        user_id,
+        can_approve,
+        flag_attr="can_approve_prepayments",
+        label="prepayment approval",
+        gate="prepayment",
+        limit_attr="prepayment_approval_limit",
+        limit=limit,
     )
-    db.commit()
-    logger.info(
-        "User {} prepayment approval {} (limit={}) by {}",
-        target.email,
-        "granted" if grant else "revoked",
-        new_limit,
-        admin.email,
-    )
-    return _render(db, request)
 
 
 @router.post("/api/admin/users/{user_id}/sales-order-approver", response_class=HTMLResponse)
@@ -483,24 +510,16 @@ async def set_sales_order_approver(
     writes an APPROVAL_GRANT / APPROVAL_REVOKE audit row. A no-op (state unchanged) re-
     renders without auditing, mirroring set_buyplan_approver.
     """
-    target = _editable_target(db, user_id)
-    grant = str(can_approve).strip().lower() in {"true", "1", "on", "yes"}
-
-    if target.can_approve_qp_sales == grant:
-        return _render(db, request)  # no-op, nothing to audit
-
-    target.can_approve_qp_sales = grant
-    action = UserAuditAction.APPROVAL_GRANT if grant else UserAuditAction.APPROVAL_REVOKE
-    record_user_audit(
+    return _set_approver_flag(
         db,
-        actor_id=admin.id,
-        target_user_id=target.id,
-        action=action,
-        detail={"gate": "qp_sales"},
+        request,
+        admin,
+        user_id,
+        can_approve,
+        flag_attr="can_approve_qp_sales",
+        label="sales-order approval",
+        gate="qp_sales",
     )
-    db.commit()
-    logger.info("User {} sales-order approval {} by {}", target.email, "granted" if grant else "revoked", admin.email)
-    return _render(db, request)
 
 
 @router.post("/api/admin/users/{user_id}/po-approver", response_class=HTMLResponse)
@@ -520,24 +539,16 @@ async def set_po_approver(
     unchanged) re-renders without auditing, mirroring set_buyplan_approver. (The route
     name stays /po-approver; SP-3 only repointed the column it governs.)
     """
-    target = _editable_target(db, user_id)
-    grant = str(can_approve).strip().lower() in {"true", "1", "on", "yes"}
-
-    if target.can_approve_qp_purchasing == grant:
-        return _render(db, request)  # no-op, nothing to audit
-
-    target.can_approve_qp_purchasing = grant
-    action = UserAuditAction.APPROVAL_GRANT if grant else UserAuditAction.APPROVAL_REVOKE
-    record_user_audit(
+    return _set_approver_flag(
         db,
-        actor_id=admin.id,
-        target_user_id=target.id,
-        action=action,
-        detail={"gate": "qp_purchasing"},
+        request,
+        admin,
+        user_id,
+        can_approve,
+        flag_attr="can_approve_qp_purchasing",
+        label="QP-purchasing approval",
+        gate="qp_purchasing",
     )
-    db.commit()
-    logger.info("User {} QP-purchasing approval {} by {}", target.email, "granted" if grant else "revoked", admin.email)
-    return _render(db, request)
 
 
 @router.post("/api/admin/users/{user_id}/purchase-order-approver", response_class=HTMLResponse)
@@ -559,43 +570,18 @@ async def set_purchase_order_approver(
     Admin-only; each change writes an APPROVAL_GRANT / APPROVAL_REVOKE audit row. A
     no-op (state unchanged) re-renders without auditing.
     """
-    target = _editable_target(db, user_id)
-    grant = str(can_approve).strip().lower() in {"true", "1", "on", "yes"}
-
-    # Parse the optional dollar limit (mirrors set_prepayment_approver).
-    limit_str = (limit or "").strip()
-    if limit_str in {"", "unlimited"}:
-        new_limit: Decimal | None = None
-    else:
-        try:
-            new_limit = Decimal(limit_str)
-            if new_limit <= 0:
-                return _render(db, request, error="Dollar limit must be a positive number.", status_code=400)
-        except InvalidOperation:
-            return _render(db, request, error="Enter a valid dollar limit (e.g. 1000.00).", status_code=400)
-
-    if target.can_approve_purchase_orders == grant and target.purchase_order_approval_limit == new_limit:
-        return _render(db, request)  # no-op, nothing to audit
-
-    target.can_approve_purchase_orders = grant
-    target.purchase_order_approval_limit = new_limit
-    action = UserAuditAction.APPROVAL_GRANT if grant else UserAuditAction.APPROVAL_REVOKE
-    record_user_audit(
+    return _set_approver_flag(
         db,
-        actor_id=admin.id,
-        target_user_id=target.id,
-        action=action,
-        detail={"gate": "purchase_order", "limit": str(new_limit) if new_limit is not None else None},
+        request,
+        admin,
+        user_id,
+        can_approve,
+        flag_attr="can_approve_purchase_orders",
+        label="PO approval",
+        gate="purchase_order",
+        limit_attr="purchase_order_approval_limit",
+        limit=limit,
     )
-    db.commit()
-    logger.info(
-        "User {} PO approval {} (limit={}) by {}",
-        target.email,
-        "granted" if grant else "revoked",
-        new_limit,
-        admin.email,
-    )
-    return _render(db, request)
 
 
 # ── Per-user access editor ───────────────────────────────────────────

@@ -28,24 +28,52 @@ MIN_MPN_PREFIX_LENGTH = 6  # Minimum prefix length for manufacturer inference
 MIN_TAG_CONFIDENCE = 0.70  # Minimum confidence for material tag display
 
 
+# -- Lookup -------------------------------------------------------------------
+
+
+def get_live_card_by_key(db: Session, normalized_key: str) -> MaterialCard | None:
+    """Look up a live (non-soft-deleted) MaterialCard by normalized key.
+
+    Never creates one. The single home for the normalized_mpn + deleted_at-IS-NULL
+    lookup shared by the dossier routes, part history, and stock-list ingest.
+    """
+    if not normalized_key:
+        return None
+    return (
+        db.query(MaterialCard)
+        .filter(MaterialCard.normalized_mpn == normalized_key)
+        .filter(MaterialCard.deleted_at.is_(None))
+        .first()
+    )
+
+
 # -- Manufacturer Inference ---------------------------------------------------
 
 
 def infer_manufacturer(db: Session, mpn: str) -> str | None:
-    """Walk from longest to shortest prefix to find a known manufacturer."""
-    for length in range(len(mpn) - 1, MIN_MPN_PREFIX_LENGTH, -1):
-        prefix = mpn[:length]
-        match = (
-            db.query(MaterialCard)
-            .filter(
-                MaterialCard.normalized_mpn == prefix,
-                MaterialCard.manufacturer.isnot(None),
-                MaterialCard.manufacturer != "",
-            )
-            .first()
+    """Walk from longest to shortest prefix to find a known manufacturer.
+
+    One IN() query over every candidate prefix (instead of one SELECT per length), then
+    the longest matching prefix wins in Python — identical winner, one round-trip per
+    call (backfill_missing_manufacturers runs this per card).
+    """
+    prefixes = [mpn[:length] for length in range(len(mpn) - 1, MIN_MPN_PREFIX_LENGTH, -1)]
+    if not prefixes:
+        return None
+    by_prefix: dict[str, str] = {}
+    for norm, manufacturer in (
+        db.query(MaterialCard.normalized_mpn, MaterialCard.manufacturer)
+        .filter(
+            MaterialCard.normalized_mpn.in_(prefixes),
+            MaterialCard.manufacturer.isnot(None),
+            MaterialCard.manufacturer != "",
         )
-        if match:
-            return match.manufacturer
+        .all()
+    ):
+        by_prefix.setdefault(norm, manufacturer)
+    for prefix in prefixes:  # longest → shortest, same walk order as before
+        if prefix in by_prefix:
+            return by_prefix[prefix]
     return None
 
 
@@ -63,6 +91,53 @@ def backfill_missing_manufacturers(db: Session) -> int:
         if inferred and set_manufacturer(part, inferred, source="prefix_infer", confidence=0.6):
             updated += 1
     return updated
+
+
+# -- Manual edits -------------------------------------------------------------
+
+
+def apply_manual_card_edits(
+    card: MaterialCard,
+    *,
+    manufacturer: str | None = None,
+    description: str | None = None,
+    condition: str | None = None,
+    category_canonical: str | None = None,
+) -> list[str]:
+    """Apply human-entered field writes with the manual-edit durability contract.
+
+    The ONE home for the ladder discipline shared by the Add-part modal and the PUT
+    update route (routers/materials.py): manufacturer/category go through the F1 ladder
+    at manual/1.0 — a direct write would leave NULL provenance (legacy floor 50) and be
+    silently reverted by the next decode/ingest — and a LANDED ladder write clears any
+    recorded validation conflict for its key (a human [re-]assertion resolves it, even
+    an unchanged value: the human looked and confirmed). description/condition are
+    plain writes.
+
+    ``None`` skips a field; values must be pre-validated by the caller (``condition``
+    against the MaterialCondition vocabulary, ``category_canonical`` already canonical —
+    the differing 422-vs-modal error handling stays in the routes). Returns the field
+    names actually written; the caller stamps provenance (``_stamp_manual_provenance``)
+    over these plus its own route-only writes.
+    """
+    from .spec_tiers import clear_validation_conflicts, set_category, set_manufacturer
+
+    written: list[str] = []
+    if manufacturer is not None:
+        if set_manufacturer(card, manufacturer, "manual", 1.0):
+            written.append("manufacturer")
+            clear_validation_conflicts(card, "manufacturer")
+    if description is not None:
+        card.description = description
+        written.append("description")
+    if condition is not None:
+        card.condition = condition
+        written.append("condition")
+    if category_canonical is not None:
+        if set_category(card, category_canonical, "manual", 1.0):
+            written.append("category")
+            clear_validation_conflicts(card, "category")
+    return written
 
 
 # -- Serialization ------------------------------------------------------------

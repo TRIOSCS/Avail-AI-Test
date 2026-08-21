@@ -11,13 +11,12 @@ Covers:
 - source_has_test_path: real-test-path gate (ai_live_web yes w/ key, sam_gov / stock_list no)
 - run_source_test persists a keyless source's ok/error status (has_env_vars gate dropped)
 - _enrich_source testability follows a real test path (Test hidden where none exists)
-- _test_toast_header builds the single-Test showToast payload
+- _test_toast_message builds the single-Test toast (message, kind)
 
 Called by: pytest
 Depends on: app/routers/sources.py, app/routers/htmx/settings.py, tests/conftest.py
 """
 
-import json
 import os
 
 os.environ["TESTING"] = "1"
@@ -31,7 +30,7 @@ from app.models import ApiSource
 from app.routers.sources import (
     _get_connector_for_source,
     _persist_test_result,
-    _test_toast_header,
+    _test_toast_message,
     run_source_test,
 )
 from app.services.connector_registry import source_has_test_path
@@ -160,36 +159,30 @@ class TestEnrichSourceTestable:
         assert enriched["testable"] is False
 
 
-# ── _test_toast_header: single-Test showToast payload ────────────────────────
+# ── _test_toast_message: single-Test toast (message, kind) ───────────────────
 
 
-class TestTestToastHeader:
+class TestTestToastMessage:
     def test_ok_toast_is_success(self):
-        payload = json.loads(
-            _test_toast_header(
-                {"source": "BrokerBin", "status": "ok", "results_count": 3, "elapsed_ms": 412, "error": None}
-            )
+        message, kind = _test_toast_message(
+            {"source": "BrokerBin", "status": "ok", "results_count": 3, "elapsed_ms": 412, "error": None}
         )
-        assert payload["showToast"]["type"] == "success"
-        assert "3 result(s)" in payload["showToast"]["message"]
-        assert "412ms" in payload["showToast"]["message"]
+        assert kind == "success"
+        assert "3 result(s)" in message
+        assert "412ms" in message
 
     def test_error_toast_is_error(self):
-        payload = json.loads(
-            _test_toast_header(
-                {"source": "Nexar", "status": "error", "results_count": 0, "elapsed_ms": 20, "error": "bad key"}
-            )
+        message, kind = _test_toast_message(
+            {"source": "Nexar", "status": "error", "results_count": 0, "elapsed_ms": 20, "error": "bad key"}
         )
-        assert payload["showToast"]["type"] == "error"
-        assert "bad key" in payload["showToast"]["message"]
+        assert kind == "error"
+        assert "bad key" in message
 
     def test_no_results_toast_is_info(self):
-        payload = json.loads(
-            _test_toast_header(
-                {"source": "Mouser", "status": "no_results", "results_count": 0, "elapsed_ms": 99, "error": None}
-            )
+        message, kind = _test_toast_message(
+            {"source": "Mouser", "status": "no_results", "results_count": 0, "elapsed_ms": 99, "error": None}
         )
-        assert payload["showToast"]["type"] == "info"
+        assert kind == "info"
 
 
 def test_persist_test_result_shape(db_session: Session):

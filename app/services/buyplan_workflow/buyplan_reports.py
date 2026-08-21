@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session, joinedload
 from ...config import settings
 from ...models import Offer, Quote, User
 from ...models.buy_plan import BuyPlan, BuyPlanStatus
+from ...utils.timezones import as_utc
 
 # ── Intelligence: Favoritism Detection ─────────────────────────────
 
@@ -133,17 +134,11 @@ def generate_case_report(plan: BuyPlan, db: Session) -> str:
         vendor_summary.append(f"  - {vendor}: {len(vlines)} lines, {v_qty:,} pcs, ${v_cost:,.2f}")
 
     # ── Timeline
-    def _tz_aware(dt):
-        """Ensure datetime is UTC-aware for safe subtraction."""
-        if dt and dt.tzinfo is None:
-            return dt.replace(tzinfo=UTC)
-        return dt
-
     timeline = []
-    created = _tz_aware(plan.created_at)
-    submitted = _tz_aware(plan.submitted_at)
-    approved = _tz_aware(plan.approved_at)
-    completed = _tz_aware(plan.completed_at)
+    created = as_utc(plan.created_at)
+    submitted = as_utc(plan.submitted_at)
+    approved = as_utc(plan.approved_at)
+    completed = as_utc(plan.completed_at)
 
     if created and submitted:
         days = (submitted - created).days
@@ -163,7 +158,7 @@ def generate_case_report(plan: BuyPlan, db: Session) -> str:
     po_times = []
     for line in lines:
         if line.po_confirmed_at and approved:
-            delta = (_tz_aware(line.po_confirmed_at) - approved).total_seconds() / 3600
+            delta = (as_utc(line.po_confirmed_at) - approved).total_seconds() / 3600
             po_times.append(delta)
     avg_po_hrs = round(sum(po_times) / len(po_times), 1) if po_times else None
 

@@ -26,23 +26,23 @@ os.environ["TESTING"] = "1"
 
 class TestAsUtc:
     def test_none_returns_none(self):
-        from app.jobs.worker_liveness_jobs import _as_utc
+        from app.utils.timezones import as_utc
 
-        assert _as_utc(None) is None
+        assert as_utc(None) is None
 
     def test_naive_datetime_gets_utc(self):
-        from app.jobs.worker_liveness_jobs import _as_utc
+        from app.utils.timezones import as_utc
 
         naive = datetime(2025, 6, 1, 12, 0, 0)
-        result = _as_utc(naive)
+        result = as_utc(naive)
         assert result.tzinfo == UTC
         assert result.hour == 12
 
     def test_aware_datetime_returned_as_is(self):
-        from app.jobs.worker_liveness_jobs import _as_utc
+        from app.utils.timezones import as_utc
 
         aware = datetime(2025, 6, 1, 12, 0, 0, tzinfo=UTC)
-        result = _as_utc(aware)
+        result = as_utc(aware)
         assert result is aware
 
 

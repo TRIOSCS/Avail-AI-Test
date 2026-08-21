@@ -3,15 +3,15 @@
    app/services/connector_health.py get_health_dashboard().
    Called by: app/routers/htmx/settings.py admin_api_health route (lazy-loaded by the
    settings System tab, settings/system.html).
-   Depends on: Tailwind CSS, timeago filter (app/template_env.py).
+   Depends on: Tailwind CSS, timeago filter (app/template_env.py),
+   shared/_macros.html status_badge (its default map already carries the
+   healthy/degraded/down colors; unknown falls through to the gray default).
 #}
+{% from "htmx/partials/shared/_macros.html" import status_badge %}
 <div class="bg-white rounded-lg shadow border border-gray-200 p-4">
-  {% set overall_colors = {'healthy': 'bg-emerald-50 text-emerald-600 border-emerald-200', 'degraded': 'bg-amber-50 text-amber-600 border-amber-200', 'down': 'bg-rose-50 text-rose-500 border-rose-200'} %}
   <div class="flex items-center justify-between mb-3">
     <h3 class="text-sm font-semibold text-gray-900">Connector Health</h3>
-    <span class="badge {{ overall_colors.get(health.get('overall_status', ''), 'bg-gray-50 text-gray-600 border-gray-200') }}">
-      {{ health.get('overall_status', 'unknown')|title }}
-    </span>
+    {{ status_badge(health.get('overall_status', 'unknown')) }}
   </div>
 
   {% if health.get('connectors') %}

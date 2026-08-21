@@ -38,30 +38,12 @@
 
 <div class="{{ 'h-[calc(100vh-116px)]' if pipeline else 'h-[calc(100vh-90px)]' }} flex"
      x-data="{
-       splitRatio: parseFloat(localStorage.getItem('parts-split') || '0.50'),
-       dragging: false,
+       ...window.ratioSplitMixin('parts-split', 0.50, 0.2, 0.8),
        selectedPartId: null,
        activeTab: 'offers',
        clearPartIfGone() {
          if (this.selectedPartId && !document.querySelector('[data-part-id=\'' + this.selectedPartId + '\']')) {
            this.selectedPartId = null;
-         }
-       },
-       startDrag(e) {
-         this.dragging = true;
-         e.preventDefault();
-       },
-       onDrag(e) {
-         if (!this.dragging) return;
-         const container = this.$refs.container;
-         const rect = container.getBoundingClientRect();
-         const ratio = (e.clientX - rect.left) / rect.width;
-         this.splitRatio = Math.max(0.2, Math.min(0.8, ratio));
-       },
-       stopDrag() {
-         if (this.dragging) {
-           this.dragging = false;
-           localStorage.setItem('parts-split', this.splitRatio.toFixed(3));
          }
        },
        selectPart(id) {

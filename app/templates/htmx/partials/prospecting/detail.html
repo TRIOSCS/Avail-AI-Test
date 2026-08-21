@@ -26,13 +26,7 @@
           {% if prospect.region %}<span>{{ prospect.region }}</span>{% endif %}
         </div>
         <div class="mt-2 flex items-center gap-2">
-          {% set _prospect_status_map = {
-            'suggested': 'bg-brand-100 text-brand-600 border-brand-200',
-            'claimed': 'bg-emerald-50 text-emerald-700 border-emerald-200',
-            'converted': 'bg-violet-100 text-violet-700 border-violet-200',
-            'dismissed': 'bg-gray-100 text-gray-600 border-gray-200'
-          } %}
-          {{ status_badge(prospect.status, status_map=_prospect_status_map) }}
+          {{ score.prospect_status_badge(prospect.status) }}
           {% if prospect.claimed_by_user %}
           <span class="text-sm text-gray-600">Claimed by {{ prospect.claimed_by_user.name }}</span>
           {% endif %}
@@ -130,7 +124,7 @@
     {# Fit score. Un-scored (null/0) prospects show a neutral "Not scored yet" placeholder
        instead of a red 0% bar that would misread as a genuine bad-fit account. #}
     <div class="card p-6">
-      <div class="text-sm font-medium text-gray-600 mb-2">{{ score_def('Fit Score', 'ICP fit (0-100): industry match, company size, procurement staff, NAICS, geography, and broker usage.') }} <span class="text-gray-300">· ICP match</span></div>
+      <div class="text-sm font-medium text-gray-600 mb-2">{{ score_def('Fit Score', score.FIT_TOOLTIP) }} <span class="text-gray-300">· ICP match</span></div>
       {% set fit = prospect.fit_score or 0 %}
       {% if prospect.fit_score %}
       <div class="text-3xl font-bold {{ score.score_text_color(fit) }}">{{ score_breakdown(fit ~ '%', prospect_fit_breakdown(prospect), title='Fit factors', align='left') }}</div>
@@ -148,7 +142,7 @@
 
     {# Readiness score (same un-scored placeholder treatment as Fit). #}
     <div class="card p-6">
-      <div class="text-sm font-medium text-gray-600 mb-2">{{ score_def('Readiness Score', 'Buy-now readiness (0-100): buying intent, company events, hiring, new procurement hires, and contact quality.') }} <span class="text-gray-300">· near-term timing</span></div>
+      <div class="text-sm font-medium text-gray-600 mb-2">{{ score_def('Readiness Score', score.READINESS_TOOLTIP) }} <span class="text-gray-300">· near-term timing</span></div>
       {% set ready = prospect.readiness_score or 0 %}
       {% if prospect.readiness_score %}
       <div class="text-3xl font-bold {{ score.score_text_color(ready) }}">{{ score_breakdown(ready ~ '%', prospect_readiness_breakdown(prospect), title='Readiness factors', align='left') }}</div>

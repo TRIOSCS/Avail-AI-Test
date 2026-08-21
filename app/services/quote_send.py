@@ -11,22 +11,26 @@ Graph (/me/sendMail), captures the sent message's Graph ids for reply threading,
 quote + requisition status, and writes an OUTBOUND email ActivityLog. In TESTING mode the
 real Graph POST and Sent-Items lookup are skipped but the quote is still marked sent.
 
+Also home to the quote expiry-anchor rule (quote_expiry_anchor / quote_valid_until /
+validity_days_from_valid_until) shared with the HTMX quote editor.
+
 Depends on: app.utils.graph_client.GraphClient, app.email_service._find_sent_message,
 app.services.status_machine.require_valid_transition, app.services.activity_service.
-log_email_activity, app.models (Quote, Requisition, CustomerSite, SiteContact).
+log_email_activity, app.services.vendor_reachability.dnc_contact_for_email,
+app.models (Quote, Requisition, CustomerSite).
 """
 
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from loguru import logger
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..constants import QuoteStatus, RequisitionStatus
-from ..models import CustomerSite, Quote, Requisition, SiteContact, User
+from ..models import CustomerSite, Quote, Requisition, User
 from ..utils.timezones import DEFAULT_DISPLAY_TZ, format_localdate
 from .status_machine import require_valid_transition
+from .vendor_reachability import dnc_contact_for_email
 
 
 @dataclass(frozen=True)
@@ -60,20 +64,41 @@ def _recipient_is_dnc(db: Session, site: CustomerSite | None, recipient: str) ->
     """True if the site itself is DNC or any SiteContact for that site with a matching
     (case-insensitive) email is flagged do_not_contact.
 
-    Mirrors the vendor-reply idiom in htmx_views.send_reply_htmx.
+    Contact-level rule lives in vendor_reachability.dnc_contact_for_email (shared with
+    quote_preflight). Mirrors the vendor-reply idiom in htmx_views.send_reply_htmx.
     """
     if site is not None and site.do_not_contact:
         return True
-    contact = (
-        db.query(SiteContact)
-        .filter(
-            SiteContact.customer_site_id == (site.id if site else None),
-            func.lower(SiteContact.email) == recipient.lower(),
-            SiteContact.do_not_contact.is_(True),
-        )
-        .first()
-    )
-    return contact is not None
+    return dnc_contact_for_email(db, site.id if site else None, recipient) is not None
+
+
+def quote_expiry_anchor(quote: Quote) -> date:
+    """The date validity_days counts from — the SINGLE place this anchor is defined.
+
+    The emailed expiry (_build_quote_email_html below) anchors to the send date if the
+    quote was sent, else "now" (UTC). Both directions (deriving valid-until from
+    validity_days, and validity_days back from a chosen valid-until date) must use this
+    identical anchor or the editor default, the preview, and the real outbound email
+    would drift apart, so it lives here once. UTC (not date.today()) matches the send-
+    side anchor.
+    """
+    return quote.sent_at.date() if quote.sent_at else datetime.now(UTC).date()
+
+
+def quote_valid_until(quote: Quote) -> date:
+    """Return the quote's "valid until" calendar date, derived from validity_days.
+
+    The Quote model has NO valid_until column — validity_days is the single source of
+    truth (also read by _build_quote_email_html, crm/_helpers.py, quote_report.html).
+    """
+    valid_days: int = quote.validity_days or 7  # legacy Column read is untyped
+    return quote_expiry_anchor(quote) + timedelta(days=valid_days)
+
+
+def validity_days_from_valid_until(quote: Quote, target: date) -> int:
+    """Convert a chosen "valid until" date back into validity_days (inverse of
+    quote_valid_until, same anchor)."""
+    return (target - quote_expiry_anchor(quote)).days
 
 
 async def send_quote_email(
@@ -119,17 +144,15 @@ async def send_quote_email(
     graph_message_id = None
     graph_conversation_id = None
     if not testing:
-        from ..utils.graph_client import GraphClient
+        from ..utils.graph_client import GraphClient, build_sendmail_payload
 
         gc = GraphClient(token)
-        payload = {
-            "message": {
-                "subject": subject,
-                "body": {"contentType": "HTML", "content": html},
-                "toRecipients": [{"emailAddress": {"address": to_email, "name": to_name}}],
-            },
-            "saveToSentItems": "true",
-        }
+        payload = build_sendmail_payload(
+            subject,
+            html,
+            [{"address": to_email, "name": to_name}],
+            save_to_sent="true",
+        )
         result = await gc.post_json("/me/sendMail", payload, raise_on_error=False)
         if "error" in result:
             raise QuoteSendError(f"Failed to send quote email: {result.get('detail', '')}")

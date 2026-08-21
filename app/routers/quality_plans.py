@@ -200,15 +200,19 @@ def _fru_rows(db: Session, qp: QualityPlan) -> list[dict]:
     (model / carrier / series context). A FRU with no crosswalk match still appears
     (empty links) so the user sees the pin and can unpin it.
     """
-    rows: list[dict] = []
-    for pin in qp.fru_lookups:
-        links = (
-            db.execute(select(FruLink).where(FruLink.fru_norm == pin.fru_norm).order_by(FruLink.id).limit(50))
-            .scalars()
-            .all()
-        )
-        rows.append({"pin": pin, "links": links})
-    return rows
+    pins = list(qp.fru_lookups)
+    if not pins:
+        return []
+    # One query for every pinned norm (was one per pin), grouped in Python; each
+    # pin keeps at most 50 links, ordered by FruLink.id, as before.
+    links_by_norm: dict[str, list[FruLink]] = {}
+    for link in (
+        db.execute(select(FruLink).where(FruLink.fru_norm.in_({p.fru_norm for p in pins})).order_by(FruLink.id))
+        .scalars()
+        .all()
+    ):
+        links_by_norm.setdefault(link.fru_norm, []).append(link)
+    return [{"pin": pin, "links": links_by_norm.get(pin.fru_norm, [])[:50]} for pin in pins]
 
 
 def _require_qp_access(db: Session, user, qp: QualityPlan) -> None:

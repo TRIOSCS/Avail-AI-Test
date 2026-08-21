@@ -12,6 +12,50 @@
                 — without it the inline banner below was unreachable and the user only saw
                 a generic toast.
    CSRF: htmx_app.js injects x-csrftoken on every POST automatically. #}
+
+{# Per-user approval-right checkbox cell. The checkbox POSTs its new state on
+   change; can_approve always carries an explicit value (the hidden 'false' field)
+   so an unchecked box still submits a revoke, not an absent field. Every POST
+   keeps the hx-target-4xx wiring (SET-03) so validation errors re-render inline. #}
+{% macro approver_toggle(post_url, checked) %}
+              <label class="inline-flex items-center cursor-pointer">
+                <input type="hidden" name="can_approve" value="false">
+                <input type="checkbox" name="can_approve" value="true"
+                       class="h-4 w-4 rounded border-gray-300 text-accent-600 focus:ring-accent-500"
+                       {{ 'checked' if checked else '' }}
+                       hx-post="{{ post_url }}"
+                       hx-target="#users-content" hx-target-4xx="#users-content" hx-swap="outerHTML"
+                       hx-trigger="change">
+                <span class="ml-2 text-xs text-gray-600">{{ 'Yes' if checked else 'No' }}</span>
+              </label>
+{% endmacro %}
+
+{# Approval right + optional dollar limit (prepayments / purchase orders). Wrapped
+   in a form so both fields submit together on any change; same hidden-false revoke
+   idiom and hx-target-4xx wiring as approver_toggle. #}
+{% macro approver_limit_form(post_url, checked, limit) %}
+              <form hx-post="{{ post_url }}"
+                    hx-target="#users-content" hx-target-4xx="#users-content" hx-swap="outerHTML"
+                    hx-trigger="change">
+                <input type="hidden" name="can_approve" value="false">
+                <div class="space-y-1">
+                  <label class="inline-flex items-center cursor-pointer">
+                    <input type="checkbox" name="can_approve" value="true"
+                           class="h-4 w-4 rounded border-gray-300 text-accent-600 focus:ring-accent-500"
+                           {{ 'checked' if checked else '' }}>
+                    <span class="ml-2 text-xs text-gray-600">{{ 'Yes' if checked else 'No' }}</span>
+                  </label>
+                  <div class="flex items-center gap-1">
+                    <span class="text-xs text-gray-600">Limit $</span>
+                    <input type="number" name="limit" min="0.01" step="0.01"
+                           placeholder="unlimited"
+                           value="{{ limit if limit is not none else '' }}"
+                           class="input input-sm w-24 text-xs">
+                  </div>
+                </div>
+              </form>
+{% endmacro %}
+
 <div class="space-y-4" id="users-content">
 
   {% if error %}
@@ -125,98 +169,26 @@
               </select>
             </td>
             <td class="table-cell">
-              {# Per-user buy-plan approval right. The checkbox POSTs its new state on
-                 change; can_approve always carries an explicit value (the hidden 'false'
-                 field) so an unchecked box still submits a revoke, not an absent field. #}
-              <label class="inline-flex items-center cursor-pointer">
-                <input type="hidden" name="can_approve" value="false">
-                <input type="checkbox" name="can_approve" value="true"
-                       class="h-4 w-4 rounded border-gray-300 text-accent-600 focus:ring-accent-500"
-                       {{ 'checked' if row.can_approve_buy_plans else '' }}
-                       hx-post="/api/admin/users/{{ row.user.id }}/buyplan-approver"
-                       hx-target="#users-content" hx-target-4xx="#users-content" hx-swap="outerHTML"
-                       hx-trigger="change">
-                <span class="ml-2 text-xs text-gray-600">{{ 'Yes' if row.can_approve_buy_plans else 'No' }}</span>
-              </label>
+              {# Per-user buy-plan approval right. #}
+              {{ approver_toggle('/api/admin/users/' ~ row.user.id ~ '/buyplan-approver', row.can_approve_buy_plans) }}
             </td>
             <td class="table-cell">
-              {# Per-user prepayment approval right + optional dollar limit.
-                 Wrapped in a form so both fields submit together on any change.
-                 Hidden 'false' field ensures an unchecked box still submits a revoke. #}
-              <form hx-post="/api/admin/users/{{ row.user.id }}/prepayment-approver"
-                    hx-target="#users-content" hx-target-4xx="#users-content" hx-swap="outerHTML"
-                    hx-trigger="change">
-                <input type="hidden" name="can_approve" value="false">
-                <div class="space-y-1">
-                  <label class="inline-flex items-center cursor-pointer">
-                    <input type="checkbox" name="can_approve" value="true"
-                           class="h-4 w-4 rounded border-gray-300 text-accent-600 focus:ring-accent-500"
-                           {{ 'checked' if row.can_approve_prepayments else '' }}>
-                    <span class="ml-2 text-xs text-gray-600">{{ 'Yes' if row.can_approve_prepayments else 'No' }}</span>
-                  </label>
-                  <div class="flex items-center gap-1">
-                    <span class="text-xs text-gray-600">Limit $</span>
-                    <input type="number" name="limit" min="0.01" step="0.01"
-                           placeholder="unlimited"
-                           value="{{ row.prepayment_approval_limit if row.prepayment_approval_limit is not none else '' }}"
-                           class="input input-sm w-24 text-xs">
-                  </div>
-                </div>
-              </form>
+              {# Per-user prepayment approval right + optional dollar limit. #}
+              {{ approver_limit_form('/api/admin/users/' ~ row.user.id ~ '/prepayment-approver', row.can_approve_prepayments, row.prepayment_approval_limit) }}
             </td>
             <td class="table-cell">
-              {# Per-user QP Sales-Order approval right (routes the Sales section gate).
-                 Hidden 'false' field ensures an unchecked box still submits a revoke. #}
-              <label class="inline-flex items-center cursor-pointer">
-                <input type="hidden" name="can_approve" value="false">
-                <input type="checkbox" name="can_approve" value="true"
-                       class="h-4 w-4 rounded border-gray-300 text-accent-600 focus:ring-accent-500"
-                       {{ 'checked' if row.can_approve_qp_sales else '' }}
-                       hx-post="/api/admin/users/{{ row.user.id }}/sales-order-approver"
-                       hx-target="#users-content" hx-target-4xx="#users-content" hx-swap="outerHTML"
-                       hx-trigger="change">
-                <span class="ml-2 text-xs text-gray-600">{{ 'Yes' if row.can_approve_qp_sales else 'No' }}</span>
-              </label>
+              {# Per-user QP Sales-Order approval right (routes the Sales section gate). #}
+              {{ approver_toggle('/api/admin/users/' ~ row.user.id ~ '/sales-order-approver', row.can_approve_qp_sales) }}
             </td>
             <td class="table-cell">
               {# Per-user QP Purchasing-section approval right (routes the qp_purchasing
-                 section gate). Hidden 'false' field ensures an unchecked box still submits
-                 a revoke. Route stays /po-approver (SP-3 repointed the column only). #}
-              <label class="inline-flex items-center cursor-pointer">
-                <input type="hidden" name="can_approve" value="false">
-                <input type="checkbox" name="can_approve" value="true"
-                       class="h-4 w-4 rounded border-gray-300 text-accent-600 focus:ring-accent-500"
-                       {{ 'checked' if row.can_approve_qp_purchasing else '' }}
-                       hx-post="/api/admin/users/{{ row.user.id }}/po-approver"
-                       hx-target="#users-content" hx-target-4xx="#users-content" hx-swap="outerHTML"
-                       hx-trigger="change">
-                <span class="ml-2 text-xs text-gray-600">{{ 'Yes' if row.can_approve_qp_purchasing else 'No' }}</span>
-              </label>
+                 section gate). Route stays /po-approver (SP-3 repointed the column only). #}
+              {{ approver_toggle('/api/admin/users/' ~ row.user.id ~ '/po-approver', row.can_approve_qp_purchasing) }}
             </td>
             <td class="table-cell">
               {# Per-user deal-level PO approval right + optional dollar limit (mirrors the
-                 prepayment gate). Wrapped in a form so both fields submit together; the
-                 hidden 'false' field ensures an unchecked box still submits a revoke. #}
-              <form hx-post="/api/admin/users/{{ row.user.id }}/purchase-order-approver"
-                    hx-target="#users-content" hx-target-4xx="#users-content" hx-swap="outerHTML"
-                    hx-trigger="change">
-                <input type="hidden" name="can_approve" value="false">
-                <div class="space-y-1">
-                  <label class="inline-flex items-center cursor-pointer">
-                    <input type="checkbox" name="can_approve" value="true"
-                           class="h-4 w-4 rounded border-gray-300 text-accent-600 focus:ring-accent-500"
-                           {{ 'checked' if row.can_approve_purchase_orders else '' }}>
-                    <span class="ml-2 text-xs text-gray-600">{{ 'Yes' if row.can_approve_purchase_orders else 'No' }}</span>
-                  </label>
-                  <div class="flex items-center gap-1">
-                    <span class="text-xs text-gray-600">Limit $</span>
-                    <input type="number" name="limit" min="0.01" step="0.01"
-                           placeholder="unlimited"
-                           value="{{ row.purchase_order_approval_limit if row.purchase_order_approval_limit is not none else '' }}"
-                           class="input input-sm w-24 text-xs">
-                  </div>
-                </div>
-              </form>
+                 prepayment gate). #}
+              {{ approver_limit_form('/api/admin/users/' ~ row.user.id ~ '/purchase-order-approver', row.can_approve_purchase_orders, row.purchase_order_approval_limit) }}
             </td>
             <td class="table-cell">
               {% if row.status == 'Active' %}

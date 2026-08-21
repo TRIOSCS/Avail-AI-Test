@@ -50,7 +50,6 @@ scheduler = AsyncIOScheduler(
 # Backward-compatible re-exports for test files that import token functions
 # from app.scheduler. Production code should import from app.utils.token_manager.
 from .utils.token_manager import (
-    _utc,  # noqa: F401
     get_valid_token,  # noqa: F401
     refresh_user_token,  # noqa: F401
 )

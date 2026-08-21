@@ -1,13 +1,14 @@
 """Auth & user models."""
 
 from datetime import UTC, datetime
+from typing import cast
 
 from sqlalchemy import JSON, Boolean, Column, ForeignKey, Integer, Numeric, String, Text, text
 from sqlalchemy.orm import relationship, validates
 
 from ..database import UTCDateTime
 from ..utils.encrypted_type import EncryptedText
-from .base import Base
+from .base import Base, warn_enum_member
 
 
 class User(Base):
@@ -121,6 +122,11 @@ class User(Base):
     # marks the parent (manager) row; foreign_keys disambiguates the two users.id self-FKs.
     manager = relationship("User", remote_side=[id], foreign_keys=[reports_to_id])
 
+    @property
+    def display_name(self) -> str:
+        """Presentation name: full name, falling back to the email local part."""
+        return cast("str", self.name or self.email.split("@")[0])
+
     @validates("email")
     def _validate_email(self, _key, value):
         if value and "@" not in value:
@@ -131,12 +137,7 @@ class User(Base):
     def _validate_role(self, _key, value):
         from ..constants import UserRole
 
-        valid = {e.value for e in UserRole}
-        if value and value not in valid:
-            from loguru import logger
-
-            logger.warning("Unexpected role: {}. Expected one of {}", value, valid)
-        return value
+        return warn_enum_member(UserRole, value, "role")
 
 
 class UserAdminAudit(Base):

@@ -18,14 +18,13 @@ from sqlalchemy import (
     Integer,
     Numeric,
     String,
-    Text,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import relationship, validates
 
 from ..database import UTCDateTime
-from .base import Base
+from .base import AttachmentColumnsMixin, Base, validate_custom_fields_dict
 
 
 class VendorCard(Base):
@@ -166,18 +165,7 @@ class VendorCard(Base):
     @validates("custom_fields")
     def _validate_custom_fields(self, _key, value):
         """Cap: max 30 keys, key max 60 chars, value max 500 chars."""
-        if value is None:
-            return {}
-        if not isinstance(value, dict):
-            raise ValueError("custom_fields must be a dict")
-        if len(value) > 30:
-            raise ValueError("custom_fields: max 30 keys")
-        for k, v in value.items():
-            if len(str(k)) > 60:
-                raise ValueError(f"custom_fields key too long: {k!r}")
-            if len(str(v)) > 500:
-                raise ValueError(f"custom_fields value too long for key {k!r}")
-        return value
+        return validate_custom_fields_dict(value)
 
     __table_args__ = (
         Index("ix_vendor_cards_created_at", "created_at"),
@@ -314,13 +302,9 @@ class VendorReview(Base):
     )
 
 
-class VendorCardAttachment(Base):
+class VendorCardAttachment(AttachmentColumnsMixin, Base):
     """File attachment on a vendor card (stored in OneDrive or company SharePoint
-    library).
-
-    Mirrors CompanyAttachment shape exactly.
-    library_drive_id NULL  → OneDrive fallback row (user token)
-    library_drive_id set   → company SharePoint library row (app token)
+    library — shared payload columns on AttachmentColumnsMixin).
 
     Called by: app/routers/attachments_extra.py, app/services/attachment_service.py
     Depends on: VendorCard, User
@@ -329,18 +313,8 @@ class VendorCardAttachment(Base):
     __tablename__ = "vendor_card_attachments"
     id = Column(Integer, primary_key=True)
     vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id", ondelete="CASCADE"), nullable=False)
-    file_name = Column(String(500), nullable=False)
-    library_item_id = Column(String(500))
-    library_drive_id = Column(String(200))
-    library_web_url = Column(Text)
-    thumbnail_url = Column(Text)
-    content_type = Column(String(100))
-    size_bytes = Column(Integer)
-    uploaded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     vendor_card = relationship("VendorCard", back_populates="attachments")
-    uploaded_by = relationship("User", foreign_keys=[uploaded_by_id])
 
     __table_args__ = (
         Index("ix_vendor_card_attachments_card", "vendor_card_id"),
@@ -348,13 +322,9 @@ class VendorCardAttachment(Base):
     )
 
 
-class VendorContactAttachment(Base):
+class VendorContactAttachment(AttachmentColumnsMixin, Base):
     """File attachment on a vendor contact (stored in OneDrive or company SharePoint
-    library).
-
-    Mirrors SiteContactAttachment shape exactly.
-    library_drive_id NULL  → OneDrive fallback row (user token)
-    library_drive_id set   → company SharePoint library row (app token)
+    library — shared payload columns on AttachmentColumnsMixin).
 
     Called by: app/routers/attachments_extra.py, app/services/attachment_service.py
     Depends on: VendorContact, User
@@ -363,18 +333,8 @@ class VendorContactAttachment(Base):
     __tablename__ = "vendor_contact_attachments"
     id = Column(Integer, primary_key=True)
     vendor_contact_id = Column(Integer, ForeignKey("vendor_contacts.id", ondelete="CASCADE"), nullable=False)
-    file_name = Column(String(500), nullable=False)
-    library_item_id = Column(String(500))
-    library_drive_id = Column(String(200))
-    library_web_url = Column(Text)
-    thumbnail_url = Column(Text)
-    content_type = Column(String(100))
-    size_bytes = Column(Integer)
-    uploaded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     vendor_contact = relationship("VendorContact", back_populates="attachments")
-    uploaded_by = relationship("User", foreign_keys=[uploaded_by_id])
 
     __table_args__ = (
         Index("ix_vendor_contact_attachments_contact", "vendor_contact_id"),

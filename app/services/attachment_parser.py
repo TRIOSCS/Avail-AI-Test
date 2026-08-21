@@ -14,6 +14,11 @@ import re
 from datetime import UTC, datetime
 
 from loguru import logger
+from sqlalchemy.orm import Session
+
+from ..models import Requirement, Sighting, VendorResponse
+from ..services.vendor_unavailability import apply_to_fresh_sightings
+from ..vendor_utils import normalize_vendor_name
 
 # Standard column header patterns (deterministic, no AI needed)
 HEADER_PATTERNS = {
@@ -381,3 +386,121 @@ async def parse_attachment(
 
     logger.info(f"Parsed {len(results)} rows from {filename} ({len(data_rows)} total, {len(mapping)} mapped columns)")
     return results
+
+
+def create_sightings_from_rows(
+    db: Session,
+    vr: VendorResponse,
+    rows: list[dict],
+) -> int:
+    """Create Sighting records from parsed attachment rows, matching to Requirements.
+
+    Pairs with parse_attachment above: fuzzy-MPN match each row to the response's
+    requisition Requirements, dedup-refresh re-sent stock lists (O3 release — a
+    re-sent row is fresh HUMAN_DIRECT evidence), then re-apply durable vendor+part
+    unavailability knowledge per requirement. Flushes (caller commits). Moved here
+    from routers/sources.py, which re-imports it for its call site.
+    """
+    from ..utils.normalization import (
+        detect_currency,
+        fuzzy_mpn_match,
+        normalize_condition,
+        normalize_date_code,
+        normalize_lead_time,
+        normalize_mpn,
+        normalize_packaging,
+        normalize_price,
+        normalize_quantity,
+    )
+
+    reqs = db.query(Requirement).filter_by(requisition_id=vr.requisition_id).all()
+    if not reqs:
+        return 0
+
+    req_map: dict[str, Requirement] = {}
+    for req in reqs:
+        norm = (req.primary_mpn or "").upper().strip()
+        if norm:
+            req_map[norm] = req
+
+    created = 0
+    created_by_req: dict[int, list[Sighting]] = {}
+    for row in rows:
+        mpn = (row.get("mpn") or "").upper().strip()
+        if not mpn:
+            continue
+
+        matched_req = req_map.get(mpn)
+        if not matched_req:
+            for req_mpn, req in req_map.items():
+                if fuzzy_mpn_match(mpn, req_mpn):
+                    matched_req = req
+                    break
+
+        if not matched_req:
+            continue
+
+        existing = (
+            db.query(Sighting)
+            .filter_by(
+                requirement_id=matched_req.id,
+                vendor_name=vr.vendor_name or "",
+                mpn_matched=mpn,
+                source_type="email_attachment",
+            )
+            .first()
+        )
+        if existing:
+            # A RE-SENT vendor stock list is fresh HUMAN_DIRECT evidence: refresh
+            # the deduped row's qty/price from the new parse and include it in the
+            # apply batch so the override matrix evaluates it (O3 release). A bare
+            # `continue` here silently defeated the documented vendor-email release.
+            new_qty = normalize_quantity(row.get("qty"))
+            if new_qty is not None:
+                existing.qty_available = new_qty
+            new_price = normalize_price(row.get("unit_price"))
+            if new_price is not None:
+                existing.unit_price = new_price
+            created_by_req.setdefault(matched_req.id, []).append(existing)
+            continue
+
+        # Resolve material card
+        from ..search_service import resolve_material_card
+
+        mat_card = resolve_material_card(mpn, db)
+
+        sighting = Sighting(
+            requirement_id=matched_req.id,
+            material_card_id=mat_card.id if mat_card else None,
+            vendor_name=vr.vendor_name or "",
+            vendor_name_normalized=normalize_vendor_name(vr.vendor_name or ""),
+            vendor_email=vr.vendor_email,
+            mpn_matched=normalize_mpn(mpn) or mpn,
+            manufacturer=row.get("manufacturer", ""),
+            qty_available=normalize_quantity(row.get("qty")),
+            unit_price=normalize_price(row.get("unit_price")),
+            currency=detect_currency(row.get("currency") or row.get("unit_price")),
+            moq=normalize_quantity(row.get("moq")),
+            source_type="email_attachment",
+            condition=normalize_condition(row.get("condition")),
+            date_code=normalize_date_code(row.get("date_code")),
+            packaging=normalize_packaging(row.get("packaging")),
+            lead_time_days=normalize_lead_time(row.get("lead_time")),
+            lead_time=row.get("lead_time"),
+            confidence=0.7,
+            raw_data=row,
+        )
+        db.add(sighting)
+        created_by_req.setdefault(matched_req.id, []).append(sighting)
+        created += 1
+
+    # Re-apply durable vendor+part unavailability knowledge per requirement
+    # (created rows AND dedup-refreshed re-sent rows). This is the HUMAN_DIRECT
+    # path: a buyer-routed attachment row with qty>0 triggers override O3
+    # (record release) instead of stamping.
+    req_by_id = {req.id: req for req in reqs}
+    for req_id, fresh_rows in created_by_req.items():
+        apply_to_fresh_sightings(db, req_by_id[req_id], fresh_rows)
+
+    db.flush()
+    return created

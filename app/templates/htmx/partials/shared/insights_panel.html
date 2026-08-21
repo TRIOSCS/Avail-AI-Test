@@ -6,6 +6,7 @@
    Called by: requisition/vendor/company detail pages + the dashboard via hx-get.
    Depends on: HTMX, Tailwind CSS with brand palette.
 #}
+{% from "htmx/partials/shared/_macros.html" import spinner -%}
 <div id="insights-panel" class="bg-white border border-brand-200 rounded-lg overflow-hidden">
   <div class="px-4 py-3 bg-gradient-to-r from-brand-50 to-white border-b border-brand-100 flex items-center justify-between">
     <div class="flex items-center gap-2">
@@ -19,10 +20,7 @@
             hx-swap="outerHTML"
             hx-indicator="#insights-spinner"
             class="px-2 py-1 text-xs font-medium text-brand-500 border border-brand-200 rounded hover:bg-brand-50 flex items-center gap-1">
-      <svg id="insights-spinner" class="htmx-indicator h-3 w-3 animate-spin" fill="none" viewBox="0 0 24 24">
-        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
-        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-      </svg>
+      {{ spinner('htmx-indicator h-3 w-3 animate-spin', attrs='id="insights-spinner"') }}
       Refresh
     </button>
   </div>

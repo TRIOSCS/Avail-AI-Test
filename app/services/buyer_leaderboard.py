@@ -1,7 +1,8 @@
 """Buyer Leaderboard — Multiplier scoring with 7-day grace period and stock list dedup.
 
 Called by: scheduler.py (monthly), routers/performance.py (on-demand)
-Depends on: models, database
+Depends on: models, database, scoring_helpers (month_range, offer-tier loaders, shared
+            buyer point values)
 """
 
 from datetime import UTC, date, datetime, timedelta
@@ -9,38 +10,38 @@ from datetime import UTC, date, datetime, timedelta
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
 
-from ..constants import BuyPlanStatus, UserRole
+from ..constants import UserRole
 from ..models import (
     BuyerLeaderboardSnapshot,
-    BuyPlan,
-    BuyPlanLine,
     Offer,
-    Quote,
     StockListHash,
     User,
 )
+from .scoring_helpers import (
+    GRACE_DAYS,
+    PTS_OFFER_BASE,
+    PTS_OFFER_BUYPLAN,
+    PTS_OFFER_PO,
+    PTS_OFFER_QUOTED,
+    PTS_STOCK_LIST,
+    load_buyplan_offer_ids,
+    load_quoted_offer_ids,
+    month_range,
+)
 
-# Buyer point multipliers
-PTS_LOGGED = 1
-PTS_QUOTED = 3
-PTS_BUYPLAN = 5
-PTS_PO_CONFIRMED = 8
-PTS_STOCK_LIST = 2
-
-GRACE_DAYS = 7
+# Buyer point multipliers — aliases over the ONE shared definition in scoring_helpers
+# (also used by multiplier_score_service), kept under this module's historical names.
+PTS_LOGGED = PTS_OFFER_BASE
+PTS_QUOTED = PTS_OFFER_QUOTED
+PTS_BUYPLAN = PTS_OFFER_BUYPLAN
+PTS_PO_CONFIRMED = PTS_OFFER_PO
 
 
 def compute_buyer_leaderboard(db: Session, month: date) -> dict:
     """Compute buyer leaderboard for a given month."""
     # Normalize to first of month
     month_start = month.replace(day=1)
-    if month_start.month == 12:
-        month_end = month_start.replace(year=month_start.year + 1, month=1)
-    else:
-        month_end = month_start.replace(month=month_start.month + 1)
-
-    month_start_dt = datetime(month_start.year, month_start.month, month_start.day, tzinfo=UTC)
-    month_end_dt = datetime(month_end.year, month_end.month, month_end.day, tzinfo=UTC)
+    month_start_dt, month_end_dt = month_range(month)
 
     # Grace period: last 7 days of previous month
     grace_start_dt = month_start_dt - timedelta(days=GRACE_DAYS)
@@ -48,27 +49,10 @@ def compute_buyer_leaderboard(db: Session, month: date) -> dict:
     # Get all buyers
     buyers = db.query(User).filter(User.role.in_([UserRole.BUYER, UserRole.TRADER])).all()
 
-    # Collect all offer_ids that appear in quotes and buy plans (for status checks)
-    quoted_offer_ids = set()
-    for (items,) in db.query(Quote.line_items).filter(Quote.status.in_(["sent", "won", "lost"])).limit(10000).all():
-        for item in items or []:
-            oid = item.get("offer_id")
-            if oid:
-                quoted_offer_ids.add(oid)
-
-    # Buy plans: get offer_ids from BuyPlanLine rows
-    buyplan_offer_ids = set()
-    po_confirmed_offer_ids = set()
-    for bp_status, offer_id in (
-        db.query(BuyPlan.status, BuyPlanLine.offer_id)
-        .join(BuyPlanLine, BuyPlanLine.buy_plan_id == BuyPlan.id)
-        .filter(BuyPlanLine.offer_id.isnot(None))
-        .limit(10000)
-        .all()
-    ):
-        buyplan_offer_ids.add(offer_id)
-        if bp_status in (BuyPlanStatus.COMPLETED.value,):
-            po_confirmed_offer_ids.add(offer_id)
+    # Collect all offer_ids that appear in quotes and buy plans (for status checks) —
+    # shared loaders (scoring_helpers) also used by multiplier_score_service.
+    quoted_offer_ids = load_quoted_offer_ids(db)
+    buyplan_offer_ids, po_confirmed_offer_ids = load_buyplan_offer_ids(db)
 
     # Batch-fetch all offers and stock counts to avoid N+1 per buyer
     buyer_ids = [b.id for b in buyers]

@@ -6,7 +6,7 @@
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
 {% from "htmx/partials/settings/_macros.html" import tab_button %}
-{% from "htmx/partials/shared/_macros.html" import lazy_body, page_header %}
+{% from "htmx/partials/shared/_macros.html" import lazy_body, page_header, spinner %}
 {# Initial lazy-load URL per tab. Most tabs live at /v2/partials/settings/<slug>,
    but the slug differs from the Alpine tab id for some (data_ops→data-ops,
    ops_group→ops-group) and the Tickets tab's content is the trouble-tickets
@@ -63,10 +63,7 @@
      structurally enforces the explicit hx-target guard (see shared/_macros.html). #}
   {% call lazy_body('settings-content', content_url, indicator='#settings-load-spinner') %}
     <div id="settings-load-spinner" class="htmx-indicator flex items-center justify-center py-6 sm:py-8">
-      <svg class="h-6 w-6 text-accent-400 animate-spin" viewBox="0 0 24 24" fill="none">
-        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-      </svg>
+      {{ spinner('h-6 w-6 text-accent-400 animate-spin') }}
     </div>
   {% endcall %}
 </div>

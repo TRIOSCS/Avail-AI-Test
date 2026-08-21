@@ -1,38 +1,22 @@
 {# _task_edit_form.html — Inline edit form for an existing CRM task.
+   Thin wrapper over shared/_task_widget.html task_edit_form: picks the
+   account-scoped or contact-scoped container id / classes / cancel URL.
    Receives: task (RequisitionTask), company_id (int, if account-scoped), contact (SiteContact, if contact-scoped),
              error (str|None, validation message from POST edit error branches)
    Called by: GET /v2/partials/tasks/{task_id}/edit-form, POST /v2/partials/tasks/{task_id}/edit (validation errors)
    Depends on: POST /v2/partials/tasks/{task_id}/edit
 #}
-{# Root div re-carries the id of the container this fragment outerHTML-replaces
-   (#account-tasks-{id} / #contact-tasks-{id}) — without it the Save/Cancel
-   hx-targets match nothing and htmx aborts (htmx:targetError) before any request.
-   Classes mirror the replaced container (_account_tasks.html / _contact_tasks.html). #}
-<div id="{% if task.company_id %}account-tasks-{{ task.company_id }}{% else %}contact-tasks-{{ task.site_contact_id }}{% endif %}"
-     class="{% if task.company_id %}bg-white rounded-xl shadow-card border border-brand-200 p-4{% else %}mt-2{% endif %}">
-<form hx-post="/v2/partials/tasks/{{ task.id }}/edit"
-      hx-target="#{% if task.company_id %}account-tasks-{{ task.company_id }}{% else %}contact-tasks-{{ task.site_contact_id }}{% endif %}"
-      hx-swap="outerHTML"
-      class="mt-2 space-y-2">
-  <input type="text" name="title" value="{{ task.title }}" required
-         placeholder="Task title"
-         class="w-full px-2 py-1 text-xs border border-gray-300 rounded input-focus"
-         aria-label="Task title">
-  <input type="date" name="due_at"
-         value="{{ task.due_at.strftime('%Y-%m-%d') if task.due_at else '' }}"
-         class="px-2 py-1 text-xs border border-gray-300 rounded input-focus"
-         aria-label="Due date">
-  <div id="task-edit-error-{{ task.id }}">
-    {% if error %}<p class="text-xs text-rose-600">{{ error }}</p>{% endif %}
-  </div>
-  <div class="flex gap-2">
-    <button type="submit"
-            class="btn btn-primary btn-sm">Save</button>
-    <button type="button"
-            hx-get="/v2/partials/{% if task.company_id %}customers/{{ task.company_id }}/tasks{% else %}customers/{{ company_id }}/contacts/{{ task.site_contact_id }}/tasks{% endif %}"
-            hx-target="#{% if task.company_id %}account-tasks-{{ task.company_id }}{% else %}contact-tasks-{{ task.site_contact_id }}{% endif %}"
-            hx-swap="outerHTML"
-            class="btn btn-secondary btn-sm">Cancel</button>
-  </div>
-</form>
-</div>
+{% from "htmx/partials/shared/_task_widget.html" import task_edit_form %}
+{% if task.company_id %}
+{{ task_edit_form(task,
+                  'account-tasks-' ~ task.company_id,
+                  'bg-white rounded-xl shadow-card border border-brand-200 p-4',
+                  '/v2/partials/customers/' ~ task.company_id ~ '/tasks',
+                  error=error) }}
+{% else %}
+{{ task_edit_form(task,
+                  'contact-tasks-' ~ task.site_contact_id,
+                  'mt-2',
+                  '/v2/partials/customers/' ~ company_id ~ '/contacts/' ~ task.site_contact_id ~ '/tasks',
+                  error=error) }}
+{% endif %}

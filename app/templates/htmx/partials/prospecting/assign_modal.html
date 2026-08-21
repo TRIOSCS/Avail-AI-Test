@@ -7,6 +7,7 @@
   (links/creates the Company) and removes the account from the prospecting pool.
   Depends on: HTMX, Alpine.js ($dispatch close-modal), Tailwind CSS.
 #}
+{% from "htmx/partials/shared/_macros.html" import close_modal_on_success -%}
 {% set target = '#main-content' if ctx == 'detail' else '#prospect-' ~ prospect.id %}
 {% set swap = 'innerHTML' if ctx == 'detail' else 'outerHTML' %}
 <div class="p-4">
@@ -20,7 +21,7 @@
         hx-target="{{ target }}"
         hx-swap="{{ swap }}"
         hx-vals='{"flt_status": "{{ flt_status|default('') }}"}'
-        hx-on::after-request="if(event.detail.successful) this.dispatchEvent(new CustomEvent('close-modal', {bubbles: true}))"
+        {{ close_modal_on_success() }}
         data-loading-disable
         class="space-y-3">
     <div>

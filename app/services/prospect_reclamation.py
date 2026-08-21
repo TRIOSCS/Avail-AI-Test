@@ -255,7 +255,7 @@ async def _send_sweep_notification(
 
     Called by: job_account_sweep_with_db
     """
-    from ..utils.graph_client import GraphClient
+    from ..utils.graph_client import GraphClient, build_sendmail_payload
     from ..utils.token_manager import get_valid_token
 
     token = await get_valid_token(owner, db)
@@ -285,14 +285,12 @@ async def _send_sweep_notification(
     recipients = _sweep_notification_recipients(owner, db)
     sent = 0
     for address in recipients:
-        payload = {
-            "message": {
-                "subject": f"[AVAIL] Account swept to prospecting pool: {company.name}",
-                "body": {"contentType": "HTML", "content": body_html},
-                "toRecipients": [{"emailAddress": {"address": address}}],
-            },
-            "saveToSentItems": "false",
-        }
+        payload = build_sendmail_payload(
+            f"[AVAIL] Account swept to prospecting pool: {company.name}",
+            body_html,
+            address,
+            save_to_sent="false",
+        )
         try:
             await gc.post_json("/me/sendMail", payload)
             sent += 1

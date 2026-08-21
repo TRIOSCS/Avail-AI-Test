@@ -15,7 +15,7 @@ from ..http_client import http
 from ..utils import safe_float, safe_int
 from ._core_attrs import clean_str, digikey_parameter, map_lifecycle, map_rohs, safe_pin_count
 from .errors import ConnectorRateLimitError
-from .sources import BaseConnector, _get_cached_token, _invalidate_token, _parse_retry_after
+from .sources import BaseConnector, _get_cached_token, _invalidate_token, _parse_retry_after, best_price_break
 
 
 class DigiKeyConnector(BaseConnector):
@@ -31,11 +31,6 @@ class DigiKeyConnector(BaseConnector):
         super().__init__(timeout=15.0)
         self.client_id = client_id
         self.client_secret = client_secret
-
-    def _token_cache_key(self) -> tuple[str, str]:
-        # Process-wide OAuth cache key (see sources._get_cached_token). A blank
-        # client_id never reaches minting — `_do_search` returns early on it.
-        return (type(self).__name__, self.client_id)
 
     async def _get_token(self) -> str:
         async def _mint() -> tuple[str, int]:
@@ -129,22 +124,10 @@ class DigiKeyConnector(BaseConnector):
             detail_desc = desc.get("DetailedDescription", "") if isinstance(desc, dict) else str(desc)
             url = prod.get("ProductUrl") or prod.get("productUrl") or ""
 
-            # Price — use unit price or first price break
+            # Price — use the smallest-qty price break, else the unit price
             price_breaks = prod.get("StandardPricing") or prod.get("standardPricing") or []
-            if isinstance(price_breaks, list) and price_breaks:
-                # Find the smallest qty price break. Coalesce the break quantity
-                # (a PRESENT-but-null key yields None → None < int TypeError) to a
-                # large sentinel so a null row sorts last instead of crashing the PN.
-                best = min(
-                    price_breaks,
-                    key=lambda p: (
-                        p.get("Quantity")
-                        or p.get("BreakQuantity")
-                        or p.get("breakQuantity")
-                        or p.get("quantity")
-                        or 999999
-                    ),
-                )
+            best = best_price_break(price_breaks) if isinstance(price_breaks, list) else None
+            if best is not None:
                 price = best.get("UnitPrice", best.get("unitPrice"))
             else:
                 price = prod.get("UnitPrice") or prod.get("unitPrice")

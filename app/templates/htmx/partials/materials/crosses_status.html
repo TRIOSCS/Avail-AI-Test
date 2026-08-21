@@ -8,6 +8,7 @@
   Receives: card (MaterialCard).
   Called by: materials.py find_crosses + material_crosses_status_partial.
 #}
+{% from "htmx/partials/shared/_macros.html" import spinner -%}
 <div id="crosses-section"
      hx-get="/v2/partials/materials/{{ card.id }}/crosses-status"
      hx-trigger="every 3s"
@@ -29,10 +30,7 @@
   {# ── Content: in-progress spinner ── #}
   <div class="px-5 py-3">
     <div class="flex items-center gap-2 text-sm text-gray-400">
-      <svg class="h-4 w-4 animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24">
-        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-      </svg>
+      {{ spinner('h-4 w-4 animate-spin flex-shrink-0') }}
       Finding crosses…
     </div>
   </div>

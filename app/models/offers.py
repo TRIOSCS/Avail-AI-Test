@@ -20,7 +20,7 @@ from sqlalchemy.orm import relationship, validates
 
 from ..constants import OfferStatus
 from ..database import UTCDateTime
-from .base import Base
+from .base import AttachmentColumnsMixin, Base, warn_enum_member
 
 
 class Offer(Base):
@@ -134,14 +134,7 @@ class Offer(Base):
 
     @validates("status")
     def _validate_status(self, _key, value):
-        from ..constants import OfferStatus
-
-        valid = {e.value for e in OfferStatus}
-        if value and value not in valid:
-            from loguru import logger
-
-            logger.warning("Unexpected offer status: {}. Expected one of {}", value, valid)
-        return value
+        return warn_enum_member(OfferStatus, value, "offer status")
 
     @validates("qty_available")
     def _validate_qty_available(self, _key, value):
@@ -250,29 +243,15 @@ class Offer(Base):
     )
 
 
-class OfferAttachment(Base):
+class OfferAttachment(AttachmentColumnsMixin, Base):
     """File attachment on a vendor offer (stored in OneDrive or company SharePoint
-    library).
-
-    library_drive_id NULL  → OneDrive fallback row (user token, item in /me/drive)
-    library_drive_id set   → company SharePoint library row (app token)
-    """
+    library — shared payload columns on AttachmentColumnsMixin)."""
 
     __tablename__ = "offer_attachments"
     id = Column(Integer, primary_key=True)
     offer_id = Column(Integer, ForeignKey("offers.id", ondelete="CASCADE"), nullable=False)
-    file_name = Column(String(500), nullable=False)
-    library_item_id = Column(String(500))
-    library_drive_id = Column(String(200))
-    library_web_url = Column(Text)
-    thumbnail_url = Column(Text)
-    content_type = Column(String(100))
-    size_bytes = Column(Integer)
-    uploaded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     offer = relationship("Offer", back_populates="attachments")
-    uploaded_by = relationship("User", foreign_keys=[uploaded_by_id])
 
     __table_args__ = (Index("ix_offer_attachments_offer", "offer_id"),)
 

@@ -15,10 +15,12 @@ Depends on: app.database.SessionLocal, app.models (MaterialCard, Sighting, Offer
 import argparse
 import sys
 from datetime import UTC, datetime
+from pathlib import Path
 
 from loguru import logger
 
-sys.path.insert(0, "/root/availai")
+# Ensure project root is on sys.path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from sqlalchemy import update
 

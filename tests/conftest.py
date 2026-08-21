@@ -291,24 +291,6 @@ def _reset_rate_limiter_state():
 
 
 @pytest.fixture(autouse=True)
-def _clear_known_html_hashes():
-    """Clear the shared HTML-structure-hash registry before and after each test.
-
-    ``search_worker_base.monitoring._known_html_hashes`` is one process-wide dict keyed
-    by component ("NC"/"ICS"/"TBF"). The 'first hash never warns / changed structure
-    warns' tests across three files depend on every consumer clearing it first; a test
-    that seeds hashes without clearing (or asserts warning behavior after another file
-    populated the same component set in the worker) flakes by ordering. Centralize the
-    clear here so no per-file setup_method discipline is load-bearing.
-    """
-    from app.services.search_worker_base.monitoring import _known_html_hashes
-
-    _known_html_hashes.clear()
-    yield
-    _known_html_hashes.clear()
-
-
-@pytest.fixture(autouse=True)
 def _restore_dependency_overrides():
     """Snapshot and restore ``app.main.app.dependency_overrides`` around every test.
 

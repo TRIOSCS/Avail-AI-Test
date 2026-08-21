@@ -40,6 +40,46 @@ def _count_untagged_cards(db: Session) -> int:
     return db.query(func.count(MaterialCard.id)).filter(_untagged_card_filter(db)).scalar() or 0
 
 
+def _apply_classification(db: Session, card_id: int, result: dict, brands_seen: set[str]) -> bool:
+    """Apply one ``classify_material_card`` result to a card.
+
+    The shared tag-application recipe for ``seed_from_existing_manufacturers`` and
+    ``run_prefix_backfill``: get-or-create the brand tag (flushing if its id hasn't been
+    assigned yet), look up the pre-seeded commodity tag, and write the MaterialTags.
+    Records the brand name in *brands_seen*; returns True when at least one tag was
+    applied.
+    """
+    tags_to_apply = []
+    if result.get("brand"):
+        brand_tag = get_or_create_brand_tag(result["brand"]["name"], db)
+        if brand_tag.id is None:  # pragma: no cover
+            db.flush()
+        brands_seen.add(brand_tag.name)
+        tags_to_apply.append(
+            {
+                "tag_id": brand_tag.id,
+                "source": result["brand"]["source"],
+                "confidence": result["brand"]["confidence"],
+            }
+        )
+
+    if result.get("commodity"):
+        commodity_tag = get_or_create_commodity_tag(result["commodity"]["name"], db)
+        if commodity_tag:
+            tags_to_apply.append(
+                {
+                    "tag_id": commodity_tag.id,
+                    "source": result["commodity"]["source"],
+                    "confidence": result["commodity"]["confidence"],
+                }
+            )
+
+    if tags_to_apply:
+        tag_material_card(card_id, tags_to_apply, db)
+        return True
+    return False
+
+
 def seed_from_existing_manufacturers(db: Session) -> dict:
     """Harvest MaterialCards with manufacturer already populated.
 
@@ -72,34 +112,7 @@ def seed_from_existing_manufacturers(db: Session) -> dict:
         for card in cards:
             last_id = card.id
             result = classify_material_card(card.normalized_mpn, card.manufacturer, card.category)
-
-            tags_to_apply = []
-            if result.get("brand"):
-                brand_tag = get_or_create_brand_tag(result["brand"]["name"], db)
-                if brand_tag.id is None:  # pragma: no cover
-                    db.flush()
-                brands_created.add(brand_tag.name)
-                tags_to_apply.append(
-                    {
-                        "tag_id": brand_tag.id,
-                        "source": result["brand"]["source"],
-                        "confidence": result["brand"]["confidence"],
-                    }
-                )
-
-            if result.get("commodity"):
-                commodity_tag = get_or_create_commodity_tag(result["commodity"]["name"], db)
-                if commodity_tag:
-                    tags_to_apply.append(
-                        {
-                            "tag_id": commodity_tag.id,
-                            "source": result["commodity"]["source"],
-                            "confidence": result["commodity"]["confidence"],
-                        }
-                    )
-
-            if tags_to_apply:
-                tag_material_card(card.id, tags_to_apply, db)
+            if _apply_classification(db, card.id, result, brands_created):
                 total_seeded += 1
 
         db.commit()
@@ -149,34 +162,7 @@ def run_prefix_backfill(db: Session, batch_size: int = 1000) -> dict:
         for card in batch:
             last_id = card.id
             result = classify_material_card(card.normalized_mpn, None, card.category)
-            tags_to_apply = []
-
-            if result.get("brand"):
-                brand_tag = get_or_create_brand_tag(result["brand"]["name"], db)
-                if brand_tag.id is None:  # pragma: no cover
-                    db.flush()
-                new_brands.add(brand_tag.name)
-                tags_to_apply.append(
-                    {
-                        "tag_id": brand_tag.id,
-                        "source": result["brand"]["source"],
-                        "confidence": result["brand"]["confidence"],
-                    }
-                )
-
-            if result.get("commodity"):  # pragma: no cover
-                commodity_tag = get_or_create_commodity_tag(result["commodity"]["name"], db)
-                if commodity_tag:
-                    tags_to_apply.append(
-                        {
-                            "tag_id": commodity_tag.id,
-                            "source": result["commodity"]["source"],
-                            "confidence": result["commodity"]["confidence"],
-                        }
-                    )
-
-            if tags_to_apply:
-                tag_material_card(card.id, tags_to_apply, db)
+            if _apply_classification(db, card.id, result, new_brands):
                 total_matched += 1
             else:
                 total_unmatched += 1
@@ -385,6 +371,9 @@ def analyze_untagged_prefixes(db: Session, top_n: int = 100) -> list[dict]:
     if not untagged:
         return []
 
+    # Known prefixes, uppercased once — the table never changes mid-scan.
+    known_prefixes = {k.upper() for k in PREFIX_TABLE}
+
     # Count 2-5 char prefixes
     prefix_counts: Counter = Counter()
     for (mpn,) in untagged:
@@ -393,7 +382,7 @@ def analyze_untagged_prefixes(db: Session, top_n: int = 100) -> list[dict]:
             if len(upper) >= length:
                 prefix = upper[:length]
                 # Skip if already in PREFIX_TABLE
-                if prefix not in {k.upper() for k in PREFIX_TABLE}:
+                if prefix not in known_prefixes:
                     prefix_counts[prefix] += 1
                 break
 

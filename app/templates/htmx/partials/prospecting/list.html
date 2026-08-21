@@ -7,6 +7,7 @@
   Called by: htmx_views.py prospecting_list_partial endpoint.
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
+{% from "htmx/partials/shared/_macros.html" import lazy_body %}
 
 <title hx-swap-oob="true">Prospecting — AvailAI</title>
 
@@ -52,11 +53,9 @@
   </div>
 
   {# Stats KPI panel — lazy-loaded so the grid paints first; OOB-refreshed after grid actions.
-     hx-target MUST be explicit: without it the div inherits #main-content's hx-target="this",
-     so the lazy stats load would wipe the whole list (cards included) instead of filling itself. #}
-  <div id="prospect-stats" class="mb-3"
-       hx-get="/v2/partials/prospecting/stats" hx-trigger="load"
-       hx-target="#prospect-stats" hx-swap="innerHTML"></div>
+     lazy_body emits the explicit hx-target structurally: without it the div would inherit
+     #main-content's hx-target="this" and the lazy stats load would wipe the whole list. #}
+  {% call lazy_body('prospect-stats', '/v2/partials/prospecting/stats', class_='mb-3') %}{% endcall %}
 
   {# Condensed toolbar — pills, inline search, scope + sort all on ONE row. #}
   <div id="prospect-filters" class="mb-3">

@@ -263,26 +263,23 @@ def _parts_snapshot(whole_list_snapshot: list[dict], by_line: dict[int, list[dic
     return whole_list_snapshot if line_id is None else by_line.get(line_id, [])
 
 
-def _has_live_recent_outreach(
-    db: Session, *, list_id: int, card_id: int, line_id: int | None, cutoff: datetime
-) -> bool:
-    """True if this buyer already has a LIVE (sending/sent) outreach on the same (list,
-    line) created since ``cutoff`` — the campaign-idempotency dedup check.
+def _live_recent_outreach_pairs(db: Session, *, list_id: int, cutoff: datetime) -> set[tuple[int, int | None]]:
+    """The list's LIVE (sending/sent) ``(vendor_card_id, line_id)`` pairs created since
+    ``cutoff`` — the campaign-idempotency dedup set, loaded in ONE query for the whole
+    submit instead of one SELECT per (buyer × line).
 
-    ``line_id`` NULL matches the whole-list touch (``excess_line_item_id IS NULL``). Uses
-    the SENDING/SENT filter (mirroring the finalize idempotency guard) so a failed /
+    ``line_id`` None is the whole-list touch (``excess_line_item_id IS NULL``). Uses the
+    SENDING/SENT filter (mirroring the finalize idempotency guard) so a failed /
     interrupted / no_response prior touch never blocks a genuine re-offer.
     """
-    conds = [
-        ExcessOutreach.excess_list_id == list_id,
-        ExcessOutreach.target_vendor_card_id == card_id,
-        ExcessOutreach.status.in_([ExcessOutreachStatus.SENDING, ExcessOutreachStatus.SENT]),
-        ExcessOutreach.created_at >= cutoff,
-        ExcessOutreach.excess_line_item_id.is_(None)
-        if line_id is None
-        else ExcessOutreach.excess_line_item_id == line_id,
-    ]
-    return db.scalar(select(ExcessOutreach.id).where(*conds).limit(1)) is not None
+    rows = db.execute(
+        select(ExcessOutreach.target_vendor_card_id, ExcessOutreach.excess_line_item_id).where(
+            ExcessOutreach.excess_list_id == list_id,
+            ExcessOutreach.status.in_([ExcessOutreachStatus.SENDING, ExcessOutreachStatus.SENT]),
+            ExcessOutreach.created_at >= cutoff,
+        )
+    ).all()
+    return {(card_id, line_id) for card_id, line_id in rows}
 
 
 def _make_outreach_rows(
@@ -489,6 +486,9 @@ def enqueue_outreach_email(
     line_ids = _target_line_ids(db, excess_list, scope, line_item_ids)
     whole_list_snapshot, by_line = _campaign_parts_snapshot(db, excess_list)
     cutoff = datetime.now(UTC) - _DUPLICATE_SUBMIT_WINDOW
+    # ONE dedup query for the whole campaign (autoflush is off, so the per-line query
+    # this replaces saw the same constant DB state all submit long).
+    live_pairs = _live_recent_outreach_pairs(db, list_id=excess_list.id, cutoff=cutoff)
 
     all_rows: list[ExcessOutreach] = []
     # Collect (plan-stub, rows) so the plan's ``row_ids`` are captured AFTER a SINGLE flush
@@ -505,12 +505,7 @@ def enqueue_outreach_email(
         # Campaign idempotency: drop the line ids this buyer already has a LIVE (sending/sent)
         # row for within the dedup window, OR already scheduled earlier in THIS submit, so a
         # re-submit makes no duplicate row / send. A buyer with nothing fresh left is skipped.
-        fresh_line_ids = [
-            lid
-            for lid in line_ids
-            if lid not in seen
-            and not _has_live_recent_outreach(db, list_id=excess_list.id, card_id=card.id, line_id=lid, cutoff=cutoff)
-        ]
+        fresh_line_ids = [lid for lid in line_ids if lid not in seen and (card.id, lid) not in live_pairs]
         if not fresh_line_ids:
             logger.info(
                 "Outreach enqueue: buyer card={} already has a live offer on list={} — skipping duplicate",

@@ -241,18 +241,8 @@
 </div>
 
 {# Pagination #}
-{% if total > limit %}
-<div class="mt-4 flex justify-center">
-  <nav class="flex gap-1 items-center">
-    {% if offset > 0 %}
-    <button @click="goToPage({{ (offset - limit) // limit }})"
-       class="btn-secondary btn-sm cursor-pointer">Prev</button>
-    {% endif %}
-    <span class="px-3 py-1.5 text-sm text-gray-600">{{ offset + 1 }}&ndash;{{ [offset + limit, total]|min }} of {{ total }}</span>
-    {% if offset + limit < total %}
-    <button @click="goToPage({{ (offset + limit) // limit }})"
-       class="btn-secondary btn-sm cursor-pointer">Next</button>
-    {% endif %}
-  </nav>
-</div>
-{% endif %}
+{% from "htmx/partials/shared/_offset_pager.html" import offset_pager %}
+{% set _pager_prev %}@click="goToPage({{ (offset - limit) // limit }})"{% endset %}
+{% set _pager_next %}@click="goToPage({{ (offset + limit) // limit }})"{% endset %}
+{{ offset_pager(offset, limit, total, _pager_prev, _pager_next,
+                btn_class='btn-secondary btn-sm cursor-pointer', tag='button') }}
