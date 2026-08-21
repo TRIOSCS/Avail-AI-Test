@@ -221,10 +221,29 @@ RFQ_DATASHEETS_DROPPED_HEADER = "X-RFQ-Datasheets-Dropped"  # oversized datashee
 
 def _render_offers_panel(request: Request, requirement: Requirement, db: Session) -> HTMLResponse:
     """Render the part-centric Offers panel for swap into #sightings-offers-panel."""
+    from ..services.offer_language_screen import screen_offer_language
+    from ..services.sourcing_leads import vendor_safety_for_card
+
+    part_offers = part_offers_for(requirement, db)
+    # Offer Pre-check: the SAME vendor-safety computation the buy-plan flags use, so an
+    # offer and its plan never read differently. Deduped per vendor to avoid an N+1
+    # across the offer list; only vendors that appear get computed.
+    _safety_by_vendor: dict[int, dict] = {}
+    safety_by_offer: dict[int, dict] = {}
+    for o in part_offers:
+        vcid = o.vendor_card_id
+        if vcid is None:
+            continue
+        if vcid not in _safety_by_vendor:
+            _safety_by_vendor[vcid] = vendor_safety_for_card(db, o.vendor_card)
+        safety_by_offer[o.id] = _safety_by_vendor[vcid]
+    language_by_offer = {o.id: screen_offer_language(o) for o in part_offers}
     ctx = {
         "request": request,
         "requirement": requirement,
-        "part_offers": part_offers_for(requirement, db),
+        "part_offers": part_offers,
+        "safety_by_offer": safety_by_offer,
+        "language_by_offer": language_by_offer,
     }
     resp = template_response("htmx/partials/sightings/offers_panel.html", ctx)
     resp.headers["X-Rendered-Req-Id"] = str(requirement.id)

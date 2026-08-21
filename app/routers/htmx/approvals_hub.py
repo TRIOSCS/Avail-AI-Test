@@ -421,10 +421,21 @@ def _sheet_ctx(db: Session, user: User, bp: BuyPlan, *, is_sourcing: bool) -> di
     """
     from ...constants import OfferStatus
     from ...models import Offer, Requirement
+    from ...services.buyplan_builder import generate_ai_flags
     from ...services.buyplan_workflow import _owns_plan, can_edit_plan
     from ...services.stale_guard import stale_token
 
     lines = bp.lines or []
+
+    # Compute the AI flags FRESH on every render — the stored bp.ai_flags is a build-time
+    # snapshot never refreshed by workspace edits/re-picks, so reading it here would show
+    # stale flags with orphaned line ids at the approval moment. generate_ai_flags is
+    # read-only (returns a list, persists nothing) and re-queries the live lines/offers.
+    ai_flags = generate_ai_flags(bp, db)
+    ai_flags_by_line: dict[int, list[dict]] = {}
+    for _f in ai_flags:
+        if _f.get("line_id"):
+            ai_flags_by_line.setdefault(_f["line_id"], []).append(_f)
     can_edit = can_edit_plan(user, bp)
     is_owner = _owns_plan(user, bp)
 
@@ -471,6 +482,13 @@ def _sheet_ctx(db: Session, user: User, bp: BuyPlan, *, is_sourcing: bool) -> di
                         "best": best_cost is not None
                         and off.unit_price is not None
                         and float(off.unit_price) == best_cost,
+                        # Count only RISK flags (warning/critical) for the rose chip —
+                        # info signals (better_offer/geo_mismatch) aren't risk.
+                        "flags": (
+                            sum(1 for f in ai_flags_by_line.get(ln.id, []) if f["severity"] in ("warning", "critical"))
+                            if ln
+                            else 0
+                        ),
                     }
                 )
             sell = next((float(ln.unit_sell) for ln in group_lines if ln.unit_sell is not None), None)
@@ -512,6 +530,9 @@ def _sheet_ctx(db: Session, user: User, bp: BuyPlan, *, is_sourcing: bool) -> di
         # UNKNOWN to it — unknown lines are left untouched, never silently removed.
         "picker_known_line_ids": sorted(rendered_line_ids),
         "readiness_missing": [r for r in checklist if not r["ok"]],
+        # Fresh-computed AI flags for the review header strip + per-line counts.
+        "ai_flags": ai_flags,
+        "ai_flags_by_line": ai_flags_by_line,
     }
 
 
