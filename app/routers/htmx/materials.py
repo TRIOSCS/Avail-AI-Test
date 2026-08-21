@@ -34,7 +34,6 @@ from ...models import (
     Offer,
     User,
 )
-from ...models.faceted_search import CommoditySpecSchema
 from ...services.commodity_registry import COMMODITY_TREE, get_display_name
 from ...services.faceted_search_service import (
     INTERNAL_FILTER_VALUES,
@@ -52,6 +51,7 @@ from ...services.part_history_service import (
     requirements_for_card,
     sightings_for_card,
 )
+from ...services.spec_format import build_card_specs
 from ...template_env import template_response
 from ...utils.csv_export import stream_csv
 from ...utils.sql_helpers import escape_like
@@ -535,34 +535,6 @@ async def materials_faceted_partial(
         # currency shown only when a card's vendor rows are single-currency; mixed → default $
         vendor_stats = {s[0]: (s[1], s[2], s[4] if s[3] == 1 else None) for s in stats}
 
-    # Attach spec chips for display. In commodity context: the selected commodity's
-    # is_primary keys (same keys as before; non-scalar/missing values are now SKIPPED
-    # instead of rendering dict-reprs or 500ing on raw-scalar entries). Without a
-    # commodity: each card's OWN category's primary keys (one batched query — no N+1);
-    # whenever that yields no chips (schema-less category OR a card lacking values for
-    # every primary key) fall back to the first 3 scalar specs_structured entries; the
-    # template renders "label: value" there.
-    def _spec_scalar(raw):
-        val = raw.get("value") if isinstance(raw, dict) else raw
-        return val if isinstance(val, (str, int, float, bool)) else None
-
-    primary_by_cat: dict[str, dict[str, str]] = {}
-    if commodity:
-        primary_by_cat[commodity.lower().strip()] = {
-            s.spec_key: s.display_name
-            for s in db.query(CommoditySpecSchema).filter_by(commodity=commodity, is_primary=True).all()
-        }
-    else:
-        card_cats = {(m.category or "").lower().strip() for m in materials if m.category}
-        if card_cats:
-            schema_rows = (
-                db.query(CommoditySpecSchema)
-                .filter(CommoditySpecSchema.commodity.in_(card_cats), CommoditySpecSchema.is_primary.is_(True))
-                .all()
-            )
-            for s in schema_rows:
-                primary_by_cat.setdefault(s.commodity, {})[s.spec_key] = s.display_name
-
     # Dual-brand cell: the " · maker" suffix renders only when brand (OEM label) and
     # manufacturer (actual maker) are DIFFERENT COMPANIES. Compare NORMALIZED forms, not
     # raw strings — B1 writes the canonical OEM into brand while manufacturer keeps the
@@ -580,25 +552,11 @@ async def materials_faceted_partial(
             and m.manufacturer
             and normalize_brand_name(db, m.brand).lower() != normalize_brand_name(db, m.manufacturer).lower()
         )
-        specs = m.specs_structured or {}
-        card_cat = commodity.lower().strip() if commodity else (m.category or "").lower().strip()
-        primary_keys = primary_by_cat.get(card_cat, {})
-        chips = [
-            {"label": primary_keys[k], "value": _spec_scalar(specs[k])}
-            for k in primary_keys
-            if k in specs and _spec_scalar(specs[k]) is not None
-        ]
-        if not commodity and not chips:
-            # No schema-known primary values for this card — first 3 scalar entries,
-            # labelled by their prettified spec key.
-            for k, raw in specs.items():
-                val = _spec_scalar(raw)
-                if val is None:
-                    continue
-                chips.append({"label": k.replace("_", " "), "value": val})
-                if len(chips) >= 3:
-                    break
-        m._primary_specs = chips
+
+    # Spec chips (m._card_specs / m._specs_more): commodity-scoped = all the
+    # commodity's populated filterable fields with human units; unscoped =
+    # per-category primaries with the prettified-key fallback.
+    build_card_specs(db, materials, commodity or None)
 
     # Coverage-aware empty state: a parametric zero-result inside a commodity usually
     # means "not yet spec-enriched", not "no such parts". Coverage is computed only when

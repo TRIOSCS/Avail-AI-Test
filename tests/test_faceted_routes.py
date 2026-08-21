@@ -370,7 +370,8 @@ def test_list_renders_zero_price_and_currency():
             lifecycle_status=None,
             last_searched_at=None,
             specs_structured=None,
-            _primary_specs=[],
+            _card_specs=[],
+            _specs_more=0,
             _vendor_count=1,
             _best_price=price,
             _best_currency=currency,
@@ -737,8 +738,9 @@ def test_faceted_row_datasheet_and_condition_badges(client, db_session: Session)
     assert "2 alternates" in resp.text
     # Condition badge styled like the lifecycle palette.
     assert ">NEW<" in resp.text.replace("\n", "").replace("  ", "")
-    # Bare card renders without the datasheet indicator leaking onto it.
-    assert resp.text.count('title="Open datasheet"') == 1
+    # Bare card renders without the datasheet indicator leaking onto it — the rich
+    # card carries it once per rendering (desktop row + mobile card), so exactly 2.
+    assert resp.text.count('title="Open datasheet"') == 2
 
 
 def test_faceted_row_crosses_badge_singular(client, db_session: Session):
@@ -757,7 +759,8 @@ def test_faceted_row_second_life_conditions_render_violet(client, db_session: Se
     db_session.commit()
     resp = client.get("/v2/partials/materials/faceted")
     assert resp.status_code == 200
-    assert resp.text.count("bg-violet-50 text-violet-700 border-violet-200") == 2
+    # 2 cards × 2 renderings (desktop row + mobile card) = 4 violet badges.
+    assert resp.text.count("bg-violet-50 text-violet-700 border-violet-200") == 4
     assert "bg-amber-50" not in resp.text
 
 
@@ -817,10 +820,12 @@ def test_faceted_spec_chips_without_commodity_fallback_first_scalars(client, db_
 
     resp = client.get("/v2/partials/materials/faceted")
     assert resp.status_code == 200
-    assert "speed mhz: 3200" in resp.text
-    assert "rank: 2R" in resp.text
-    assert "voltage: 1.2" in resp.text
-    assert "nested junk:" not in resp.text
+    # Labels + values render as separate spans now; the title keeps "label: value".
+    # Bare numerics get thousands separators via the shared formatter.
+    assert 'title="speed mhz: 3,200"' in resp.text
+    assert 'title="rank: 2R"' in resp.text
+    assert 'title="voltage: 1.2"' in resp.text
+    assert "nested junk" not in resp.text
     assert "chip4-overflow-value" not in resp.text
 
 

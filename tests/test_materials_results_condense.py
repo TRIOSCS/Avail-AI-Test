@@ -1,5 +1,6 @@
-"""Condensed materials results table (list.html): 7-column layout, merged Status cell,
-category folded under Manufacturer, smart price decimals, match-framed count.
+"""Condensed materials results (list.html): hybrid layout — 8-column desktop table
+(labelled Specs column, merged Status cell, category folded under Manufacturer, smart
+price decimals) plus the stacked mobile card list — and the match-framed count.
 
 Renders the partial directly via Jinja (mirrors tests/test_oem_badges.py) so the layout
 contract is asserted without seeding vendor-sighting stats.
@@ -34,7 +35,8 @@ def _render(*, materials=None, total=1, q="", commodity="", commodity_display=""
             "_vendor_count": 0,
             "_best_price": None,
             "_best_currency": "USD",
-            "_primary_specs": [],
+            "_card_specs": [],
+            "_specs_more": 0,
             "last_searched_at": None,
         }
         base.update(card_overrides)
@@ -50,23 +52,34 @@ def _render(*, materials=None, total=1, q="", commodity="", commodity_display=""
     )
 
 
-def test_seven_column_header_no_category_or_lifecycle_columns():
+def test_eight_column_header_no_category_or_lifecycle_columns():
     html = _render()
-    # Exactly 7 column headers (was 9): Category + Lifecycle columns are gone.
-    assert html.count("<th ") == 7  # trailing space: doesn't match <thead>
+    # Exactly 8 column headers: Category + Lifecycle stay merged away; Specs is new;
+    # "Last Seen" is renamed "Searched" (the column shows last_searched_at).
+    assert html.count("<th ") == 8  # trailing space: doesn't match <thead>
     assert ">Category</th>" not in html
     assert ">Lifecycle</th>" not in html
-    # The survivors, including the merged Status column and the renamed Last Seen.
+    assert ">Last Seen</th>" not in html
     for header in (
         ">MPN</th>",
         ">Description</th>",
         ">Manufacturer</th>",
+        ">Specs</th>",
         ">Status</th>",
         ">Vendors</th>",
         ">Best Price</th>",
-        ">Last Seen</th>",
+        ">Searched</th>",
     ):
         assert header in html, f"missing header {header}"
+
+
+def test_hybrid_renders_desktop_table_and_mobile_cards():
+    html = _render()
+    # Desktop table hidden below lg; mobile card list hidden at lg and up.
+    assert 'class="overflow-x-auto hidden lg:block"' in html
+    assert 'class="lg:hidden divide-y divide-gray-100"' in html
+    # The MPN appears in BOTH renderings.
+    assert html.count("M393A2K43DB2-CWE") >= 2
 
 
 def test_category_folds_under_manufacturer():
@@ -83,8 +96,8 @@ def test_status_cell_merges_trust_lifecycle_condition():
     assert "VERIFIED" in html
     assert "ACTIVE" in html
     assert "REFURBISHED" in html
-    # Still only 7 columns — proves lifecycle merged into status rather than adding a col.
-    assert html.count("<th ") == 7  # trailing space: doesn't match <thead>
+    # Still only 8 columns — proves lifecycle merged into status rather than adding a col.
+    assert html.count("<th ") == 8  # trailing space: doesn't match <thead>
 
 
 @pytest.mark.parametrize(

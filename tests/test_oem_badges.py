@@ -34,7 +34,8 @@ def _render(status, provenance=None, *, brand=None, manufacturer="Lenovo", show_
             "_show_maker_suffix": show_maker_suffix,
             "id": 1,
             "normalized_mpn": "01hw917",
-            "_primary_specs": [],
+            "_card_specs": [],
+            "_specs_more": 0,
             "last_searched_at": None,
         },
     )()
