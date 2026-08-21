@@ -295,3 +295,20 @@ def test_below_market_ignores_different_condition(db_session: Session):
     db_session.flush()
     bm = [f for f in generate_ai_flags(plan, db_session) if f["type"] == "below_market"]
     assert not bm  # cross-condition comparison suppressed
+
+
+def test_offer_screening_maps_builds_both(db_session: Session):
+    from app.routers.sightings import _offer_screening_maps
+
+    user = _make_user(db_session)
+    company = _make_company(db_session)
+    site = _make_site(db_session, company)
+    req = _make_requisition(db_session, user, site)
+    requirement = _make_requirement(db_session, req)
+    o1 = _make_offer(db_session, req, requirement, _make_vendor(db_session, name="A"))
+    o1.notes = "New & Original"
+    db_session.flush()
+    maps = _offer_screening_maps([o1], db_session)
+    assert set(maps) == {"safety_by_offer", "language_by_offer"}
+    assert o1.id in maps["safety_by_offer"]
+    assert any(f["code"] == "vague_language" for f in maps["language_by_offer"][o1.id])
