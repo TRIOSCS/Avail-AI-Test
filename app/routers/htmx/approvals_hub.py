@@ -482,7 +482,13 @@ def _sheet_ctx(db: Session, user: User, bp: BuyPlan, *, is_sourcing: bool) -> di
                         "best": best_cost is not None
                         and off.unit_price is not None
                         and float(off.unit_price) == best_cost,
-                        "flags": len(ai_flags_by_line.get(ln.id, [])) if ln else 0,
+                        # Count only RISK flags (warning/critical) for the rose chip —
+                        # info signals (better_offer/geo_mismatch) aren't risk.
+                        "flags": (
+                            sum(1 for f in ai_flags_by_line.get(ln.id, []) if f["severity"] in ("warning", "critical"))
+                            if ln
+                            else 0
+                        ),
                     }
                 )
             sell = next((float(ln.unit_sell) for ln in group_lines if ln.unit_sell is not None), None)

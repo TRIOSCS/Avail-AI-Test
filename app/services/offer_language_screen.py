@@ -13,6 +13,10 @@ offer Pre-check (app/routers/sightings.py).
 
 from __future__ import annotations
 
+import re
+
+from ..utils.normalization import normalize_lead_time
+
 # Counterfeit-adjacent hedging phrases that read as reassurance but carry no verifiable
 # meaning — the "vague communication" red flag (David's checklist names "New & Original").
 _VAGUE_PHRASES: tuple[str, ...] = (
@@ -32,8 +36,8 @@ _VAGUE_PHRASES: tuple[str, ...] = (
     "unverified",
 )
 
-# lead_time strings that actually mean "in stock, no wait" — not a contradiction.
-_IN_STOCK_LEAD = {"", "in stock", "stock", "0", "0 days", "immediate", "same day", "ready"}
+# Match phrases on WORD BOUNDARIES so "as is" does not fire inside "was issued", etc.
+_VAGUE_RE = re.compile(r"\b(?:" + "|".join(re.escape(p) for p in _VAGUE_PHRASES) + r")\b")
 
 
 def _offer_text(offer) -> str:
@@ -53,12 +57,15 @@ def screen_offer_language(offer) -> list[dict]:
     """
     flags: list[dict] = []
 
-    hits = sorted({p for p in _VAGUE_PHRASES if p in _offer_text(offer)})
+    hits = sorted(set(_VAGUE_RE.findall(_offer_text(offer))))
     if hits:
         flags.append({"code": "vague_language", "note": "Vague vendor wording: " + ", ".join(hits)})
 
-    lead = (offer.lead_time or "").strip().lower()
-    if offer.qty_available and offer.qty_available > 0 and lead not in _IN_STOCK_LEAD:
+    # Only a POSITIVE parsed lead time contradicts an in-stock claim. Reuse the canonical
+    # normalizer: "in stock"/"from stock"/"immediate" → 0 (no conflict), ambiguous
+    # ("ex-stock", "available", "ARO") → None (don't guess), "2-3 weeks" → a positive.
+    days = normalize_lead_time(offer.lead_time)
+    if offer.qty_available and offer.qty_available > 0 and days is not None and days > 0:
         flags.append(
             {
                 "code": "stock_leadtime_conflict",

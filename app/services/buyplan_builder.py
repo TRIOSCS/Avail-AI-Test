@@ -528,6 +528,10 @@ def generate_ai_flags(plan: BuyPlan, db: Session, customer_region: str | None = 
     """
     flags = []
     now = datetime.now(UTC)
+    # Memo so the vendor-safety computation (a DB round-trip via
+    # get_vendor_feedback_adjustment) runs once per distinct vendor, not once per line —
+    # this function is recomputed fresh on EVERY approval-pane render.
+    safety_memo: dict[int | None, dict] = {}
     stale_days = settings.buyplan_stale_offer_days
     min_margin = settings.buyplan_min_margin_pct
     better_pct = settings.buyplan_better_offer_pct
@@ -592,7 +596,7 @@ def generate_ai_flags(plan: BuyPlan, db: Session, customer_region: str | None = 
         #    same vendor can't read differently on the offer vs here). Surfaces only the
         #    high-signal caution codes as a flag; the full band lives on the Pre-check.
         if offer is not None:
-            _check_vendor_risk(line, offer, flags, db)
+            _check_vendor_risk(line, offer, flags, db, safety_memo)
 
         # ── Offer communication red flags (deterministic language/contradiction screen)
         if offer is not None:
@@ -620,17 +624,22 @@ _VENDOR_RISK_CODES: dict[str, str] = {
 }
 
 
-def _check_vendor_risk(line: BuyPlanLine, offer: Offer, flags: list[dict], db: Session):
+def _check_vendor_risk(line: BuyPlanLine, offer: Offer, flags: list[dict], db: Session, memo: dict):
     """Append a vendor_risk flag when the line's vendor carries high-signal caution
     codes.
 
-    Reads the SHARED vendor-safety computation (sourcing_leads.vendor_safety_for_card)
-    so the flag can never disagree with the offer Pre-check for the same vendor.
+    Reads the SHARED vendor-safety computation (sourcing_leads.vendor_safety_for_card) so
+    the flag can never disagree with the offer Pre-check for the same vendor. ``memo``
+    caches the result per vendor_card_id so the underlying DB round-trip runs once per
+    distinct vendor, not once per line.
     """
     from .sourcing_leads import vendor_safety_for_card
 
     vc = offer.vendor_card or (db.get(VendorCard, offer.vendor_card_id) if offer.vendor_card_id else None)
-    caution = vendor_safety_for_card(db, vc)["caution"]
+    key = vc.id if vc is not None else None
+    if key not in memo:
+        memo[key] = vendor_safety_for_card(db, vc)
+    caution = memo[key]["caution"]
     hits = [c for c in caution if c in _VENDOR_RISK_CODES]
     if not hits:
         return
@@ -699,6 +708,9 @@ def _check_below_market(line: BuyPlanLine, selected: Offer, flags: list[dict], d
     """
     if not selected.unit_price or float(selected.unit_price) <= 0:
         return
+    # Compare only LIKE offers: same condition (a legit refurb/pull prices far below new)
+    # and same currency (raw prices aren't comparable across currencies). Otherwise the
+    # expected new-vs-used delta would fire a false "too cheap" alarm.
     others = sorted(
         float(o.unit_price)
         for o in db.query(Offer)
@@ -706,6 +718,8 @@ def _check_below_market(line: BuyPlanLine, selected: Offer, flags: list[dict], d
             Offer.requirement_id == line.requirement_id,
             Offer.status == OfferStatus.ACTIVE.value,
             Offer.id != selected.id,
+            Offer.condition == selected.condition,
+            Offer.currency == selected.currency,
         )
         .all()
         if o.unit_price and float(o.unit_price) > 0

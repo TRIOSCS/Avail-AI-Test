@@ -244,3 +244,54 @@ def test_language_flags_reach_generate_ai_flags(db_session: Session):
     db_session.flush()
     types = {f["type"] for f in generate_ai_flags(plan, db_session)}
     assert "offer_language" in types
+
+
+# ── review-fix regressions (false positives caught by adversarial review) ──
+
+
+def test_language_no_false_positive_on_was_issued(db_session: Session):
+    from app.services.offer_language_screen import screen_offer_language
+
+    user = _make_user(db_session)
+    company = _make_company(db_session)
+    site = _make_site(db_session, company)
+    req = _make_requisition(db_session, user, site)
+    requirement = _make_requirement(db_session, req)
+    offer = _make_offer(db_session, req, requirement, _make_vendor(db_session))
+    offer.notes = "Certificate of Conformance was issued by the OEM."  # 'as is' inside 'was issued'
+    db_session.flush()
+    assert {f["code"] for f in screen_offer_language(offer)} == set()
+
+
+def test_language_no_conflict_on_from_stock(db_session: Session):
+    from app.services.offer_language_screen import screen_offer_language
+
+    user = _make_user(db_session)
+    company = _make_company(db_session)
+    site = _make_site(db_session, company)
+    req = _make_requisition(db_session, user, site)
+    requirement = _make_requirement(db_session, req)
+    for lt in ("from stock", "ex-stock", "available"):
+        offer = _make_offer(db_session, req, requirement, _make_vendor(db_session, name=f"v {lt}"), qty=500)
+        offer.lead_time = lt
+        db_session.flush()
+        assert "stock_leadtime_conflict" not in {f["code"] for f in screen_offer_language(offer)}, lt
+
+
+def test_below_market_ignores_different_condition(db_session: Session):
+    # legit refurb far below NEW siblings must NOT flag "too cheap"
+    user = _make_user(db_session)
+    company = _make_company(db_session)
+    site = _make_site(db_session, company)
+    req = _make_requisition(db_session, user, site)
+    requirement = _make_requirement(db_session, req)
+    picked = _make_offer(db_session, req, requirement, _make_vendor(db_session, name="Refurb"), price=0.30)
+    picked.condition = "refurb"
+    for i, p in enumerate([1.00, 1.05]):
+        o = _make_offer(db_session, req, requirement, _make_vendor(db_session, name=f"New {i}"), price=p)
+        o.condition = "new"
+    quote = _make_quote(db_session, req, site, user)
+    plan, _ = _make_plan_with_line(db_session, quote, req, requirement, picked, buyer_id=user.id)
+    db_session.flush()
+    bm = [f for f in generate_ai_flags(plan, db_session) if f["type"] == "below_market"]
+    assert not bm  # cross-condition comparison suppressed

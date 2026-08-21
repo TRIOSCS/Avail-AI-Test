@@ -85,16 +85,22 @@
        flags use (sourcing_leads.vendor_safety_for_card), so offer and plan agree.
        Compact by design; the full vendor detail is one click away. #}
     {% set _s = (safety_by_offer | default({})).get(o.id) %}
-    {% if _s and _s.band != 'unknown' %}
+    {% set _lang = (language_by_offer | default({})).get(o.id) %}
+    {% set _has_band = _s and _s.band != 'unknown' %}
+    {% set _caution = (_s.caution_labels if _s else []) %}
+    {# Show the Pre-check when there is a real vendor band OR any language flag — the
+       language flags must NOT be hidden just because the vendor has no card. #}
+    {% if _has_band or _caution or _lang %}
     {% set _band_pill = {'low_risk': 'border-emerald-200 bg-emerald-50 text-emerald-700', 'medium_risk': 'border-amber-200 bg-amber-50 text-amber-700', 'high_risk': 'border-rose-200 bg-rose-50 text-rose-700'} %}
     {% set _band_label = {'low_risk': 'Low risk', 'medium_risk': 'Medium risk', 'high_risk': 'High risk'} %}
     <div class="pb-0.5">
       <span class="text-[11px] font-medium uppercase tracking-wide text-gray-400">Pre-check</span>
+      {% if _has_band %}
       <span class="ml-1 inline-flex items-center rounded-full border px-1.5 py-0.5 text-[11px] font-medium {{ _band_pill.get(_s.band, 'border-gray-200 bg-gray-50 text-gray-600') }}">{{ _band_label.get(_s.band, 'Unknown') }}</span>
-      {% set _lang = (language_by_offer | default({})).get(o.id) %}
-      {% if _s.caution_labels or _lang %}
+      {% endif %}
+      {% if _caution or _lang %}
       <ul class="mt-0.5 space-y-0.5">
-        {% for sig in _s.caution_labels %}<li class="flex items-start gap-1 text-amber-700"><span>&#9888;</span><span>{{ sig }}</span></li>{% endfor %}
+        {% for sig in _caution %}<li class="flex items-start gap-1 text-amber-700"><span>&#9888;</span><span>{{ sig }}</span></li>{% endfor %}
         {% for lf in _lang %}<li class="flex items-start gap-1 text-amber-700"><span>&#9888;</span><span>{{ lf.note }}</span></li>{% endfor %}
       </ul>
       {% endif %}
