@@ -9,8 +9,10 @@ from sqlalchemy.orm import Session
 if TYPE_CHECKING:
     from app.constants import CustomerBidStatus
 
+# Second root lets the documents share partials via the same rooted
+# "documents/_doc_style.html" path the app-wide template env resolves.
 _jinja_env = Environment(
-    loader=FileSystemLoader("app/templates/documents"),
+    loader=FileSystemLoader(["app/templates/documents", "app/templates"]),
     autoescape=True,
 )
 

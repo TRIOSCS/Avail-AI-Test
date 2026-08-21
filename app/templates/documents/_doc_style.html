@@ -3,8 +3,9 @@
   Included INSIDE the <style> tag of quote_report.html, bid_report.html, and
   rfq_summary.html so the letterhead look lives in exactly one place; each
   document appends its own extra rules (totals / badges) after the include.
-  NOTE: document_service._jinja_env is rooted at app/templates/documents, so
-  the include path is the bare "_doc_style.html".
+  NOTE: included as "documents/_doc_style.html" — the app-wide template env is
+  rooted at app/templates, and document_service._jinja_env carries app/templates
+  as a fallback root so the same path resolves in both environments.
 #}
   @page { size: letter; margin: 1in 0.75in; }
   body { font-family: Arial, Helvetica, sans-serif; font-size: 11pt; color: #222; line-height: 1.4; }
