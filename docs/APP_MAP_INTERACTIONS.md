@@ -1179,6 +1179,11 @@ policy behavior for free — in its OWN session, right where the rows are create
 1. `app/search_service.py` — after the fresh-Sighting construction loop that
    follows the connector-aware delete (inside search's separate write session).
 2. `app/services/ics_worker/sighting_writer.py` — async ICS browser-worker save loop.
+   (Simplify sweep: the save skeleton — requirement fetch, vendor/mpn/qty dedup set,
+   unavailability re-application before commit, commit, vendor-summary rebuild — is ONE
+   shared implementation in `app/services/search_worker_base/sighting_writer.py`; each
+   worker's module supplies only its marketplace-specific Sighting field mapping. Small
+   shared parse helpers, e.g. `parse_quantity`, live in `search_worker_base/parsing.py`.)
 3. `app/services/nc_worker/sighting_writer.py` — same, NetComponents worker.
    `app/services/tbf_worker/sighting_writer.py` — same, The Broker Forum worker (ACTIVE: logs in with member creds and captures the real seller `vendor_name` + `vendor_phone` from the authenticated listing — logged-out, TBF anonymizes the seller to "TBS Member"). The session/circuit-breaker key on a POSITIVE, fail-safe logged-in marker (the "Sign out" control present, `session_manager.LOGGED_IN_MARKER`); never on "TBS Member" text, which is the logged-OUT anonymized company label.
 4. `app/routers/sources.py` — email-attachment import (ALSO the HUMAN_DIRECT/O3
@@ -1676,6 +1681,14 @@ Build-Quote tab (no schema change):
   omission. `document_service.generate_quote_report_pdf` now renders
   `quote_report.html` from this context, so the customer PDF cannot leak a
   vendor name.
+
+The quote header-totals re-roll after a line mutation also lives here:
+`recalc_quote_totals(db, quote)` (simplify sweep — moved out of
+`routers/htmx/quotes.py`) recomputes `quote.subtotal`/`total_cost`/
+`total_margin_pct` from the QuoteLine rows AND rebuilds `quote.line_items` (the
+JSON the sent email/PDF render rows from) so the OQ-12 fix holds; called before
+commit by every line-mutation route (`htmx/quotes.py` line handlers,
+`htmx/offers/crud.py::create_quote_from_offers`).
 
 **Build-Quote tab (in-workspace single-stage assembly — Chunk B).** The sales
 quote-builder modal is reshaped into a **Build Quote** tab on the requisition
@@ -2647,6 +2660,14 @@ fetch, no Graph client) when the recipient's `notify_buyplan_email_enabled` is F
 the Profile-tab toggle. Suppression is at the firing site only: the calling `notify_*`
 function still writes the recipient's in-app `activity_log` row, so nothing is lost
 in-app — only the email channel is silenced for that user.
+
+**External sends as a borrowed admin mailbox (`services/admin_mailer.py`, simplify
+sweep).** The sends that go to an external/group address rather than a logged-in
+user (`buyplan_notifications.notify_stock_sale_approved`,
+`prepayment_notifications._send_group_email`) share one home for the "borrow an
+admin with a live delegated Graph token" policy: who qualifies as sender, the token
+refresh, skip-and-log when no admin token is live, and `saveToSentItems="false"` —
+there is NO app-token sendMail path.
 
 **Reporting fold.** The retired `/v2/reporting` page's analytics now live where the work
 happens: the **Supervise** lens strip (open value / avg margin / approvals / halted /
@@ -6547,11 +6568,14 @@ next click clears).
 
 The registry API is uniform: `begin` (claim / double-enqueue guard), `finish`
 (record terminal outcome), `is_running`, `consume_outcome` (pop-once), `clear`.
+The mechanics live in ONE shared class, `app/utils/run_registry.py::RunRegistry`
+(generic over the outcome type); each feature module below just instantiates its
+own module-level singleton(s) and keeps its outcome dataclass / string constants.
 The registries in use:
 
 | Registry module | Singleton(s) | Action / trigger |
 |-----------------|--------------|------------------|
-| `material_enrich_runs.py` | `enrich_runs` **+** `crosses_runs` (two `_RunRegistry` singletons) | Material-card "Enrich" and "Find Crosses"/"Refresh" (`materials.py`) |
+| `material_enrich_runs.py` | `enrich_runs` **+** `crosses_runs` (two `RunRegistry` singletons; keeps the historical `finish(id, *, blocked=)` signature) | Material-card "Enrich" and "Find Crosses"/"Refresh" (`materials.py`) |
 | `company_enrich_runs.py` | `company_enrich_runs` | Account (Company) "Enrich" (`routers/crm/enrichment.py`) |
 | `contact_discovery_runs.py` | `contact_discovery_runs` | Account "Find Contacts" contact discovery (`routers/htmx/companies/contacts.py`) — deliberately separate from `company_enrich_runs` |
 | `vendor_contact_runs.py` | `vendor_contact_runs` | Vendor "Find Contacts" (`routers/htmx/vendors.py`) |
@@ -6582,7 +6606,7 @@ registry.)
 | Tags | 4 | List, entity tags |
 | Activity | 14 | Log calls, timeline, dashboards |
 | Admin | 15 | Users, config, diagnostics, maintenance |
-| Tickets | 12 | Error reports, trouble tickets, AI analysis; **admin-gated triage vs. open submission**: the maintainer triage console (`GET /v2/partials/trouble-tickets/workspace`, `.../list`, `.../{id}` and screenshot `GET /api/trouble-tickets/{id}/screenshot`) is `require_admin` (also hidden behind `{% if is_admin %}` Tickets tab in settings/index.html — non-admins can't see or reach it, closing the cross-user report leak), while the floating "Report a Problem" submission flow stays open to any login: `GET /api/trouble-tickets/form`, `POST /api/trouble-tickets/submit`, `POST /api/trouble-tickets` + `POST /api/error-reports` remain `require_user`. **In-shell triage wiring**: the Tickets console lives inside the Settings shell — `_build_ticket_list_context(db, status)` (in htmx_views) is the single list query+grouping helper shared by `GET .../list` and `POST /api/trouble-tickets/analyze` (analyze renders+returns the freshly-grouped `list.html` so the `innerHTML` swap into `#ticket-list` shows results — no more empty body + dead `HX-Trigger: ticketsUpdated`). The logical `status="open"` filter expands to `(submitted, in_progress)` so in-progress tickets stay under the workspace's "Open" pill. Drill-in rows/detail target `#settings-content` (no `#main-content`, no `hx-push-url`); the legacy full-page `GET /v2/trouble-tickets` route redirects 303 → `/v2/settings?tab=tickets` (registered before the generic `v2_page` catch-all; `v2_page` threads `?tab=` through for settings and `settings/index.html` maps the active tab to its first-paint content URL so `tab=tickets` lazy-loads the workspace, not a non-existent `/settings/tickets`). The detail status `<select>` gates its "Status updated" toast on `r.ok` (+`.catch`) so a failed PATCH shows an error toast |
+| Tickets | 12 | Error reports, trouble tickets, AI analysis; **admin-gated triage vs. open submission**: the maintainer triage console (`GET /v2/partials/trouble-tickets/workspace`, `.../list`, `.../{id}` and screenshot `GET /api/trouble-tickets/{id}/screenshot`) is `require_admin` (also hidden behind `{% if is_admin %}` Tickets tab in settings/index.html — non-admins can't see or reach it, closing the cross-user report leak), while the floating "Report a Problem" submission flow stays open to any login: `GET /api/trouble-tickets/form`, `POST /api/trouble-tickets/submit`, `POST /api/trouble-tickets` + `POST /api/error-reports` remain `require_user`. **In-shell triage wiring**: the Tickets console lives inside the Settings shell — `_build_ticket_list_context(db, status)` (in `htmx/archive.py`) is the single list query+grouping helper shared by `GET .../list` and `POST /api/trouble-tickets/analyze` (analyze renders+returns the freshly-grouped `list.html` so the `innerHTML` swap into `#ticket-list` shows results — no more empty body + dead `HX-Trigger: ticketsUpdated`). The logical `status="open"` filter expands to `(submitted, in_progress)` so in-progress tickets stay under the workspace's "Open" pill. Drill-in rows/detail target `#settings-content` (no `#main-content`, no `hx-push-url`); the legacy full-page `GET /v2/trouble-tickets` route redirects 303 → `/v2/settings?tab=tickets` (registered before the generic `v2_page` catch-all; `v2_page` threads `?tab=` through for settings and `settings/index.html` maps the active tab to its first-paint content URL so `tab=tickets` lazy-loads the workspace, not a non-existent `/settings/tickets`). The detail status `<select>` gates its "Status updated" toast on `r.ok` (+`.catch`) so a failed PATCH shows an error toast |
 | Documents | 2 | Requisition PDF, quote PDF |
 | Quote Builder | 5 | Draft, save, send, signature |
 | Events | 1 | SSE stream |
@@ -7149,7 +7173,9 @@ Admin console (require_admin):  Settings → Tickets  (tab admin-gated)
        the two filters compose without client state — mirrors sightings/table.html).
        _row.html carries a bug/feature badge.
   GET  /api/trouble-tickets/{id}/screenshot                 (require_admin — closes IDOR)
-  POST /api/trouble-tickets/analyze          → claude_structured groups into RootCauseGroup
+  POST /api/trouble-tickets/analyze          → ticket_diagnosis_service.analyze_open_tickets
+       (claude_structured groups into RootCauseGroup + upserts the rows; moved out of
+       the router — error_reports.analyze_tickets just delegates and re-renders list.html)
   POST /api/trouble-tickets/{id}/diagnose    → ticket_diagnosis_service.diagnose_ticket
        (bugs only in the UI); returns _diagnosis.html + OOB _generated_prompt.html
   POST /api/trouble-tickets/{id}/generate-prompt → ticket_prompt_service.generate_ticket_prompt

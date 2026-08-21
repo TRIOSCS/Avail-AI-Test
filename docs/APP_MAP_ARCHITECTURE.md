@@ -381,8 +381,10 @@ aggregated internally by `htmx_views.py` itself so `main.py` needed zero new mou
 - `app/routers/htmx/archive.py` — **tail split (tasks/tickets lifecycle slice)**: trouble-ticket
   workspace/list/detail, account + contact + vendor tasks (add-form/create/list), task
   complete/delete/edit/snooze, and the account/contact + vendor activity add-note forms. Imports
-  `company_tab`/`vendor_tab` (its activity add-note routes re-render those tabs); `htmx_views.py`
-  re-imports `_build_ticket_list_context` for `error_reports.analyze_tickets`.
+  `company_tab`/`vendor_tab` (its activity add-note routes re-render those tabs);
+  `error_reports.analyze_tickets` imports `_build_ticket_list_context` from it for the
+  post-analyze list re-render (the analysis itself now lives in
+  `services/ticket_diagnosis_service.analyze_open_tickets`).
 - `app/routers/htmx/my_day.py` — **P4.3 final split (My Day / Tasks slice)**: the Tasks
   page (`GET /v2/partials/my-day` + filter-bar re-render) plus create/snooze/reopen
   mutations. Owns `_my_day_filtered_tasks`/`_my_day_results_response`; imports
@@ -501,6 +503,9 @@ authoritative reference. Static-analysis tests in
 | `_detail_empty.html` | partials/customers/ | Right-panel placeholder shown before any account is selected in the CDM workspace. |
 | `tabs/contacts_tab.html` | partials/customers/tabs/ | Contacts tab partial for company detail — default tab on `company_detail_partial`. Displays `contact_rows` (active SiteContacts across the company's active sites + legacy site-level contacts on active sites) and renders click-to-contact links (tel:/mailto:/Teams deep link/weixin://) with `data-outreach-log` attributes. |
 | `tabs/quotes_tab.html` | partials/customers/tabs/ | CRM account Quotes tab — Alpine status filter (all/draft/sent/won/lost). Quote set = union of site-linked and requisition-linked quotes via `_company_quotes_query`. Served at `GET /v2/partials/customers/{id}/tab/quotes`. |
+| `_offset_pager.html` | partials/shared/ | Shared offset-based Prev/Next pager + "{start}–{end} of {total}" count strip for the offset-paged lists (requisitions/customers-contacts/vendors/vendor-contacts/materials); page-based lists keep `shared/pagination.html`. Callers pass their Prev/Next control attributes as raw strings, so each list keeps its own hx-get/hx-vals wiring. (Simplify sweep.) |
+| `_task_widget.html` | partials/shared/ | One source for the account / contact / vendor task UI (panel, rows, add + edit form macros). The thin wrappers (`customers/_account_tasks.html` / `_contact_tasks.html`, `vendors/tabs/_vendor_tasks.html` + their `*_task_form` siblings) pass container ids and URL prefixes in, so the existing `#…-tasks-{id}` swap contracts are unchanged. (Simplify sweep.) |
+| `_doc_style.html` | templates/documents/ | Shared print stylesheet for the customer-facing PDF documents — included inside the `<style>` tag of `quote_report.html`, `bid_report.html`, and `rfq_summary.html` (resolved as `documents/_doc_style.html` in both the app-wide env and `document_service._jinja_env`). (Simplify sweep.) |
 
 ### Inline Editing
 
