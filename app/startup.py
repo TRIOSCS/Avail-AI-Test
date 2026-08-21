@@ -797,7 +797,7 @@ def _chunked_backfill(conn, table: str, src_col: str, dst_col: str, normalize) -
         try:
             rows = conn.execute(
                 sqltext(
-                    f"SELECT id, {src_col} FROM {table} "
+                    f"SELECT id, {src_col} FROM {table} "  # nosec B608 — identifiers are code literals
                     f"WHERE {dst_col} IS NULL AND {src_col} IS NOT NULL "
                     "AND id > :last_id ORDER BY id LIMIT :lim"
                 ),
@@ -809,7 +809,7 @@ def _chunked_backfill(conn, table: str, src_col: str, dst_col: str, normalize) -
             batch = [{"nv": nv, "id": r[0]} for r in rows if (nv := normalize(r[1]))]
             if batch:
                 conn.execute(
-                    sqltext(f"UPDATE {table} SET {dst_col} = :nv WHERE id = :id"),
+                    sqltext(f"UPDATE {table} SET {dst_col} = :nv WHERE id = :id"),  # nosec B608 — identifiers are code literals
                     batch,
                 )
                 conn.commit()
