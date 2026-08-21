@@ -23,11 +23,10 @@ from ..models import (
     MaterialVendorHistory,
     Offer,
     User,
-    VendorCard,
 )
 from ..schemas.vendors import MaterialCardUpdate
-from ..services.credential_service import get_credential_cached
 from ..services.material_card_service import (
+    apply_manual_card_edits,
     backfill_missing_manufacturers,
 )
 from ..services.material_card_service import (
@@ -36,17 +35,14 @@ from ..services.material_card_service import (
 from ..services.material_card_service import (
     serialize_material_card as material_card_to_dict,
 )
-from ..services.spec_tiers import set_manufacturer
 from ..services.stock_list_ingest import (
-    StockListResult,
     StockListValidationError,
     ingest_stock_list,
+    maybe_trigger_vendor_enrichment,
     validate_metadata,
 )
-from ..utils.async_helpers import safe_background_task
 from ..utils.normalization import normalize_mpn_key
 from ..utils.search_builder import SearchBuilder
-from ..utils.vendor_helpers import _background_enrich_vendor
 
 router = APIRouter(tags=["vendors"])
 
@@ -115,7 +111,6 @@ async def add_material(
     from ..constants import MaterialCondition, MaterialEnrichmentStatus
     from ..search_service import resolve_material_card, run_deterministic_passes
     from ..services.category_normalizer import normalize_category
-    from ..services.spec_tiers import clear_validation_conflicts, set_category
     from ..utils.normalization import normalize_mpn
 
     form = await request.form()
@@ -165,29 +160,15 @@ async def add_material(
         return render_add_modal(request, errors={"mpn": "Enter a valid MPN."}, values=values, status_code=422)
 
     # Manual/100 writes — blank = blank (never default, suggest, or copy values).
-    written: list[str] = []
-    if manufacturer:
-        # Through the F1 ladder at manual/100 — same durability contract as the PUT
-        # path: a direct write would leave NULL provenance (legacy floor 50) and be
-        # silently reverted by the next decode/ingest. Canonicalizes via the alias table.
-        if set_manufacturer(card, manufacturer, "manual", 1.0):
-            written.append("manufacturer")
-            # A manual (re-)assertion resolves any recorded manufacturer conflict —
-            # same clearing semantics as category below.
-            clear_validation_conflicts(card, "manufacturer")
-    if description:
-        card.description = description
-        written.append("description")
-    if condition:
-        card.condition = condition  # validated MaterialCondition vocabulary above
-        written.append("condition")
-    if canonical_category:
-        if set_category(card, canonical_category, "manual", 1.0):
-            written.append("category")
-            # A manual (re-)assertion resolves any recorded category conflict — same
-            # clearing semantics as both PUT paths (a re-add through the modal is a
-            # re-assertion too; the stale "Needs review" badge must not survive it).
-            clear_validation_conflicts(card, "category")
+    # The ladder + conflict-clearing discipline lives in apply_manual_card_edits (the
+    # one copy shared with the PUT path); condition was vocabulary-validated above.
+    written = apply_manual_card_edits(
+        card,
+        manufacturer=manufacturer or None,
+        description=description or None,
+        condition=condition or None,
+        category_canonical=canonical_category,
+    )
     if written:
         _stamp_manual_provenance(card, written)
         if not card.enrichment_source:
@@ -378,30 +359,41 @@ async def update_material(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    from ..services.spec_tiers import clear_validation_conflicts, set_category
-
     card = db.get(MaterialCard, card_id)
     if not card or card.deleted_at is not None:
         raise HTTPException(404, "Material not found")
-    written: list[str] = []
-    if data.manufacturer is not None:
-        # Through the F1 ladder at manual/100 (the top tier): a human correction must be
-        # DURABLE — a direct `card.manufacturer = ...` write would leave NULL provenance,
-        # rank at the legacy floor (50), and be silently reverted by the next decode (85)
-        # or trio re-ingest (95). set_manufacturer also canonicalizes via the alias table
-        # and rejects empty/whitespace (a write can never blank a value).
-        if set_manufacturer(card, data.manufacturer, "manual", 1.0):
-            written.append("manufacturer")
-            # A manual (re-)assertion resolves any recorded manufacturer conflict —
-            # same clearing contract as category below.
-            clear_validation_conflicts(card, "manufacturer")
-    if data.description is not None:
-        card.description = data.description
-        written.append("description")
+
+    # Category validation up front (nothing is committed on a 422 either way). F1
+    # ladder: a human edit is manual/100 — it wins, gets provenance stamped, and purges
+    # the old commodity's facets. Off-vocab values are never persisted, and the JSON
+    # API must SAY so (a 200 with the edit silently dropped is indistinguishable from
+    # acceptance — the htmx PUT path surfaces the same rejection as a toast). 422
+    # reverts the whole request (nothing committed).
+    canonical_category = None
+    if data.category is not None:
+        from ..services.category_normalizer import normalize_category
+
+        raw_category = data.category.strip()
+        canonical_category = normalize_category(raw_category)
+        if canonical_category is None:
+            if raw_category:
+                raise HTTPException(422, f'"{raw_category}" is not a recognized commodity.')
+            # The ladder never blanks an existing category (set_category contract).
+            raise HTTPException(422, f'Category can\'t be cleared — kept "{card.category or "none"}".')
+
+    # Manufacturer/description/category ride the shared manual-edit discipline
+    # (apply_manual_card_edits — F1 ladder at manual/100 + conflict clearing), the one
+    # copy shared with the Add-part modal.
+    written = apply_manual_card_edits(
+        card,
+        manufacturer=data.manufacturer,
+        description=data.description,
+        category_canonical=canonical_category,
+    )
     if data.display_mpn is not None and data.display_mpn.strip():
         card.display_mpn = data.display_mpn.strip()
         written.append("display_mpn")
-    # Enrichment fields. Category is handled separately below — NEVER via raw setattr:
+    # Enrichment fields. Category is handled above — NEVER via raw setattr:
     # a raw write bypasses the F1 ladder, leaving the OLD provenance columns attached
     # to the NEW value (the next enrichment pass would silently revert the human's
     # correction) and skipping the stale-commodity facet purge.
@@ -418,26 +410,6 @@ async def update_material(
         if val is not None:
             setattr(card, field, val)
             written.append(field)
-    if data.category is not None:
-        # F1 ladder: a human edit is manual/100 — it wins, gets provenance stamped,
-        # and purges the old commodity's facets. Off-vocab values are never persisted,
-        # and the JSON API must SAY so (a 200 with the edit silently dropped is
-        # indistinguishable from acceptance — the htmx PUT path surfaces the same
-        # rejection as a toast). 422 reverts the whole request (nothing committed).
-        from ..services.category_normalizer import normalize_category
-
-        raw_category = data.category.strip()
-        canonical = normalize_category(raw_category)
-        if canonical is None:
-            if raw_category:
-                raise HTTPException(422, f'"{raw_category}" is not a recognized commodity.')
-            # The ladder never blanks an existing category (set_category contract).
-            raise HTTPException(422, f'Category can\'t be cleared — kept "{card.category or "none"}".')
-        if set_category(card, canonical, "manual", 1.0):
-            written.append("category")
-            # A canonical re-assertion clears any recorded conflict for the key
-            # (even an unchanged value: the human looked and confirmed it).
-            clear_validation_conflicts(card, "category")
     if written:
         _stamp_manual_provenance(card, written)
         if not card.enrichment_source:
@@ -750,25 +722,6 @@ async def import_stock_list_standalone(
     }
 
 
-async def _maybe_enrich_vendor(db: Session, result: StockListResult) -> bool:
-    """Fire background vendor enrichment when the ingest flagged a brand-new vendor with
-    a domain and an enrichment credential is configured.
-
-    Kept in the router (not the shared service) because background-task wiring + the
-    credential gate are HTTP-side-effect concerns; the service stays pure/sync.
-    """
-    if not result.enrich_vendor or result.vendor_card_id is None:
-        return False
-    if not (
-        get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")
-        or get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY")
-    ):
-        return False
-    vendor_card = db.get(VendorCard, result.vendor_card_id)
-    if not vendor_card or not vendor_card.domain:
-        return False
-    await safe_background_task(
-        _background_enrich_vendor(vendor_card.id, vendor_card.domain, vendor_card.display_name),
-        task_name="enrich_vendor_bg",
-    )
-    return True
+# The credential-gated enrichment trigger is the shared service implementation — the
+# module attribute is kept so the name remains patchable in tests.
+_maybe_enrich_vendor = maybe_trigger_vendor_enrichment

@@ -30,8 +30,7 @@ from ...services.task_service import (
     get_my_tasks as _get_my_tasks,
 )
 from ...template_env import _task_due_state, template_response
-from ._shared import _base_ctx, _parse_task_due_date
-from .requisitions import _coerce_task_priority
+from ._shared import _base_ctx, _coerce_task_priority, _parse_task_due_date
 
 router = APIRouter(tags=["htmx-views"])
 

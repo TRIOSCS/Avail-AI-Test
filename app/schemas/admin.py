@@ -1,6 +1,6 @@
 """schemas/admin.py — Pydantic models for admin endpoints.
 
-Validates admin-only request bodies: credential updates, channel routing config.
+Validates admin-only request bodies: credential updates.
 
 Called by: routers/admin/system.py, routers/admin/data_ops.py
 Depends on: pydantic
@@ -16,17 +16,6 @@ class SourceCredentialsUpdate(BaseModel):
 
     Body is a dict of VAR_NAME -> plaintext_value. Uses extra="allow" to accept dynamic
     credential keys.
-    """
-
-    model_config = ConfigDict(extra="allow")
-
-
-class TeamsChannelRouting(BaseModel):
-    """Per-event-type Teams channel routing configuration.
-
-    Valid keys: teams_channel_hot, teams_channel_quotes, teams_channel_inventory,
-    teams_channel_ownership, teams_channel_buyplan, teams_channel_ops.
-    Uses extra="allow" to accept dynamic channel keys.
     """
 
     model_config = ConfigDict(extra="allow")

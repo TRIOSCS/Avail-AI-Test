@@ -14,7 +14,6 @@ from sqlalchemy.orm import Session
 from app.models import ActivityLog, Company, CustomerSite, SiteContact, User
 from app.services.activity_service import (
     get_account_timeline,
-    get_contact_timeline,
     get_last_outbound_activity,
     log_call_activity,
     log_email_activity,
@@ -154,28 +153,6 @@ class TestGetAccountTimeline:
         assert total2 == 5
         assert len(items2) == 2
         assert items[0].id != items2[0].id
-
-
-# ═══════════════════════════════════════════════════════════════════════
-#  TestGetContactTimeline
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class TestGetContactTimeline:
-    def test_returns_activities_for_contact(self, db_session, site_contact, contact_activities):
-        items, total = get_contact_timeline(db_session, site_contact.id)
-        assert total == 2
-        assert len(items) == 2
-
-    def test_empty_when_no_activities(self, db_session, site_contact):
-        items, total = get_contact_timeline(db_session, site_contact.id)
-        assert total == 0
-        assert items == []
-
-    def test_filters_by_channel(self, db_session, site_contact, contact_activities):
-        items, total = get_contact_timeline(db_session, site_contact.id, channel=["email"])
-        assert total == 1
-        assert items[0].channel == "email"
 
 
 # ═══════════════════════════════════════════════════════════════════════

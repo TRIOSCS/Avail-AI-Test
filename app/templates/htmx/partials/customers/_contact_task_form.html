@@ -1,36 +1,11 @@
 {# _contact_task_form.html — Inline add-task form for a contact.
-   Receives: company_id, contact_id
+   Thin wrapper over shared/_task_widget.html task_add_form (with context:
+   the macro reads users + current_user_id from this template's context).
+   Receives: company_id, contact_id, users, current_user_id
    Called by: GET /v2/partials/customers/{company_id}/contacts/{contact_id}/tasks/add-form
 #}
-<form hx-post="/v2/partials/customers/{{ company_id }}/contacts/{{ contact_id }}/tasks"
-      hx-target="#contact-tasks-{{ contact_id }}"
-      hx-swap="outerHTML"
-      class="mt-1 space-y-2">
-  <input type="text" name="title" placeholder="Task title" required
-         class="w-full px-2 py-1 text-xs border border-gray-300 rounded input-focus"
-         aria-label="Task title">
-  <input type="date" name="due_at"
-         class="px-2 py-1 text-xs border border-gray-300 rounded input-focus"
-         aria-label="Due date">
-  <div class="flex gap-2">
-    <select name="priority" aria-label="Priority"
-            class="px-2 py-1 text-xs border border-gray-300 rounded input-focus">
-      <option value="2" selected>Medium</option>
-      <option value="1">Low</option>
-      <option value="3">High</option>
-    </select>
-    <select name="assigned_to_id" aria-label="Assignee"
-            class="flex-1 px-2 py-1 text-xs border border-gray-300 rounded input-focus">
-      {% for u in users %}
-      <option value="{{ u.id }}"{{ ' selected' if u.id == current_user_id else '' }}>{{ u.name or u.email }}</option>
-      {% endfor %}
-    </select>
-  </div>
-  <div class="flex gap-2">
-    <button type="submit"
-            class="btn-primary btn-sm">Save</button>
-    <button type="button"
-            onclick="document.getElementById('contact-task-form-{{ contact_id }}').innerHTML = ''"
-            class="btn-secondary btn-sm">Cancel</button>
-  </div>
-</form>
+{% from "htmx/partials/shared/_task_widget.html" import task_add_form with context %}
+{{ task_add_form('/v2/partials/customers/' ~ company_id ~ '/contacts/' ~ contact_id ~ '/tasks',
+                 'contact-tasks-' ~ contact_id,
+                 form_id='contact-task-form-' ~ contact_id,
+                 form_class='mt-1 space-y-2') }}

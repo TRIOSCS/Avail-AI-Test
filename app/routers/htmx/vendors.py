@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session, joinedload
 from ...constants import AccessKey
 from ...database import get_db
 from ...dependencies import require_access, require_admin, require_prospect_site_access, require_user
-from ...models import Offer, Sighting, SourcingLead, User, VendorCard
+from ...models import Offer, User, VendorCard
 from ...models.enrichment import ProspectContact
 from ...models.vendors import VendorContact
 from ...services.crm_service import cadence_state as _cadence_state
@@ -43,6 +43,7 @@ from ...utils.sql_helpers import escape_like
 from ...utils.vendor_helpers import sync_card_emails_on_contact_change
 from .._lookup_helpers import get_vendor_card_or_404
 from ._shared import _base_ctx, _sanitize_hx_params
+from ._shared_tabs import _vendor_overview_data
 from ._shared_tabs import vendor_tab as _vendor_tab_impl
 
 router = APIRouter(tags=["htmx-views"])
@@ -553,38 +554,11 @@ async def vendor_detail_partial(
     hx_target, push_url_base = _sanitize_hx_params(hx_target, push_url_base, "/v2/vendors")
     vendor = get_vendor_card_or_404(db, vendor_id)
 
-    contacts = (
-        db.query(VendorContact)
-        .filter(VendorContact.vendor_card_id == vendor_id)
-        .order_by(VendorContact.interaction_count.desc().nullslast())
-        .limit(20)
-        .all()
-    )
-
-    sightings_query = db.query(Sighting).filter(Sighting.vendor_name_normalized == vendor.normalized_name)
-    if mpn.strip():
-        from app.utils.normalization import normalize_mpn
-
-        norm = normalize_mpn(mpn)
-        if norm:
-            sightings_query = sightings_query.filter(Sighting.normalized_mpn == norm)
-
-    recent_sightings = sightings_query.order_by(Sighting.created_at.desc().nullslast()).limit(10).all()
-
-    # Load safety data from most recent SourcingLead
-    safety_band = None
-    safety_summary = None
-    safety_flags = None
-    lead = (
-        db.query(SourcingLead)
-        .filter(SourcingLead.vendor_name_normalized == vendor.normalized_name)
-        .order_by(SourcingLead.created_at.desc())
-        .first()
-    )
-    if lead:
-        safety_band = lead.vendor_safety_band
-        safety_summary = lead.vendor_safety_summary
-        safety_flags = lead.vendor_safety_flags
+    # Shared overview assembly (contacts, sightings, safety) — the detail header
+    # deliberately hides the numeric safety score, so it overrides those two keys.
+    overview = _vendor_overview_data(db, vendor, mpn)
+    overview["safety_score"] = None
+    overview["safety_available"] = False
 
     now_utc = datetime.now(UTC)
     vendor_cadence = _cadence_state(None, vendor.last_outbound_at, now_utc)
@@ -597,18 +571,11 @@ async def vendor_detail_partial(
     vendor_score_breakdown = compute_single_vendor_score_breakdown(db, vendor_id) if vendor.vendor_score else []
 
     ctx = _base_ctx(request, user, "vendors")
+    ctx.update(overview)
     ctx.update(
         {
             "vendor": vendor,
             "vendor_score_breakdown": vendor_score_breakdown,
-            "contacts": contacts,
-            "recent_sightings": recent_sightings,
-            "safety_band": safety_band,
-            "safety_summary": safety_summary,
-            "safety_flags": safety_flags,
-            "safety_score": None,
-            "safety_available": False,
-            "mpn_filter": mpn.strip().upper() if mpn.strip() else None,
             "cadence_state": vendor_cadence,
             "next_best_touch": vendor_nbt,
             "now_utc": now_utc,
@@ -1029,10 +996,10 @@ async def vendor_ownership_badge(
 
 
 def _render_vendor_custom_fields(request: Request, vendor):
-    """Render vendor _custom_fields partial."""
+    """Render the shared _custom_fields partial for a vendor card."""
     return template_response(
-        "htmx/partials/vendors/_custom_fields.html",
-        {"request": request, "vendor": vendor},
+        "htmx/partials/customers/_custom_fields.html",
+        {"request": request, "entity": "vendor", "obj": vendor},
     )
 
 

@@ -44,7 +44,7 @@
           <td class="text-right tabular-nums">{{ row.quantity or '—' }}</td>
           <td>{{ row.date_code or '—' }}</td>
           <td>{{ row.condition or '—' }}</td>
-          <td class="text-right tabular-nums">{{ '${:,.2f}'.format(row.asking_price) if row.asking_price else '—' }}</td>
+          <td class="text-right tabular-nums">{{ "$" ~ row.asking_price|money if row.asking_price else '—' }}</td>
         </tr>
         {% endfor %}
       </tbody>

@@ -180,6 +180,20 @@ def expand_part(db: Session, part: str) -> dict:
     return expand_parts(db, {part})[part]
 
 
+def class_keys_and_spellings(db: Session, part: str) -> tuple[set[str], set[str]]:
+    """Equivalence-class derivation shared by the proactive matcher passes.
+
+    Returns ``(class_keys, class_spellings)``: the pooled normalized keys for demand
+    joins, and every observed spelling (plus *part* itself) for suppression/dedup
+    (throttle, do-not-offer, active-match) so a variant spelling can never sidestep a
+    suppression. The ONE copy of the expand_part → observed_spellings union that the
+    three matchers in proactive_matching previously each inlined.
+    """
+    class_keys = set(expand_part(db, part)["keys"])
+    class_spellings = {part} | {s for group in observed_spellings(db, class_keys).values() for s in group}
+    return class_keys, class_spellings
+
+
 def windowed_spellings_by_key(db: Session) -> dict[str, str]:
     """{normalized key: example spelling} over the matching windows.
 

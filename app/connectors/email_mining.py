@@ -226,6 +226,46 @@ class EmailMiner:
             self.db.flush()
             logger.info(f"Cleared stale delta token for {folder} (user {self.user_id})")
 
+    async def _delta_scan(
+        self,
+        folder_key: str,
+        endpoint: str,
+        select: str,
+        lookback_days: int,
+        max_messages: int,
+        log_label: str,
+    ) -> tuple[list[dict], bool]:
+        """Try a Graph delta query for one folder, managing the stored delta token.
+
+        Returns ``(messages, used_delta)``. Token-retention rules: a
+        ``GraphSyncStateExpired`` (410) clears the stored token so the next scan does
+        a full re-sync; any other failure KEEPS the token — it was never advanced
+        past unfetched data. Both failure modes return ``([], False)`` so the
+        caller's non-delta fallback runs.
+        """
+        delta_token = self._get_delta_token(folder_key)
+        try:
+            messages, new_token = await self.gc.delta_query(
+                endpoint,
+                delta_token=delta_token,
+                params={"$select": select, "$top": "50"},
+                max_items=max_messages,
+                max_page_size=50,
+                # Bound the initial full-sync round to the same window the caller's
+                # non-delta fallback scans.
+                initial_lookback_days=lookback_days,
+            )
+            if new_token:
+                self._save_delta_token(folder_key, new_token)
+            logger.info(f"Delta scan ({log_label}): {len(messages)} changes")
+            return messages, True
+        except GraphSyncStateExpired:
+            logger.warning(f"Delta token expired for {log_label} — clearing and falling back")
+            self._clear_delta_token(folder_key)
+        except Exception as e:
+            logger.warning(f"Delta query failed for {log_label}, falling back: {e}")
+        return [], False
+
     # ══════════════════════════════════════════════════════════════════
     #  Inbound: Vendor Contact Mining
     # ══════════════════════════════════════════════════════════════════
@@ -245,39 +285,19 @@ class EmailMiner:
                 "used_delta": bool,
             }
         """
-        messages = []
+        messages: list[dict] = []
         used_delta = False
 
         # ── H8: Try Delta Query for incremental scan ──
         if use_delta and self.user_id:
-            delta_token = self._get_delta_token("inbox_mining")
-            try:
-                items, new_token = await self.gc.delta_query(
-                    "/me/mailFolders/inbox/messages/delta",
-                    delta_token=delta_token,
-                    params={"$select": MSG_SELECT, "$top": "50"},
-                    max_items=max_messages,
-                    max_page_size=50,
-                    # Bound the initial full-sync round to the same window the
-                    # keyword-search fallback below scans.
-                    initial_lookback_days=lookback_days,
-                )
-                messages = items
-                used_delta = True
-                if new_token:
-                    self._save_delta_token("inbox_mining", new_token)
-                logger.info(f"Delta scan (mining): {len(messages)} changes")
-            except GraphSyncStateExpired:
-                logger.warning("Delta token expired for inbox mining — clearing and falling back")
-                self._clear_delta_token("inbox_mining")
-                messages = []
-                used_delta = False
-            except Exception as e:
-                # Any other failure (typed error page, network) keeps the token —
-                # it was never advanced past unfetched data — and falls back.
-                logger.warning(f"Delta query failed for mining, falling back to search: {e}")
-                messages = []
-                used_delta = False
+            messages, used_delta = await self._delta_scan(
+                "inbox_mining",
+                "/me/mailFolders/inbox/messages/delta",
+                MSG_SELECT,
+                lookback_days,
+                max_messages,
+                log_label="inbox mining",
+            )
 
         # ── Fallback: Keyword search scan ──
         if not messages and not used_delta:
@@ -511,40 +531,21 @@ class EmailMiner:
                 "used_delta": bool,
             }
         """
-        messages = []
+        messages: list[dict] = []
         used_delta = False
 
         # ── H8: Try Delta Query on SentItems ──
+        # (delta only supports filtering on receivedDateTime, ≈ sentDateTime for
+        # sent items, so the initial-lookback bound matches the search fallback.)
         if self.user_id:
-            delta_token = self._get_delta_token("sent_items")
-            try:
-                items, new_token = await self.gc.delta_query(
-                    "/me/mailFolders/sentItems/messages/delta",
-                    delta_token=delta_token,
-                    params={"$select": SENT_SELECT, "$top": "50"},
-                    max_items=max_messages,
-                    max_page_size=50,
-                    # Bound the initial full-sync round to the same window the
-                    # search fallback below scans (delta only supports filtering
-                    # on receivedDateTime, ≈ sentDateTime for sent items).
-                    initial_lookback_days=lookback_days,
-                )
-                messages = items
-                used_delta = True
-                if new_token:
-                    self._save_delta_token("sent_items", new_token)
-                logger.info(f"Delta scan (sent): {len(messages)} changes")
-            except GraphSyncStateExpired:
-                logger.warning("Delta token expired for sent items — clearing and falling back")
-                self._clear_delta_token("sent_items")
-                messages = []
-                used_delta = False
-            except Exception as e:
-                # Any other failure (typed error page, network) keeps the token —
-                # it was never advanced past unfetched data — and falls back.
-                logger.warning(f"Delta query failed for SentItems, falling back: {e}")
-                messages = []
-                used_delta = False
+            messages, used_delta = await self._delta_scan(
+                "sent_items",
+                "/me/mailFolders/sentItems/messages/delta",
+                SENT_SELECT,
+                lookback_days,
+                max_messages,
+                log_label="sent items",
+            )
 
         # ── Fallback: Search SentItems ──
         if not messages and not used_delta:

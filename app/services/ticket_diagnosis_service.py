@@ -203,3 +203,105 @@ async def diagnose_tickets_bulk(db: Session, tickets: list[TroubleTicket]) -> di
     ok = sum(1 for v in outcomes.values() if v == "ok")
     logger.info("Bulk-diagnosed {}/{} trouble tickets", ok, len(tickets))
     return outcomes
+
+
+async def analyze_open_tickets(db: Session) -> str:
+    """Batch AI root-cause analysis: group open report-button tickets.
+
+    Projects the 50 newest SUBMITTED/IN_PROGRESS tickets, asks Claude to group them
+    by root cause, then upserts RootCauseGroup rows (identity = exact title match,
+    suggested_fix backfilled when empty) and links each ticket to its group.
+
+    Returns "no_tickets" (nothing to analyze), "no_result" (AI unavailable or empty
+    answer; nothing persisted), or "ok" (groups committed). Moved from
+    routers/error_reports.analyze_tickets, which delegates here and renders.
+    """
+    from sqlalchemy import desc
+
+    from ..constants import TicketSource, TicketStatus
+    from ..models.root_cause_group import RootCauseGroup
+    from ..utils.claude_client import claude_structured
+    from ..utils.claude_errors import ClaudeError, ClaudeUnavailableError
+
+    tickets = (
+        db.query(TroubleTicket)
+        .filter(TroubleTicket.status.in_([TicketStatus.SUBMITTED, TicketStatus.IN_PROGRESS]))
+        .filter(TroubleTicket.source == TicketSource.REPORT_BUTTON)
+        .order_by(desc(TroubleTicket.created_at))
+        .limit(50)
+        .all()
+    )
+
+    if not tickets:
+        return "no_tickets"
+
+    ticket_data = []
+    for t in tickets:
+        ticket_data.append(
+            {
+                "id": t.id,
+                "description": (t.description or "")[:300],
+                "page": t.current_page or "",
+                "js_errors": (t.console_errors or "")[:200],
+                "network": str(t.network_errors or "")[:200],
+            }
+        )
+
+    tool_schema = {
+        "type": "object",
+        "properties": {
+            "groups": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string"},
+                        "suggested_fix": {"type": "string"},
+                        "ticket_ids": {"type": "array", "items": {"type": "integer"}},
+                    },
+                    "required": ["title", "ticket_ids"],
+                },
+            }
+        },
+        "required": ["groups"],
+    }
+
+    try:
+        result = await claude_structured(
+            prompt=(
+                "Group these trouble tickets by root cause. For each group, provide a short title "
+                "and a suggested fix. Return JSON with a 'groups' array.\n\n"
+                f"Tickets:\n{json.dumps(ticket_data, indent=2)}"
+            ),
+            schema=tool_schema,
+            system="You are a bug triage assistant. Group related bug reports by their likely root cause.",
+            model_tier="fast",
+        )
+    except (ClaudeUnavailableError, ClaudeError) as e:
+        logger.warning("AI root cause analysis failed: {}", e)
+        result = None
+
+    if not result or "groups" not in result:
+        return "no_result"
+
+    ticket_map = {t.id: t for t in tickets}
+    for group_data in result["groups"]:
+        title = (group_data.get("title") or "Unknown")[:200]
+        fix = group_data.get("suggested_fix")
+        ticket_ids = group_data.get("ticket_ids", [])
+
+        group = db.query(RootCauseGroup).filter(RootCauseGroup.title == title).first()
+        if not group:
+            group = RootCauseGroup(title=title, suggested_fix=fix)
+            db.add(group)
+            db.flush()
+        elif fix and not group.suggested_fix:
+            group.suggested_fix = fix
+
+        for tid in ticket_ids:
+            if tid in ticket_map:
+                ticket_map[tid].root_cause_group_id = group.id
+
+    db.commit()
+    logger.info("AI analysis grouped {} tickets into {} groups", len(tickets), len(result["groups"]))
+    return "ok"

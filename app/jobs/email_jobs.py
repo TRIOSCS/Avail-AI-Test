@@ -23,7 +23,7 @@ from loguru import logger
 
 from ..scheduler import _traced_job
 from ..shared_constants import RFQ_SUBJECT_TAG_RE
-from ..utils.token_manager import _utc
+from ..utils.timezones import as_utc
 
 
 def register_email_jobs(scheduler, settings, db=None):
@@ -100,6 +100,20 @@ def register_email_jobs(scheduler, settings, db=None):
         )
 
 
+def _connected_users(db):
+    """Users whose M365 connection is usable by background jobs.
+
+    The single definition of "connected" for the job layer: a stored refresh token, a
+    current access token, and m365_connected. Used by contacts sync, calendar scan,
+    sent-folder scan (here) and inbox scan (core_jobs); each job layers its own per-job
+    staleness check on top.
+    """
+    from ..models import User
+
+    users = db.query(User).filter(User.refresh_token.isnot(None)).all()
+    return [u for u in users if u.access_token and u.m365_connected]
+
+
 @_traced_job
 async def _job_contacts_sync():
     """Sync Outlook contacts for all connected users."""
@@ -110,12 +124,9 @@ async def _job_contacts_sync():
     db = SessionLocal()
     try:
         now = datetime.now(UTC)
-        users = db.query(User).filter(User.refresh_token.isnot(None)).all()
         user_ids = []
-        for user in users:
-            if not user.access_token or not user.m365_connected:
-                continue
-            should_sync = not user.last_contacts_sync or now - _utc(user.last_contacts_sync) > timedelta(hours=24)
+        for user in _connected_users(db):
+            should_sync = not user.last_contacts_sync or now - as_utc(user.last_contacts_sync) > timedelta(hours=24)
             if should_sync:
                 user_ids.append(user.id)
     except Exception as e:
@@ -258,7 +269,7 @@ async def _job_contact_status_compute():
                 continue
 
             if last_at is not None:
-                last_at = _utc(last_at)
+                last_at = as_utc(last_at)
                 days = (now - last_at).days
                 if days <= 7:
                     new_status = "active"
@@ -271,7 +282,7 @@ async def _job_contact_status_compute():
                     new_status = "inactive"
             else:
                 # No activity ever
-                created = _utc(sc.created_at) if sc.created_at else now
+                created = as_utc(sc.created_at) if sc.created_at else now
                 days_since_created = (now - created).days
                 if days_since_created > 90:
                     new_status = "inactive"
@@ -327,8 +338,7 @@ async def _job_calendar_scan():
 
     db = SessionLocal()
     try:
-        users = db.query(User).filter(User.refresh_token.isnot(None)).all()
-        users_to_scan = [u for u in users if u.access_token and u.m365_connected]
+        users_to_scan = _connected_users(db)
     except Exception as e:
         logger.exception(f"Calendar scan user query error: {e}")
         raise  # Re-raise so _traced_job / Sentry can capture
@@ -468,11 +478,50 @@ async def _scan_user_inbox(user, db):
 # ── Vendor Contact Mining ───────────────────────────────────────────────
 
 
+def _preload_vendor_cards(db, norm_names: list[str]) -> dict:
+    """Map normalized_name → VendorCard for all existing cards in one IN query."""
+    from ..models import VendorCard
+
+    if not norm_names:
+        return {}
+    return {c.normalized_name: c for c in db.query(VendorCard).filter(VendorCard.normalized_name.in_(norm_names)).all()}
+
+
+def _get_or_create_vendor_card(db, card_map: dict, norm: str, display_name: str, source: str):
+    """Return card_map[norm], creating (add + flush) a VendorCard if absent.
+
+    On an IntegrityError flush conflict (concurrent insert of the same normalized_name)
+    logs a warning, rolls the session back, and returns None — the caller skips that
+    contact. A successfully created card is cached in card_map so later contacts for the
+    same vendor reuse it.
+    """
+    from ..models import VendorCard
+
+    card = card_map.get(norm)
+    if card:
+        return card
+    card = VendorCard(
+        normalized_name=norm,
+        display_name=display_name,
+        emails=[],
+        phones=[],
+        source=source,
+    )
+    db.add(card)
+    try:
+        db.flush()
+        card_map[norm] = card
+    except sqlalchemy.exc.IntegrityError as e:
+        logger.warning(f"VendorCard flush conflict for '{norm}': {e}")
+        db.rollback()
+        return None
+    return card
+
+
 async def _mine_vendor_contacts(user, db, is_backfill: bool = False):
     """Extract vendor contact info from recent emails into VendorCards."""
     from ..config import settings
     from ..connectors.email_mining import EmailMiner
-    from ..models import VendorCard
     from ..utils.token_manager import get_valid_token
     from ..vendor_utils import normalize_vendor_name
 
@@ -493,10 +542,7 @@ async def _mine_vendor_contacts(user, db, is_backfill: bool = False):
         vn = contact.get("vendor_name", "")
         if vn:
             norm_names.append(normalize_vendor_name(vn))
-    card_map = {}
-    if norm_names:
-        for c in db.query(VendorCard).filter(VendorCard.normalized_name.in_(norm_names)).all():
-            card_map[c.normalized_name] = c
+    card_map = _preload_vendor_cards(db, norm_names)
 
     enriched = 0
     for contact in contacts:
@@ -505,23 +551,9 @@ async def _mine_vendor_contacts(user, db, is_backfill: bool = False):
             continue
 
         norm = normalize_vendor_name(vendor_name)
-        card = card_map.get(norm)
-        if not card:
-            card = VendorCard(
-                normalized_name=norm,
-                display_name=vendor_name,
-                emails=[],
-                phones=[],
-                source="email_mining",
-            )
-            db.add(card)
-            try:
-                db.flush()
-                card_map[norm] = card
-            except sqlalchemy.exc.IntegrityError as e:
-                logger.warning(f"VendorCard flush conflict for '{norm}': {e}")
-                db.rollback()
-                continue
+        card = _get_or_create_vendor_card(db, card_map, norm, vendor_name, "email_mining")
+        if card is None:
+            continue
 
         enriched += merge_emails_into_card(card, contact.get("emails", []))
         merge_phones_into_card(card, contact.get("phones", []))
@@ -603,7 +635,7 @@ async def _sync_user_contacts(user, db):
     """Pull contacts from Outlook into VendorCards using delta query for efficiency."""
     from app.utils.graph_client import GraphClient, GraphSyncStateExpired
 
-    from ..models import SyncState, VendorCard
+    from ..models import SyncState
     from ..vendor_utils import (
         merge_emails_into_card,
         merge_phones_into_card,
@@ -678,10 +710,7 @@ async def _sync_user_contacts(user, db):
         company = c.get("companyName") or c.get("displayName") or ""
         if company and len(company) >= 2:
             sync_norm_names.append(normalize_vendor_name(company))
-    sync_card_map = {}
-    if sync_norm_names:
-        for vc in db.query(VendorCard).filter(VendorCard.normalized_name.in_(sync_norm_names)).all():
-            sync_card_map[vc.normalized_name] = vc
+    sync_card_map = _preload_vendor_cards(db, sync_norm_names)
 
     for c in contacts:
         company = c.get("companyName") or c.get("displayName") or ""
@@ -689,23 +718,9 @@ async def _sync_user_contacts(user, db):
             continue
 
         norm = normalize_vendor_name(company)
-        card = sync_card_map.get(norm)
-        if not card:
-            card = VendorCard(
-                normalized_name=norm,
-                display_name=company,
-                emails=[],
-                phones=[],
-                source="outlook_contacts",
-            )
-            db.add(card)
-            try:
-                db.flush()
-                sync_card_map[norm] = card
-            except sqlalchemy.exc.IntegrityError as e:
-                logger.warning(f"VendorCard flush conflict for '{norm}': {e}")
-                db.rollback()
-                continue
+        card = _get_or_create_vendor_card(db, sync_card_map, norm, company, "outlook_contacts")
+        if card is None:
+            continue
 
         # Merge emails from Outlook contact
         outlook_emails = [(addr.get("address") or "").strip() for addr in c.get("emailAddresses", [])]
@@ -743,8 +758,7 @@ async def _job_scan_sent_folders():
 
     db = SessionLocal()
     try:
-        users = db.query(User).filter(User.refresh_token.isnot(None)).all()
-        users_to_scan = [u.id for u in users if u.access_token and u.m365_connected]
+        users_to_scan = [u.id for u in _connected_users(db)]
     except Exception as e:
         logger.exception(f"Sent folder scan user query error: {e}")
         raise  # Re-raise so _traced_job / Sentry can capture

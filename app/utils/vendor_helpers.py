@@ -586,3 +586,94 @@ def merge_contact_into_card(
     if source and changed:
         card.source = source
     return changed
+
+
+def _coalesce_contact_list(values, single):
+    """Normalize an AI-returned list field, prepending an optional single value."""
+    if isinstance(values, str):
+        values = [values]
+    else:
+        values = list(values or [])
+    if single and single not in values:
+        values.insert(0, single)
+    return values
+
+
+async def lookup_vendor_contact_waterfall(
+    db: Session, card: VendorCard, vendor_name: str
+) -> tuple[str | None, int, str | None]:
+    """Run the 3-tier vendor-contact waterfall (cache -> website scrape -> AI web
+    search) against *card*, merging any found contacts into it (committed here).
+
+    Returns ``(source, tier, error)``: ("cached", 1, None), ("website_scrape", 2, None),
+    ("ai_lookup", 3, None), or (None, 0, error) when no tier produced emails — missing
+    ANTHROPIC_API_KEY or an AI failure. *vendor_name* is the caller-supplied name (used
+    for logging). Moved from routers/vendor_contacts.py so the tier ordering, prompt,
+    and merge policy live beside their sibling helpers.
+    """
+    # TIER 1: Cache check (free, instant)
+    if card.emails:
+        return "cached", 1, None
+
+    # TIER 2: Website scrape (free, ~1-2 sec)
+    if card.website:
+        logger.info(f"Tier 2: Scraping {card.website} for {vendor_name}")
+        try:
+            scraped = await scrape_website_contacts(card.website)
+            if scraped["emails"] or scraped["phones"]:
+                merge_contact_into_card(card, scraped["emails"], scraped["phones"], source="website_scrape")
+                db.commit()
+                if card.emails:
+                    return "website_scrape", 2, None
+        except Exception as e:
+            logger.warning(f"Tier 2 scrape failed for {vendor_name}: {e}")
+
+    # TIER 3: AI lookup (expensive, last resort)
+    if not get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"):
+        return None, 0, "No API key configured"
+
+    logger.info(f"Tier 3: AI lookup for {vendor_name}")
+    try:
+        website_hint = f" Their website may be {card.website}." if card.website else ""
+
+        from .claude_client import claude_json
+
+        info = await claude_json(
+            prompt=(
+                f"Find ALL contact information for '{vendor_name}', an electronic "
+                f"component distributor/broker.{website_hint}\n\n"
+                f"Search these sources:\n"
+                f"1. Their company website -- look for contact, about, sales pages\n"
+                f"2. LinkedIn company page -- phone numbers, website\n"
+                f"3. Industry directories (FindChips, IC Source, TrustedParts)\n"
+                f"4. Google Maps / business listings\n\n"
+                f"I need EVERY email you can find:\n"
+                f"- General: info@, contact@, support@\n"
+                f"- Sales: sales@, rfq@, quotes@, purchasing@\n"
+                f"- Individual salespeople: firstname@, firstname.lastname@\n\n"
+                f"And ALL phone numbers -- main line, sales direct, fax.\n\n"
+                f"Return ONLY a JSON object:\n"
+                f'{{"emails": [...], "phones": [...], "website": "..."}}\n'
+                f"No explanation, no markdown, just the JSON."
+            ),
+            model_tier="fast",
+            max_tokens=1024,
+            tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}],
+            timeout=60,
+        )
+
+        if not info or not isinstance(info, dict):
+            info = {}
+
+        ai_emails = clean_emails(_coalesce_contact_list(info.get("emails"), info.get("email")))
+        ai_phones = clean_phones(_coalesce_contact_list(info.get("phones"), info.get("phone")))
+        website = info.get("website")
+
+        merge_contact_into_card(card, ai_emails, ai_phones, website, source="ai_lookup")
+        db.commit()
+
+        return "ai_lookup", 3, None
+
+    except Exception as e:
+        logger.warning(f"Tier 3 AI lookup failed for {vendor_name}: {e}")
+        return None, 0, str(e)[:200]

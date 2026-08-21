@@ -131,17 +131,5 @@ Usage:
 {%- endmacro %}
 
 
-{# ── Prepayment "already requested" pill (#10) ─────────────────────────
-   Non-interactive replacement for the live request button once a line already has a live
-   prepayment (state = 'requested'|'approved'), so a buyer/approver can't fire a duplicate
-   request that dead-ends on the service's duplicate-pending 400. Button-shaped (.btn) but
-   disabled — a clear "this is done" affordance, not a click target. #}
-{% macro prepay_requested_pill(state) -%}
-<span class="btn btn-secondary btn-sm opacity-60 cursor-default" aria-disabled="true">
-  {%- if state == 'paid' -%}Paid{%- elif state == 'approved' -%}Prepaid{%- else -%}Prepay requested{%- endif -%}
-</span>
-{%- endmacro %}
-
-
 {# (The old per-tab scope_toggle macro retired with the 3-tab console — the Approvals
    Workspace list owns its own Mine/All toggle in _workspace_list.html.) #}

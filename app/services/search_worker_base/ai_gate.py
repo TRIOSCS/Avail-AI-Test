@@ -6,7 +6,7 @@ passives, connectors). Includes a classification cache to avoid
 re-classifying the same part.
 
 Called by: worker loop (process_ai_gate)
-Depends on: llm_router, queue model
+Depends on: claude_client, queue model
 """
 
 import threading
@@ -131,7 +131,7 @@ class AIGate:
             List of {"mpn": str, search_field: bool, "commodity": str, "reason": str}
             or None on API failure.
         """
-        from app.utils.llm_router import routed_structured
+        from app.utils.claude_client import claude_structured
 
         if not parts:
             return []
@@ -145,7 +145,7 @@ class AIGate:
         prompt = "\n".join(prompt_lines)
 
         try:
-            result = await routed_structured(
+            result = await claude_structured(
                 prompt=prompt,
                 schema=self._schema,
                 system=self._system_prompt,

@@ -306,3 +306,56 @@ def mark_prepayment_paid(
     # a coroutine (this sync service is driven by the async confirm route + in-app fallback).
     schedule_prepayment_notify(run_prepayment_notify_bg(notify_prepayment_paid, prepayment.id))
     return prepayment
+
+
+def unmark_prepayment_paid(db: Session, prepayment: Prepayment, actor) -> Prepayment:
+    """Reverse a mis-clicked payment: revert ``paid`` → ``approved``.
+
+    The exact inverse of :func:`mark_prepayment_paid`, kept beside it so the paid-field
+    set is defined and cleared in ONE place: clears the seven paid_* fields, re-mints a
+    fresh single-use ``pay_token`` (the old link was cleared on paid), writes the
+    correction ActivityLog, and commits.
+
+    Args:
+        db: SQLAlchemy session (sync, 2.0 style).
+        prepayment: The Prepayment to revert — must be in status ``paid``.
+        actor: The manager/admin User performing the reversal (stamped on the log).
+
+    Returns:
+        The same Prepayment, now committed back in status ``approved``.
+
+    Raises:
+        ValueError: If *prepayment* is not in status ``paid`` (only a paid prepayment
+            can be reversed).
+    """
+    import secrets
+
+    from ..constants import ActivityType, PrepaymentStatus
+    from ..models import ActivityLog
+
+    if prepayment.status != PrepaymentStatus.PAID.value:
+        raise ValueError("Only a paid prepayment can be reversed.")
+
+    prepayment.status = PrepaymentStatus.APPROVED.value
+    prepayment.paid_at = None
+    prepayment.paid_by_id = None
+    prepayment.paid_by_label = None
+    prepayment.paid_via = None
+    prepayment.wire_reference = None
+    prepayment.paid_amount = None
+    prepayment.pay_token = secrets.token_urlsafe(32)
+
+    requisition_id = prepayment.buy_plan.requisition_id if prepayment.buy_plan is not None else None
+    db.add(
+        ActivityLog(
+            user_id=actor.id,
+            activity_type=ActivityType.NOTE,
+            channel="system",
+            requisition_id=requisition_id,
+            buy_plan_id=prepayment.buy_plan_id,
+            subject="Prepayment payment reversed",
+            notes=f"Prepayment #{prepayment.id} reverted paid → approved by {actor.name or actor.email}",
+        )
+    )
+    db.commit()
+    return prepayment

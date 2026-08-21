@@ -8,23 +8,18 @@ Depends on: models, dependencies, vendor_utils, vendor_helpers, cache
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import func as sqlfunc
-from sqlalchemy import text as sqltext
-from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy.orm import Session
 
-from ..cache.decorators import cached_endpoint
 from ..database import get_db
 from ..dependencies import require_admin, require_user
 from ..models import Company, Offer, User, VendorCard, VendorReview
-from ..models.strategic import StrategicVendor
-from ..models.vendors import VendorContact
 from ..schemas.responses import VendorDetailResponse, VendorListResponse
 from ..schemas.vendors import VendorBlacklistToggle, VendorCardCreate, VendorCardUpdate, VendorReviewCreate
 
 # The duplicate-check logic lives in the service (shared with the sightings RFQ
 # composer's POST composer-vendor endpoint). _fuzzy_match_python is re-exported
 # for back-compat — existing callers/tests import it from this module.
+from ..services.vendor_analysis_service import list_vendor_cards
 from ..services.vendor_duplicates import _fuzzy_match_python  # noqa: F401
 from ..services.vendor_duplicates import check_vendor_duplicate as _check_vendor_duplicate
 from ..utils.search_builder import SearchBuilder
@@ -107,234 +102,8 @@ async def list_vendors(
 ):
     """List vendor cards with search, pagination, tier filter, sort, and engagement
     scores."""
-
-    @cached_endpoint(
-        prefix="vendor_list", ttl_hours=0.5, key_params=["q", "tag", "tier", "sort", "order", "limit", "offset"]
-    )
-    def _fetch(q, tag, tier, sort, order, limit, offset, db):
-        query = db.query(VendorCard)
-
-        # ── Tier filter ──
-        if tier:
-            tier = tier.strip().lower()
-            if tier == "proven":
-                query = query.filter(
-                    VendorCard.vendor_score.isnot(None),
-                    VendorCard.vendor_score >= 66,
-                    VendorCard.is_new_vendor.is_(False),
-                )
-            elif tier == "developing":
-                query = query.filter(
-                    VendorCard.vendor_score.isnot(None),
-                    VendorCard.vendor_score >= 33,
-                    VendorCard.vendor_score < 66,
-                    VendorCard.is_new_vendor.is_(False),
-                )
-            elif tier == "caution":
-                query = query.filter(
-                    VendorCard.vendor_score.isnot(None),
-                    VendorCard.vendor_score < 33,
-                    VendorCard.is_new_vendor.is_(False),
-                )
-            elif tier == "new":
-                query = query.filter(
-                    sqlfunc.coalesce(VendorCard.is_new_vendor, True).is_(True) | VendorCard.vendor_score.is_(None)
-                )
-
-        # ── Default order ──
-        query = query.order_by(VendorCard.display_name)
-        if tag.strip():
-            from sqlalchemy import String as SAString
-
-            safe_tag = tag.strip().lower()
-            query = query.filter(
-                sqlfunc.lower(sqlfunc.cast(VendorCard.brand_tags, SAString)).contains(safe_tag)
-                | sqlfunc.lower(sqlfunc.cast(VendorCard.commodity_tags, SAString)).contains(safe_tag)
-            )
-        if q:
-            from sqlalchemy import String as SAString
-            from sqlalchemy import or_
-
-            sb = SearchBuilder(q)
-            # Tag match — vendors whose brand/commodity tags contain the query
-            tag_filter = or_(
-                sqlfunc.lower(sqlfunc.cast(VendorCard.brand_tags, SAString)).contains(q),
-                sqlfunc.lower(sqlfunc.cast(VendorCard.commodity_tags, SAString)).contains(q),
-                sb.ilike_filter(VendorCard.industry),
-            )
-            name_filter = sb.ilike_filter(VendorCard.normalized_name)
-
-            if len(q) >= 3:
-                # Full-text search for longer queries (faster + ranked)
-                try:
-                    fts_query = (
-                        db.query(VendorCard)
-                        .filter(
-                            VendorCard.search_vector.isnot(None),
-                            sqltext("search_vector @@ plainto_tsquery('english', :q)"),
-                        )
-                        .params(q=q)
-                        .order_by(
-                            sqltext("ts_rank(search_vector, plainto_tsquery('english', :q)) DESC"),
-                        )
-                        .params(q=q)
-                    )
-                    fts_count = fts_query.count()
-                    if fts_count > 0:
-                        query = fts_query
-                    else:
-                        # FTS found nothing, fall back to name + tag search
-                        query = query.filter(or_(name_filter, tag_filter))
-                except (ProgrammingError, OperationalError):
-                    # FTS not available (e.g., SQLite in tests), fall back
-                    query = query.filter(or_(name_filter, tag_filter))
-            else:
-                query = query.filter(or_(name_filter, tag_filter))
-        # ── Apply explicit sort (overrides default order_by) ──
-        if sort:
-            sort = sort.strip().lower()
-            sort_map = {
-                "name": VendorCard.display_name,
-                "score": VendorCard.vendor_score,
-                "sighting_count": VendorCard.sighting_count,
-                "response_rate": VendorCard.total_responses,  # proxy: sort by raw responses
-                "total_pos": VendorCard.total_pos,
-            }
-            sort_col = sort_map.get(sort)
-            if sort_col is not None:
-                if order.strip().lower() == "desc":
-                    query = query.order_by(None).order_by(sort_col.desc().nullslast())
-                else:
-                    query = query.order_by(None).order_by(sort_col.asc().nullsfirst())
-
-        total = query.count()
-        if offset and offset >= total:
-            # Stale offset beyond the (re)filtered result set — e.g. a bookmarked or
-            # hand-edited URL. Never blindly trust a round-tripped offset: snap back
-            # to page 1 (same clamp as crm_service.customer_contacts_context).
-            offset = 0
-        cards = query.limit(limit).offset(offset).all()
-        if not cards:
-            return {"vendors": [], "total": total, "limit": limit, "offset": offset}
-        # card_ids is non-empty here -- the empty-cards case returned above.
-        card_ids = [c.id for c in cards]
-        # Batch fetch review stats -- single query instead of N+1
-        review_stats = {}
-        for cid, avg, cnt in (
-            db.query(
-                VendorReview.vendor_card_id,
-                sqlfunc.avg(VendorReview.rating),
-                sqlfunc.count(VendorReview.id),
-            )
-            .filter(VendorReview.vendor_card_id.in_(card_ids))
-            .group_by(VendorReview.vendor_card_id)
-            .all()
-        ):
-            review_stats[cid] = (avg, cnt)
-        # Batch fetch strategic claim info -- single query instead of N+1
-        claim_map = {}
-        for sv in (
-            db.query(StrategicVendor)
-            .filter(
-                StrategicVendor.vendor_card_id.in_(card_ids),
-                StrategicVendor.released_at.is_(None),
-            )
-            .all()
-        ):
-            owner_name = sv.user.name if sv.user else None
-            claim_map[sv.vendor_card_id] = {
-                "claimed_by_user_id": sv.user_id,
-                "claimed_by_name": owner_name,
-            }
-
-        # Batch fetch top contact per vendor -- single query, dedup in Python
-        top_contact_map = {}
-        contacts = (
-            db.query(VendorContact)
-            .filter(VendorContact.vendor_card_id.in_(card_ids))
-            .order_by(
-                VendorContact.relationship_score.desc().nullslast(),
-                VendorContact.interaction_count.desc().nullslast(),
-                VendorContact.last_seen_at.desc().nullslast(),
-            )
-            .all()
-        )
-        for vc in contacts:
-            if vc.vendor_card_id not in top_contact_map:
-                top_contact_map[vc.vendor_card_id] = {
-                    "name": vc.full_name,
-                    "email": vc.email,
-                    "phone": vc.phone,
-                }
-
-        results = []
-        for c in cards:
-            stat = review_stats.get(c.id)
-            avg_rating = round(float(stat[0]), 1) if stat else None
-            review_count = int(stat[1]) if stat else 0
-            rating_source = "manual" if stat else None
-            resp_rate = None
-            if c.total_outreach and c.total_outreach > 0:
-                resp_rate = round((c.total_responses or 0) / c.total_outreach * 100, 1)
-
-            # Auto-calculated star rating baseline when no manual reviews
-            if avg_rating is None:
-                auto_score = 0
-                components = 0
-                if resp_rate is not None:
-                    auto_score += (resp_rate / 100) * 5
-                    components += 1
-                if c.overall_win_rate is not None:
-                    auto_score += c.overall_win_rate * 5
-                    components += 1
-                if c.vendor_score is not None:
-                    auto_score += (c.vendor_score / 100) * 5
-                    components += 1
-                if components > 0:
-                    avg_rating = round(auto_score / components, 1)
-                    rating_source = "auto"
-
-            # Build location string from available fields
-            loc_parts = [p for p in [c.hq_city, c.hq_state, c.hq_country] if p]
-            location = ", ".join(loc_parts) if loc_parts else None
-
-            claim = claim_map.get(c.id)
-            results.append(
-                {
-                    "id": c.id,
-                    "display_name": c.display_name,
-                    "emails": c.emails or [],
-                    "phones": c.phones or [],
-                    "sighting_count": c.sighting_count or 0,
-                    "vendor_score": c.vendor_score,
-                    "is_new_vendor": c.is_new_vendor if c.is_new_vendor is not None else True,
-                    "engagement_score": c.vendor_score,
-                    "is_blacklisted": c.is_blacklisted or False,
-                    "avg_rating": avg_rating,
-                    "review_count": review_count,
-                    "total_pos": c.total_pos or 0,
-                    "response_rate": resp_rate,
-                    "last_sighting_at": (c.last_activity_at or c.updated_at or c.created_at).isoformat()
-                    if (c.last_activity_at or c.updated_at or c.created_at)
-                    else None,
-                    "brand_tags": c.brand_tags or [],
-                    "commodity_tags": c.commodity_tags or [],
-                    "industry": c.industry,
-                    "location": location,
-                    "website": c.website,
-                    "domain": c.domain,
-                    "avg_response_hours": c.avg_response_hours,
-                    "overall_win_rate": c.overall_win_rate,
-                    "total_revenue": c.total_revenue or 0,
-                    "claimed_by": claim,
-                    "top_contact": top_contact_map.get(c.id),
-                    "rating_source": rating_source,
-                }
-            )
-        return {"vendors": results, "total": total, "limit": limit, "offset": offset}
-
     q = q.strip().lower()
-    return _fetch(q=q, tag=tag, tier=tier, sort=sort, order=order, limit=limit, offset=offset, db=db)
+    return list_vendor_cards(q=q, tag=tag, tier=tier, sort=sort, order=order, limit=limit, offset=offset, db=db)
 
 
 @router.get("/api/autocomplete/names")

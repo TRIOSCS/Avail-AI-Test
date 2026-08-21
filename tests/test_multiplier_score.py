@@ -45,8 +45,6 @@ from app.services.multiplier_score_service import (
     compute_all_multiplier_scores,
     compute_buyer_multiplier,
     compute_sales_multiplier,
-    determine_bonus_winners,
-    get_multiplier_scores,
 )
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -579,98 +577,11 @@ class TestComputeAll:
         assert count == 1
 
 
-# ══════════════════════════════════════════════════════════════════════
-#  BONUS WINNER QUERY
-# ══════════════════════════════════════════════════════════════════════
-
-
-class TestBonusWinners:
-    def test_winners_from_persisted(self, db_session):
-        """determine_bonus_winners reads from persisted snapshots."""
-        b1 = _make_user(db_session, "Winner1", "buyer", "winner1")
-        b2 = _make_user(db_session, "Winner2", "buyer", "winner2")
-
-        # Seed avail scores
-        _make_avail_snapshot(db_session, b1.id, "buyer", 75)
-        _make_avail_snapshot(db_session, b2.id, "buyer", 55)
-
-        # Seed multiplier snapshots directly
-        db_session.add(
-            MultiplierScoreSnapshot(
-                user_id=b1.id,
-                month=MONTH,
-                role_type="buyer",
-                total_points=100,
-                offer_points=90,
-                bonus_points=10,
-                avail_score=75,
-                qualified=True,
-                rank=1,
-                bonus_amount=BONUS_1ST,
-            )
-        )
-        db_session.add(
-            MultiplierScoreSnapshot(
-                user_id=b2.id,
-                month=MONTH,
-                role_type="buyer",
-                total_points=60,
-                offer_points=50,
-                bonus_points=10,
-                avail_score=55,
-                qualified=True,
-                rank=2,
-                bonus_amount=BONUS_2ND,
-            )
-        )
-        db_session.commit()
-
-        winners = determine_bonus_winners(db_session, "buyer", MONTH)
-        assert len(winners) == 2
-        assert winners[0]["bonus_amount"] == BONUS_1ST
-        assert winners[0]["user_name"] == "Winner1"
-        assert winners[1]["bonus_amount"] == BONUS_2ND
-
-    def test_no_winners(self, db_session):
-        """No qualified users → empty winners list."""
-        winners = determine_bonus_winners(db_session, "buyer", MONTH)
-        assert winners == []
-
-
-# ══════════════════════════════════════════════════════════════════════
-#  API QUERY
-# ══════════════════════════════════════════════════════════════════════
-
-
-class TestGetMultiplierScores:
-    def test_get_scores_empty(self, db_session):
-        """No snapshots returns empty list."""
-        result = get_multiplier_scores(db_session, "buyer", MONTH)
-        assert result == []
-
-    def test_get_scores_returns_breakdown(self, db_session):
-        """Scores returned include role-specific breakdown."""
-        buyer = _make_user(db_session, "Query Buyer", "buyer", "querymult")
-        req = _make_req(db_session, buyer.id)
-        _make_offer(db_session, req.id, buyer.id)
-        db_session.commit()
-
-        compute_all_multiplier_scores(db_session, MONTH)
-        result = get_multiplier_scores(db_session, "buyer", MONTH)
-
-        assert len(result) == 1
-        entry = result[0]
-        assert entry["user_name"] == "Query Buyer"
-        assert "breakdown" in entry
-        assert "offers_total" in entry["breakdown"]
-
-
 # NOTE: the /api/performance/* HTTP surface (multiplier-scores / bonus-winners) was
-# removed with app/routers/performance.py in the dead-code cleanup (commit 5ea26ba0). The
-# scoring services exercised above remain live (nightly jobs compute and persist
-# snapshots). The former TestMultiplierAPI class hit the deleted endpoints and was
-# silently hidden by an MVP_MODE-defaulted skip; it has been removed rather than left as a
-# dead skip.
+# removed with app/routers/performance.py in the dead-code cleanup (commit 5ea26ba0),
+# and the orphaned read-side service functions (determine_bonus_winners /
+# get_multiplier_scores) were deleted with it in the simplify sweep. The compute
+# services exercised above remain live (nightly jobs compute and persist snapshots).
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -747,53 +658,6 @@ class TestMultiplierCoverageGaps:
             result = compute_all_multiplier_scores(db_session, MONTH)
 
         assert isinstance(result, dict)
-
-    def test_bonus_winners_break_at_2(self, db_session):
-        """Lines 515-516: loop breaks when 2 winners found."""
-        from app.models.performance import MultiplierScoreSnapshot
-
-        # Create 3 qualified users
-        for i in range(3):
-            u = _make_user(db_session, f"W{i}", "buyer", f"winner{i}")
-            snap = MultiplierScoreSnapshot(
-                user_id=u.id,
-                month=MONTH,
-                role_type="buyer",
-                total_points=100 - i * 10,
-                offer_points=80 - i * 10,
-                bonus_points=20,
-                qualified=True,
-                avail_score=90 - i * 5,
-            )
-            db_session.add(snap)
-        db_session.commit()
-
-        winners = determine_bonus_winners(db_session, "buyer", MONTH)
-        assert len(winners) <= 2
-
-    def test_get_multiplier_scores_sales_breakdown(self, db_session):
-        """Line 600: sales breakdown branch in get_multiplier_scores."""
-        from app.models.performance import MultiplierScoreSnapshot
-
-        sales = _make_user(db_session, "Sales Rep", "sales", "sales-bd")
-        snap = MultiplierScoreSnapshot(
-            user_id=sales.id,
-            month=MONTH,
-            role_type="sales",
-            total_points=50,
-            offer_points=0,
-            bonus_points=50,
-            rank=1,
-            avail_score=80,
-            qualified=True,
-            bonus_amount=0,
-        )
-        db_session.add(snap)
-        db_session.commit()
-
-        results = get_multiplier_scores(db_session, "sales", MONTH)
-        assert len(results) == 1
-        assert "quotes_sent" in results[0]["breakdown"]
 
     def test_upsert_multiplier_sales_columns(self, db_session):
         """Line 481: setattr for sales-specific columns."""

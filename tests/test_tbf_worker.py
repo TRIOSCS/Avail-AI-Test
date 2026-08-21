@@ -351,7 +351,7 @@ class TestSightingWriter:
         """save_tbf_sightings runs durable-unavailability gating on the created rows."""
         item = _queue_item(db_session, test_requisition)
         tbf = [TbfSighting(part_number="LM317T", vendor_name="Gated Vendor", quantity=50, in_stock=True)]
-        with patch("app.services.tbf_worker.sighting_writer.apply_to_fresh_sightings") as mock_gate:
+        with patch("app.services.search_worker_base.sighting_writer.apply_to_fresh_sightings") as mock_gate:
             created = save_tbf_sightings(db_session, item, tbf)
         assert created == 1
         mock_gate.assert_called_once()

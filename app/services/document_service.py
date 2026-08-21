@@ -9,10 +9,18 @@ from sqlalchemy.orm import Session
 if TYPE_CHECKING:
     from app.constants import CustomerBidStatus
 
+# Second root lets the documents share partials via the same rooted
+# "documents/_doc_style.html" path the app-wide template env resolves.
 _jinja_env = Environment(
-    loader=FileSystemLoader("app/templates/documents"),
+    loader=FileSystemLoader(["app/templates/documents", "app/templates"]),
     autoescape=True,
 )
+
+# Share the canonical money-display filter with the app template env so the
+# document templates (quote_report/bid_report) format totals identically.
+from app.template_env import _money_filter  # noqa: E402
+
+_jinja_env.filters["money"] = _money_filter
 
 
 def _render_pdf(template_name: str, **context) -> bytes:

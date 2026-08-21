@@ -21,7 +21,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from ..constants import ProactiveDigestStatus, ProactiveMatchSource, ProactiveMatchStatus
 from ..database import UTCDateTime
-from .base import Base
+from .base import AttachmentColumnsMixin, Base
 
 
 class MaterialCard(Base):
@@ -797,14 +797,12 @@ class ActivityDigest(Base):
     __table_args__ = (UniqueConstraint("entity_type", "entity_id", name="uq_activity_digest_entity"),)
 
 
-class MaterialCardAttachment(Base):
+class MaterialCardAttachment(AttachmentColumnsMixin, Base):
     """User-uploaded file attachment on a material card part dossier.
 
     Distinct from MaterialCardDatasheet (system-captured PDFs). These are user files:
     drawings, test reports, photos, POs, anything the buyer wants to pin to the part.
-
-    library_drive_id NULL  → OneDrive fallback row (user token, item in /me/drive)
-    library_drive_id set   → company SharePoint library row (app token)
+    Shared payload columns on AttachmentColumnsMixin.
 
     Called by: app/routers/attachments_extra.py, app/services/attachment_service.py
     Depends on: MaterialCard, User
@@ -813,17 +811,7 @@ class MaterialCardAttachment(Base):
     __tablename__ = "material_card_attachments"
     id = Column(Integer, primary_key=True)
     material_card_id = Column(Integer, ForeignKey("material_cards.id", ondelete="CASCADE"), nullable=False)
-    file_name = Column(String(500), nullable=False)
-    library_item_id = Column(String(500))
-    library_drive_id = Column(String(200))
-    library_web_url = Column(Text)
-    thumbnail_url = Column(Text)
-    content_type = Column(String(100))
-    size_bytes = Column(Integer)
-    uploaded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     material_card = relationship("MaterialCard", back_populates="attachments")
-    uploaded_by = relationship("User", foreign_keys=[uploaded_by_id])
 
     __table_args__ = (Index("ix_material_card_attachments_card", "material_card_id"),)

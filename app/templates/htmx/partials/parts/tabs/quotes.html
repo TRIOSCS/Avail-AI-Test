@@ -1,9 +1,12 @@
 {# quotes.html — Cross-requisition quote history for the selected part (Reqs workspace Quotes tab).
    Receives: requirement (Requirement), quote_lines (list[QuoteLine] with .quote and .quote.requisition eager-loaded).
    Called by: part_tab_quotes route (/v2/partials/parts/{requirement_id}/tab/quotes).
-   Depends on: HTMX (row deep-link), brand palette, shared/_macros.html (status_badge, badge).
+   Depends on: HTMX (row deep-link), brand palette, shared/_macros.html (status_badge),
+   quotes/_macros.html (quote_margin_badge).
 #}
-{% from "htmx/partials/shared/_macros.html" import status_badge, badge %}
+{% from "htmx/partials/shared/_macros.html" import status_badge %}
+{% from "htmx/partials/quotes/_macros.html" import quote_margin_badge %}
+{% from "htmx/partials/shared/empty_state.html" import empty_state %}
 <div>
   {% if quote_lines %}
   <p class="text-sm text-gray-600 mb-4">
@@ -40,16 +43,10 @@
           <td class="table-cell text-sm text-gray-600">{{ q.requisition.name if q.requisition else "—" }}</td>
           <td class="table-cell text-sm text-gray-700">{{ line.mpn }}</td>
           <td class="table-cell text-sm text-gray-900 text-right">{{ line.qty if line.qty is not none else "—" }}</td>
-          <td class="table-cell text-sm text-gray-900 font-medium text-right">{{ "${:,.2f}".format(line.sell_price) if line.sell_price is not none else "—" }}</td>
+          <td class="table-cell text-sm text-gray-900 font-medium text-right">{{ "$" ~ line.sell_price|money if line.sell_price is not none else "—" }}</td>
           <td class="table-cell text-sm text-right">
             {% if line.margin_pct is not none %}
-              {% if line.margin_pct >= 30 %}
-                {{ badge("%.1f%%"|format(line.margin_pct), tone='success') }}
-              {% elif line.margin_pct >= 15 %}
-                {{ badge("%.1f%%"|format(line.margin_pct), tone='warning') }}
-              {% else %}
-                {{ badge("%.1f%%"|format(line.margin_pct), tone='danger') }}
-              {% endif %}
+              {{ quote_margin_badge(line.margin_pct) }}
             {% else %}
               <span class="text-gray-600">—</span>
             {% endif %}
@@ -71,12 +68,12 @@
     </table>
   </div>
   {% else %}
-  <div class="py-6 sm:py-8 text-center">
-    <svg class="mx-auto h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z"/>
-    </svg>
-    <p class="text-sm font-medium text-gray-500 mt-3">This part hasn't been on any quotes yet.</p>
+  {% call empty_state('M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z',
+                      "This part hasn't been on any quotes yet.",
+                      wrapper_class='py-6 sm:py-8 text-center',
+                      message_class='text-sm font-medium text-gray-500 mt-3',
+                      message_safe=True) %}
     <p class="text-secondary mt-1">Quotes are created from a requirement's Offers tab.</p>
-  </div>
+  {% endcall %}
   {% endif %}
 </div>

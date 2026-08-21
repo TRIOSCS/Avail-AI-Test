@@ -12,8 +12,6 @@ Depends on: app.models, app.dependencies, app.database, app.services, ._shared,
     ._shared_tabs (company_tab, vendor_tab)
 """
 
-from datetime import UTC, date, datetime
-
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from loguru import logger
@@ -41,25 +39,94 @@ from ...models import (
 )
 from ...template_env import template_response
 from .._lookup_helpers import get_vendor_card_or_404
-from ._shared import _base_ctx, _safe_int
+from ._shared import _active_users, _base_ctx, _coerce_task_priority, _parse_task_due_date, _safe_int
 from ._shared_tabs import company_tab, vendor_tab
 
 router = APIRouter(tags=["htmx-views"])
 
 
-def _coerce_task_priority(raw: str | None) -> int:
-    """Map a submitted priority ('1'|'2'|'3') to a valid int, defaulting to 2
-    (medium)."""
-    try:
-        p = int(raw) if raw not in (None, "") else 2
-    except (TypeError, ValueError):
-        return 2
-    return p if p in (1, 2, 3) else 2
+def _require_crm_task_mutable(db: Session, task_id: int, user: User, action: str) -> RequisitionTask:
+    """Load a task and enforce the shared CRM-task mutation gate.
+
+    404 unknown id → 400 when the task is neither customer- (account/contact) nor
+    vendor-scoped → 403 unless creator/assignee/account-owner/admin. ``action`` is the
+    verb in the 403 detail ("delete" / "edit" / "snooze"). Shared by the delete, edit
+    (form + save), and snooze endpoints so the guard chain cannot drift between them.
+    """
+    from app.services.task_service import is_task_mutation_authorized
+
+    task = db.get(RequisitionTask, task_id)
+    if not task:
+        raise HTTPException(404, "Task not found")
+    is_vendor_task = task.vendor_card_id is not None or task.vendor_contact_id is not None
+    if not task.company_id and not task.site_contact_id and not is_vendor_task:
+        raise HTTPException(400, "Not a CRM task")
+    if not is_task_mutation_authorized(db, task, user.id, is_admin=(user.role == UserRole.ADMIN)):
+        raise HTTPException(403, f"You are not allowed to {action} this task")
+    return task
 
 
-def _active_users(db: Session) -> list[User]:
-    """Active users for the task-create assignee picker, ordered by name."""
-    return db.query(User).filter(User.is_active.is_(True)).order_by(User.name).all()
+def _render_parent_task_list(
+    request: Request,
+    user: User,
+    db: Session,
+    *,
+    company_id: int | None,
+    site_contact_id: int | None,
+    vendor_card_id: int | None,
+    vendor_contact_id: int | None,
+    vendor_contact_missing_html: str = "",
+) -> HTMLResponse:
+    """Re-render the parent open-tasks container for a CRM task after a mutation.
+
+    One four-way branch (account → contact → vendor card → vendor contact) shared by
+    the complete/delete/edit/snooze endpoints — pass the parent ids captured from the
+    task (delete captures them BEFORE deletion). ``vendor_contact_missing_html`` is
+    returned when the task's VendorContact row no longer exists (complete/delete show
+    a safe acknowledgement; edit/snooze fall through to the empty fragment). Anything
+    else (e.g. a plain requisition task) returns the empty fragment.
+    """
+    from app.services.task_service import (
+        get_open_tasks_for_company,
+        get_open_tasks_for_contact,
+        get_open_tasks_for_vendor_card,
+    )
+
+    if company_id:
+        tasks = get_open_tasks_for_company(db, company_id)
+        ctx = _base_ctx(request, user, "customers")
+        ctx["company_id"] = company_id
+        ctx["company_tasks"] = tasks
+        return template_response("htmx/partials/customers/_account_tasks.html", ctx)
+    if site_contact_id:
+        contact = db.get(SiteContact, site_contact_id)
+        tasks = get_open_tasks_for_contact(db, site_contact_id)
+        ctx = _base_ctx(request, user, "customers")
+        ctx["contact"] = contact
+        ctx["contact_tasks"] = tasks
+        ctx["company_id"] = contact.customer_site.company_id if contact and contact.customer_site else 0
+        ctx["site_id"] = site_contact_id
+        return template_response("htmx/partials/customers/_contact_tasks.html", ctx)
+    if vendor_card_id:
+        vendor_tasks = get_open_tasks_for_vendor_card(db, vendor_card_id)
+        ctx = _base_ctx(request, user, "vendors")
+        ctx["vendor_id"] = vendor_card_id
+        ctx["vendor_tasks"] = vendor_tasks
+        return template_response("htmx/partials/vendors/tabs/_vendor_tasks.html", ctx)
+    if vendor_contact_id:
+        from app.models.vendors import VendorContact as _VendorContact
+
+        vc = db.get(_VendorContact, vendor_contact_id)
+        if vc:
+            vendor_tasks = get_open_tasks_for_vendor_card(db, vc.vendor_card_id)
+            ctx = _base_ctx(request, user, "vendors")
+            ctx["vendor_id"] = vc.vendor_card_id
+            ctx["vendor_tasks"] = vendor_tasks
+            return template_response("htmx/partials/vendors/tabs/_vendor_tasks.html", ctx)
+        # VendorContact was deleted — return a safe non-blank acknowledgement.
+        if vendor_contact_missing_html:
+            return HTMLResponse(vendor_contact_missing_html)
+    return HTMLResponse("")
 
 
 # ── Trouble Tickets ──────────────────────────────────────────────────────
@@ -236,13 +303,10 @@ async def create_account_task(
         raise HTTPException(403, "Only the account owner or an admin can create tasks for this account")
     if not title.strip():
         return HTMLResponse('<p class="text-xs text-rose-600">Title is required.</p>')
-    due_dt = None
-    if due_at.strip():
-        try:
-            d = date.fromisoformat(due_at.strip())
-            due_dt = datetime.combine(d, datetime.min.time()).replace(tzinfo=UTC)
-        except ValueError:
-            return HTMLResponse('<p class="text-xs text-rose-600">Invalid date.</p>')
+    try:
+        due_dt = _parse_task_due_date(due_at)
+    except HTTPException:
+        return HTMLResponse('<p class="text-xs text-rose-600">Invalid date.</p>')
     create_company_task(
         db,
         company_id=company_id,
@@ -321,13 +385,10 @@ async def create_contact_task_endpoint(
             raise HTTPException(403, "Only the account owner or an admin can create tasks for this account")
     if not title.strip():
         return HTMLResponse('<p class="text-xs text-rose-600">Title is required.</p>')
-    due_dt = None
-    if due_at.strip():
-        try:
-            d = date.fromisoformat(due_at.strip())
-            due_dt = datetime.combine(d, datetime.min.time()).replace(tzinfo=UTC)
-        except ValueError:
-            return HTMLResponse('<p class="text-xs text-rose-600">Invalid date.</p>')
+    try:
+        due_dt = _parse_task_due_date(due_at)
+    except HTTPException:
+        return HTMLResponse('<p class="text-xs text-rose-600">Invalid date.</p>')
     create_contact_task(
         db,
         site_contact_id=contact_id,
@@ -400,11 +461,7 @@ async def complete_task_endpoint(
     from_my_day=true, returns an empty fragment so the row removes itself via outerHTML
     swap on the My Day worklist.
     """
-    from app.services.task_service import (
-        complete_crm_task,
-        get_open_tasks_for_company,
-        get_open_tasks_for_contact,
-    )
+    from app.services.task_service import complete_crm_task
 
     task = db.get(RequisitionTask, task_id)
     if not task:
@@ -423,44 +480,16 @@ async def complete_task_endpoint(
     if from_my_day:
         return HTMLResponse("")
     # Re-render the appropriate parent container
-    if task.company_id:
-        tasks = get_open_tasks_for_company(db, task.company_id)
-        ctx = _base_ctx(request, user, "customers")
-        ctx["company_id"] = task.company_id
-        ctx["company_tasks"] = tasks
-        return template_response("htmx/partials/customers/_account_tasks.html", ctx)
-    if task.site_contact_id:
-        contact = db.get(SiteContact, task.site_contact_id)
-        tasks = get_open_tasks_for_contact(db, task.site_contact_id)
-        ctx = _base_ctx(request, user, "customers")
-        ctx["contact"] = contact
-        ctx["contact_tasks"] = tasks
-        ctx["company_id"] = contact.customer_site.company_id if contact and contact.customer_site else 0
-        ctx["site_id"] = task.site_contact_id
-        return template_response("htmx/partials/customers/_contact_tasks.html", ctx)
-    if task.vendor_card_id:
-        from app.services.task_service import get_open_tasks_for_vendor_card
-
-        vendor_tasks = get_open_tasks_for_vendor_card(db, task.vendor_card_id)
-        ctx = _base_ctx(request, user, "vendors")
-        ctx["vendor_id"] = task.vendor_card_id
-        ctx["vendor_tasks"] = vendor_tasks
-        return template_response("htmx/partials/vendors/tabs/_vendor_tasks.html", ctx)
-    if task.vendor_contact_id:
-        from app.models.vendors import VendorContact as _VendorContact
-        from app.services.task_service import get_open_tasks_for_vendor_card
-
-        vc = db.get(_VendorContact, task.vendor_contact_id)
-        if vc:
-            vendor_tasks = get_open_tasks_for_vendor_card(db, vc.vendor_card_id)
-            ctx = _base_ctx(request, user, "vendors")
-            ctx["vendor_id"] = vc.vendor_card_id
-            ctx["vendor_tasks"] = vendor_tasks
-            return template_response("htmx/partials/vendors/tabs/_vendor_tasks.html", ctx)
-        # VendorContact was deleted — return a safe non-blank acknowledgement.
-        return HTMLResponse('<p class="text-xs text-gray-400">Task updated.</p>')
-    # Fallback: requisition task — just return empty fragment
-    return HTMLResponse("")
+    return _render_parent_task_list(
+        request,
+        user,
+        db,
+        company_id=task.company_id,
+        site_contact_id=task.site_contact_id,
+        vendor_card_id=task.vendor_card_id,
+        vendor_contact_id=task.vendor_contact_id,
+        vendor_contact_missing_html='<p class="text-xs text-gray-400">Task updated.</p>',
+    )
 
 
 @router.delete("/v2/partials/tasks/{task_id}", response_class=HTMLResponse)
@@ -474,25 +503,11 @@ async def delete_task_endpoint(
 
     Returns the refreshed parent task list (account or contact).
     """
-    from app.services.task_service import (
-        delete_task,
-        get_open_tasks_for_company,
-        get_open_tasks_for_contact,
-    )
-
-    task = db.get(RequisitionTask, task_id)
-    if not task:
-        raise HTTPException(404, "Task not found")
-    is_vendor_task = task.vendor_card_id is not None or task.vendor_contact_id is not None
-    is_crm_task = task.company_id is not None or task.site_contact_id is not None
-    if not is_crm_task and not is_vendor_task:
-        raise HTTPException(400, "Not a CRM task")
-    from app.services.task_service import is_task_mutation_authorized
+    from app.services.task_service import delete_task
 
     # One gate for every task kind: creator, assignee, admin, or (customer tasks)
     # the parent account owner. Vendor delete is no longer admin-only.
-    if not is_task_mutation_authorized(db, task, user.id, is_admin=(user.role == UserRole.ADMIN)):
-        raise HTTPException(403, "You are not allowed to delete this task")
+    task = _require_crm_task_mutable(db, task_id, user, "delete")
     # Capture parent refs before deletion
     company_id = task.company_id
     site_contact_id = task.site_contact_id
@@ -500,43 +515,16 @@ async def delete_task_endpoint(
     vendor_contact_id = task.vendor_contact_id
     delete_task(db, task_id)
     logger.info("Task {} deleted by user {}", task_id, user.id)
-    if company_id:
-        tasks = get_open_tasks_for_company(db, company_id)
-        ctx = _base_ctx(request, user, "customers")
-        ctx["company_id"] = company_id
-        ctx["company_tasks"] = tasks
-        return template_response("htmx/partials/customers/_account_tasks.html", ctx)
-    if site_contact_id:
-        contact = db.get(SiteContact, site_contact_id)
-        tasks = get_open_tasks_for_contact(db, site_contact_id)
-        ctx = _base_ctx(request, user, "customers")
-        ctx["contact"] = contact
-        ctx["contact_tasks"] = tasks
-        ctx["company_id"] = contact.customer_site.company_id if contact and contact.customer_site else 0
-        ctx["site_id"] = site_contact_id
-        return template_response("htmx/partials/customers/_contact_tasks.html", ctx)
-    if vendor_card_id:
-        from app.services.task_service import get_open_tasks_for_vendor_card
-
-        vendor_tasks = get_open_tasks_for_vendor_card(db, vendor_card_id)
-        ctx = _base_ctx(request, user, "vendors")
-        ctx["vendor_id"] = vendor_card_id
-        ctx["vendor_tasks"] = vendor_tasks
-        return template_response("htmx/partials/vendors/tabs/_vendor_tasks.html", ctx)
-    if vendor_contact_id:
-        from app.models.vendors import VendorContact as _VendorContact
-        from app.services.task_service import get_open_tasks_for_vendor_card
-
-        vc = db.get(_VendorContact, vendor_contact_id)
-        if vc:
-            vendor_tasks = get_open_tasks_for_vendor_card(db, vc.vendor_card_id)
-            ctx = _base_ctx(request, user, "vendors")
-            ctx["vendor_id"] = vc.vendor_card_id
-            ctx["vendor_tasks"] = vendor_tasks
-            return template_response("htmx/partials/vendors/tabs/_vendor_tasks.html", ctx)
-        # VendorContact was deleted — return a safe non-blank acknowledgement.
-        return HTMLResponse('<p class="text-xs text-gray-400">Task deleted.</p>')
-    return HTMLResponse("")
+    return _render_parent_task_list(
+        request,
+        user,
+        db,
+        company_id=company_id,
+        site_contact_id=site_contact_id,
+        vendor_card_id=vendor_card_id,
+        vendor_contact_id=vendor_contact_id,
+        vendor_contact_missing_html='<p class="text-xs text-gray-400">Task deleted.</p>',
+    )
 
 
 def _render_task_edit_form(request: Request, user: User, db: Session, task: RequisitionTask, error: str | None = None):
@@ -585,16 +573,7 @@ async def task_edit_form(
     db: Session = Depends(get_db),
 ):
     """Return the inline edit form for an existing CRM task (prefilled)."""
-    task = db.get(RequisitionTask, task_id)
-    if not task:
-        raise HTTPException(404, "Task not found")
-    is_vendor_task = task.vendor_card_id is not None or task.vendor_contact_id is not None
-    if not task.company_id and not task.site_contact_id and not is_vendor_task:
-        raise HTTPException(400, "Not a CRM task")
-    from app.services.task_service import is_task_mutation_authorized
-
-    if not is_task_mutation_authorized(db, task, user.id, is_admin=(user.role == UserRole.ADMIN)):
-        raise HTTPException(403, "You are not allowed to edit this task")
+    task = _require_crm_task_mutable(db, task_id, user, "edit")
     return _render_task_edit_form(request, user, db, task)
 
 
@@ -612,32 +591,16 @@ async def edit_task_endpoint(
     Authz: same gate as complete/delete — assignee, creator, account owner, or admin.
     """
 
-    from app.services.task_service import (
-        get_open_tasks_for_company,
-        get_open_tasks_for_contact,
-        is_task_mutation_authorized,
-    )
-
-    task = db.get(RequisitionTask, task_id)
-    if not task:
-        raise HTTPException(404, "Task not found")
-    _is_vendor = task.vendor_card_id is not None or task.vendor_contact_id is not None
-    if not task.company_id and not task.site_contact_id and not _is_vendor:
-        raise HTTPException(400, "Not a CRM task")
-    if not is_task_mutation_authorized(db, task, user.id, is_admin=(user.role == UserRole.ADMIN)):
-        raise HTTPException(403, "You are not allowed to edit this task")
+    task = _require_crm_task_mutable(db, task_id, user, "edit")
     # Validation errors re-render the id-bearing edit form (NOT a bare <p>): the
     # response outerHTML-swaps the #…-tasks-{id} container, which must survive.
     if not title.strip():
         return _render_task_edit_form(request, user, db, task, error="Title is required.")
     # Parse due_at: empty string → explicit clear (None); non-empty → parse.
-    due_dt = None
-    if due_at.strip():
-        try:
-            d = date.fromisoformat(due_at.strip())
-            due_dt = datetime.combine(d, datetime.min.time()).replace(tzinfo=UTC)
-        except ValueError:
-            return _render_task_edit_form(request, user, db, task, error="Invalid date format.")
+    try:
+        due_dt = _parse_task_due_date(due_at)
+    except HTTPException:
+        return _render_task_edit_form(request, user, db, task, error="Invalid date format.")
     # Set both controlled fields directly so an empty due_at clears the existing value.
     # (update_task skips None values to avoid mass-assignment; bypass that for explicit edits.)
     task.title = title.strip()
@@ -647,45 +610,15 @@ async def edit_task_endpoint(
     logger.info("Task {} edited by user {}", task_id, user.id)
     # Re-render the parent container
     task = db.get(RequisitionTask, task_id)
-    company_id = task.company_id if task else None
-    site_contact_id = task.site_contact_id if task else None
-    vendor_card_id_edit = task.vendor_card_id if task else None
-    vendor_contact_id_edit = task.vendor_contact_id if task else None
-    if company_id:
-        tasks = get_open_tasks_for_company(db, company_id)
-        ctx = _base_ctx(request, user, "customers")
-        ctx["company_id"] = company_id
-        ctx["company_tasks"] = tasks
-        return template_response("htmx/partials/customers/_account_tasks.html", ctx)
-    if site_contact_id:
-        contact = db.get(SiteContact, site_contact_id)
-        tasks = get_open_tasks_for_contact(db, site_contact_id)
-        ctx = _base_ctx(request, user, "customers")
-        ctx["contact"] = contact
-        ctx["contact_tasks"] = tasks
-        ctx["company_id"] = contact.customer_site.company_id if contact and contact.customer_site else 0
-        ctx["site_id"] = site_contact_id
-        return template_response("htmx/partials/customers/_contact_tasks.html", ctx)
-    if vendor_card_id_edit:
-        from app.services.task_service import get_open_tasks_for_vendor_card
-
-        vendor_tasks = get_open_tasks_for_vendor_card(db, vendor_card_id_edit)
-        ctx = _base_ctx(request, user, "vendors")
-        ctx["vendor_id"] = vendor_card_id_edit
-        ctx["vendor_tasks"] = vendor_tasks
-        return template_response("htmx/partials/vendors/tabs/_vendor_tasks.html", ctx)
-    if vendor_contact_id_edit:
-        from app.models.vendors import VendorContact as _VendorContact
-        from app.services.task_service import get_open_tasks_for_vendor_card
-
-        vc = db.get(_VendorContact, vendor_contact_id_edit)
-        if vc:
-            vendor_tasks = get_open_tasks_for_vendor_card(db, vc.vendor_card_id)
-            ctx = _base_ctx(request, user, "vendors")
-            ctx["vendor_id"] = vc.vendor_card_id
-            ctx["vendor_tasks"] = vendor_tasks
-            return template_response("htmx/partials/vendors/tabs/_vendor_tasks.html", ctx)
-    return HTMLResponse("")
+    return _render_parent_task_list(
+        request,
+        user,
+        db,
+        company_id=task.company_id if task else None,
+        site_contact_id=task.site_contact_id if task else None,
+        vendor_card_id=task.vendor_card_id if task else None,
+        vendor_contact_id=task.vendor_contact_id if task else None,
+    )
 
 
 @router.post("/v2/partials/tasks/{task_id}/snooze", response_class=HTMLResponse)
@@ -700,64 +633,22 @@ async def snooze_task_endpoint(
     Authz: same gate as edit/complete — assignee, creator, account owner, or admin.
     Returns the refreshed parent task list (account, contact, or vendor card).
     """
-    from app.services.task_service import (
-        get_open_tasks_for_company,
-        get_open_tasks_for_contact,
-        is_task_mutation_authorized,
-        snooze_task,
-    )
+    from app.services.task_service import snooze_task
 
-    task = db.get(RequisitionTask, task_id)
-    if not task:
-        raise HTTPException(404, "Task not found")
-    _is_vendor = task.vendor_card_id is not None or task.vendor_contact_id is not None
-    if not task.company_id and not task.site_contact_id and not _is_vendor:
-        raise HTTPException(400, "Not a CRM task")
-    if not is_task_mutation_authorized(db, task, user.id, is_admin=(user.role == UserRole.ADMIN)):
-        raise HTTPException(403, "You are not allowed to snooze this task")
+    _require_crm_task_mutable(db, task_id, user, "snooze")
     snooze_task(db, task_id)
     logger.info("Task {} snoozed by user {}", task_id, user.id)
     # Re-render the parent container (same logic as edit_task_endpoint)
     task = db.get(RequisitionTask, task_id)
-    company_id = task.company_id if task else None
-    site_contact_id = task.site_contact_id if task else None
-    vendor_card_id_snooze = task.vendor_card_id if task else None
-    vendor_contact_id_snooze = task.vendor_contact_id if task else None
-    if company_id:
-        tasks = get_open_tasks_for_company(db, company_id)
-        ctx = _base_ctx(request, user, "customers")
-        ctx["company_id"] = company_id
-        ctx["company_tasks"] = tasks
-        return template_response("htmx/partials/customers/_account_tasks.html", ctx)
-    if site_contact_id:
-        contact = db.get(SiteContact, site_contact_id)
-        tasks = get_open_tasks_for_contact(db, site_contact_id)
-        ctx = _base_ctx(request, user, "customers")
-        ctx["contact"] = contact
-        ctx["contact_tasks"] = tasks
-        ctx["company_id"] = contact.customer_site.company_id if contact and contact.customer_site else 0
-        ctx["site_id"] = site_contact_id
-        return template_response("htmx/partials/customers/_contact_tasks.html", ctx)
-    if vendor_card_id_snooze:
-        from app.services.task_service import get_open_tasks_for_vendor_card
-
-        vendor_tasks = get_open_tasks_for_vendor_card(db, vendor_card_id_snooze)
-        ctx = _base_ctx(request, user, "vendors")
-        ctx["vendor_id"] = vendor_card_id_snooze
-        ctx["vendor_tasks"] = vendor_tasks
-        return template_response("htmx/partials/vendors/tabs/_vendor_tasks.html", ctx)
-    if vendor_contact_id_snooze:
-        from app.models.vendors import VendorContact as _VendorContact
-        from app.services.task_service import get_open_tasks_for_vendor_card
-
-        vc = db.get(_VendorContact, vendor_contact_id_snooze)
-        if vc:
-            vendor_tasks = get_open_tasks_for_vendor_card(db, vc.vendor_card_id)
-            ctx = _base_ctx(request, user, "vendors")
-            ctx["vendor_id"] = vc.vendor_card_id
-            ctx["vendor_tasks"] = vendor_tasks
-            return template_response("htmx/partials/vendors/tabs/_vendor_tasks.html", ctx)
-    return HTMLResponse("")
+    return _render_parent_task_list(
+        request,
+        user,
+        db,
+        company_id=task.company_id if task else None,
+        site_contact_id=task.site_contact_id if task else None,
+        vendor_card_id=task.vendor_card_id if task else None,
+        vendor_contact_id=task.vendor_contact_id if task else None,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -812,20 +703,15 @@ async def create_vendor_task_endpoint(
     db: Session = Depends(get_db),
 ):
     """Create a task scoped to a vendor; return refreshed task list."""
-    from datetime import date as _date
-
     from app.services.task_service import create_vendor_task, get_open_tasks_for_vendor_card
 
     vendor = get_vendor_card_or_404(db, vendor_id)
     if not title.strip():
         return HTMLResponse('<p class="text-xs text-rose-600">Title is required.</p>')
-    due_dt = None
-    if due_at.strip():
-        try:
-            d = _date.fromisoformat(due_at.strip())
-            due_dt = datetime.combine(d, datetime.min.time()).replace(tzinfo=UTC)
-        except ValueError:
-            return HTMLResponse('<p class="text-xs text-rose-600">Invalid date.</p>')
+    try:
+        due_dt = _parse_task_due_date(due_at)
+    except HTTPException:
+        return HTMLResponse('<p class="text-xs text-rose-600">Invalid date.</p>')
     create_vendor_task(
         db,
         vendor_card_id=vendor_id,

@@ -60,6 +60,7 @@ from ..template_env import template_response
 from ..utils.csv_export import stream_csv
 from ..utils.normalization import normalize_mpn_key
 from ..utils.sql_helpers import escape_like
+from .htmx._shared import set_toast
 
 router = APIRouter(tags=["resell"])
 
@@ -99,6 +100,29 @@ def _file_extension(filename: str) -> str:
     if "." not in filename:
         return ""
     return "." + filename.rsplit(".", 1)[-1].lower()
+
+
+async def _read_tabular_upload(file: UploadFile) -> tuple[str, list[dict]]:
+    """Shared upload contract for the two tabular-preview routes: extension allowlist,
+    10MB size cap, ParseError→400, empty-rows→400. Returns (filename, parsed rows).
+
+    Silent-failure e: a corrupt/unreadable file raises ParseError (distinct from a
+    genuinely-empty one) so we can tell the user which of the two actually happened,
+    instead of collapsing both to "No data rows found".
+    """
+    filename = file.filename or ""
+    if _file_extension(filename) not in ALLOWED_EXTENSIONS:
+        raise HTTPException(400, f"Unsupported file type '{_file_extension(filename)}'")
+    content = await file.read()
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(400, "File too large")
+    try:
+        rows = parse_tabular_file(content, filename)
+    except ParseError as exc:
+        raise HTTPException(400, "We couldn't read this file — it may be corrupt or not a valid spreadsheet") from exc
+    if not rows:
+        raise HTTPException(400, "No data rows found")
+    return filename, rows
 
 
 # List statuses whose posting window is still LIVE (counting down). Only these render the
@@ -1233,7 +1257,7 @@ async def resell_send_bid(
     await bid_back_service.send_bid_back(db, list_id=list_id, bid_id=bid_id, owner=user, token=token)
     el = excess_service.get_excess_list(db, list_id)
     resp = template_response("htmx/partials/resell/_build_bid.html", _build_bid_context(request, db, el, user))
-    return _toast(resp, "Bid sent to the customer")
+    return set_toast(resp, "Bid sent to the customer")
 
 
 @router.post("/api/resell/{list_id}/bid/{bid_id}/accept", response_class=HTMLResponse)
@@ -1252,7 +1276,7 @@ async def resell_accept_bid(
     bid_back_service.record_bid_response(db, list_id=list_id, bid_id=bid_id, owner=user, accepted=True)
     el = excess_service.get_excess_list(db, list_id)
     resp = template_response("htmx/partials/resell/_build_bid.html", _build_bid_context(request, db, el, user))
-    return _toast(resp, "Bid marked accepted")
+    return set_toast(resp, "Bid marked accepted")
 
 
 @router.post("/api/resell/{list_id}/bid/{bid_id}/reject", response_class=HTMLResponse)
@@ -1271,7 +1295,7 @@ async def resell_reject_bid(
     bid_back_service.record_bid_response(db, list_id=list_id, bid_id=bid_id, owner=user, accepted=False)
     el = excess_service.get_excess_list(db, list_id)
     resp = template_response("htmx/partials/resell/_build_bid.html", _build_bid_context(request, db, el, user))
-    return _toast(resp, "Bid marked rejected")
+    return set_toast(resp, "Bid marked rejected")
 
 
 # ── Modal forms ──────────────────────────────────────────────────────
@@ -1554,7 +1578,7 @@ async def resell_delete_list(
     excess_service.delete_excess_list(db, list_id, user)
     resp = HTMLResponse("")
     resp.headers["HX-Redirect"] = "/v2/resell"
-    return _toast(resp, "List deleted")
+    return set_toast(resp, "List deleted")
 
 
 @router.post("/api/resell/{list_id}/import-preview", response_class=HTMLResponse)
@@ -1575,21 +1599,7 @@ async def resell_import_preview(
         raise HTTPException(409, "Posted lists are locked. Close this list and create a new one to make changes.")
     if not excess_service.can_post(user):
         raise HTTPException(403, "You do not have permission to post excess lists")
-    filename = file.filename or ""
-    if _file_extension(filename) not in ALLOWED_EXTENSIONS:
-        raise HTTPException(400, f"Unsupported file type '{_file_extension(filename)}'")
-    content = await file.read()
-    if len(content) > MAX_UPLOAD_BYTES:
-        raise HTTPException(400, "File too large")
-    # Silent-failure e: a corrupt/unreadable file raises ParseError (distinct from a
-    # genuinely-empty one) so we can tell the user which of the two actually happened,
-    # instead of collapsing both to "No data rows found".
-    try:
-        rows = parse_tabular_file(content, filename)
-    except ParseError as exc:
-        raise HTTPException(400, "We couldn't read this file — it may be corrupt or not a valid spreadsheet") from exc
-    if not rows:
-        raise HTTPException(400, "No data rows found")
+    filename, rows = await _read_tabular_upload(file)
     result = excess_service.preview_import(rows)
     return template_response(
         "htmx/partials/resell/import_preview.html",
@@ -1667,18 +1677,7 @@ async def resell_bids_upload_preview(
         # Owner-only from here (403 above) — a camouflage 404 would mislead the one user
         # who can see the draft; say what unblocks the upload instead.
         raise HTTPException(400, "Post the list before uploading bids — offers are only collected on a posted list")
-    filename = file.filename or ""
-    if _file_extension(filename) not in ALLOWED_EXTENSIONS:
-        raise HTTPException(400, f"Unsupported file type '{_file_extension(filename)}'")
-    content = await file.read()
-    if len(content) > MAX_UPLOAD_BYTES:
-        raise HTTPException(400, "File too large")
-    try:
-        rows = parse_tabular_file(content, filename)
-    except ParseError as exc:
-        raise HTTPException(400, "We couldn't read this file — it may be corrupt or not a valid spreadsheet") from exc
-    if not rows:
-        raise HTTPException(400, "No data rows found")
+    filename, rows = await _read_tabular_upload(file)
 
     result = excess_service.preview_bid_upload(db, list_id, rows)
     return template_response(
@@ -1739,7 +1738,7 @@ async def resell_bids_upload_confirm(
     superseded = result.get("superseded", 0)
     if superseded > 0:
         message += f" — replaced {superseded} earlier upload(s)"
-    return _toast(resp, message)
+    return set_toast(resp, message)
 
 
 @router.post("/api/resell/{list_id}/publish", response_class=HTMLResponse)
@@ -1888,14 +1887,6 @@ async def resell_submit_offer(
     return await resell_offers(request, list_id=el.id, user=user, db=db)
 
 
-def _toast(resp: Response, message: str) -> Response:
-    """Attach the ``showToast`` HX-Trigger so an award/unaward confirms even though the
-    triggering button was swapped out of the DOM (same pattern as
-    sightings._with_toast)."""
-    resp.headers["HX-Trigger"] = json.dumps({"showToast": {"message": message, "type": "success"}})
-    return resp
-
-
 @router.post("/api/resell/{list_id}/offers/{offer_id}/award", response_class=HTMLResponse)
 async def resell_award_offer(
     request: Request,
@@ -1926,7 +1917,7 @@ async def resell_award_offer(
     resp = template_response(
         "htmx/partials/resell/_award_response.html", _award_response_context(request, db, el, user)
     )
-    return _toast(resp, "Offer awarded")
+    return set_toast(resp, "Offer awarded")
 
 
 @router.post("/api/resell/{list_id}/offers/{offer_id}/unaward", response_class=HTMLResponse)
@@ -1955,7 +1946,7 @@ async def resell_unaward_offer(
     resp = template_response(
         "htmx/partials/resell/_award_response.html", _award_response_context(request, db, el, user)
     )
-    return _toast(resp, "Award reversed")
+    return set_toast(resp, "Award reversed")
 
 
 @router.post("/api/resell/{list_id}/offers/{offer_id}/withdraw", response_class=HTMLResponse)
@@ -1988,7 +1979,7 @@ async def resell_withdraw_offer(
     resp = template_response(
         "htmx/partials/resell/_award_response.html", _award_response_context(request, db, el, user)
     )
-    return _toast(resp, "Offer withdrawn")
+    return set_toast(resp, "Offer withdrawn")
 
 
 @router.post("/api/resell/{list_id}/offer-lines/{offer_line_id}/assign", response_class=HTMLResponse)
@@ -2013,7 +2004,7 @@ async def resell_assign_offer_line(
     resp = template_response(
         "htmx/partials/resell/_award_response.html", _award_response_context(request, db, el, user)
     )
-    return _toast(resp, "Offer assigned to line")
+    return set_toast(resp, "Offer assigned to line")
 
 
 # ── Outreach: offer-to-buyers panel + tracker + don't-forget strip ───
@@ -2142,20 +2133,17 @@ def _buyer_panel_context(
     }
 
 
-def _outreach_tracker_context(request: Request, db: Session, el: ExcessList, user: User) -> dict:
-    """Context for the unified Outreach tracker: rows (newest first) + the glance
-    summary."""
-    # B7: reclassify any of THIS list's rows stuck in ``sending`` past the staleness
-    # threshold before rendering, so a row orphaned by a dead background send job becomes
-    # actionable (Retry-able) the instant the tab is opened, instead of waiting on the
-    # once-nightly sweep.
-    resell_outreach_service.reclassify_stale_sending(db, excess_list_id=el.id)
-    rows = (
+def _outreach_rows(db: Session, el: ExcessList) -> list[ExcessOutreach]:
+    """The list's outreach tracker rows, newest first — shared by the tracker tab and
+    its CSV-export twin so the eager-load set and ordering can never drift.
+
+    Eager-loads the buyer / line / sender the consumers read so neither render — the
+    tracker runs inside the 3s poll — N+1s per row (finding 2). All many-to-one, so no
+    .unique() is needed.
+    """
+    return (
         db.query(ExcessOutreach)
         .filter(ExcessOutreach.excess_list_id == el.id)
-        # Eager-load the buyer / line / sender the template reads (the same joinedloads as
-        # the CSV-export twin) so this render — which runs inside the 3s tracker poll — never
-        # N+1s per row (finding 2). All many-to-one, so no .unique() is needed.
         .options(
             joinedload(ExcessOutreach.target_vendor_card),
             joinedload(ExcessOutreach.excess_line_item),
@@ -2164,6 +2152,17 @@ def _outreach_tracker_context(request: Request, db: Session, el: ExcessList, use
         .order_by(ExcessOutreach.created_at.desc(), ExcessOutreach.id.desc())
         .all()
     )
+
+
+def _outreach_tracker_context(request: Request, db: Session, el: ExcessList, user: User) -> dict:
+    """Context for the unified Outreach tracker: rows (newest first) + the glance
+    summary."""
+    # B7: reclassify any of THIS list's rows stuck in ``sending`` past the staleness
+    # threshold before rendering, so a row orphaned by a dead background send job becomes
+    # actionable (Retry-able) the instant the tab is opened, instead of waiting on the
+    # once-nightly sweep.
+    resell_outreach_service.reclassify_stale_sending(db, excess_list_id=el.id)
+    rows = _outreach_rows(db, el)
     # Distinct-buyer counts so "offered N · M responded · K bid" reads per buyer, not per
     # (buyer × line) row — a 3-line per-line campaign is one buyer offered, not three. Only
     # genuinely-sent rows count as "offered": a ``sending`` / ``failed`` / ``interrupted``
@@ -2280,17 +2279,7 @@ async def resell_outreach_export(
     # 404-mask a foreign private draft (finding #48) BEFORE the owner 403.
     el, _ = _get_list_for_user(db, list_id, user)
     _require_owner(el, user)
-    rows = (
-        db.query(ExcessOutreach)
-        .filter(ExcessOutreach.excess_list_id == el.id)
-        .options(
-            joinedload(ExcessOutreach.target_vendor_card),
-            joinedload(ExcessOutreach.excess_line_item),
-            joinedload(ExcessOutreach.submitted_by_user),
-        )
-        .order_by(ExcessOutreach.created_at.desc(), ExcessOutreach.id.desc())
-        .all()
-    )
+    rows = _outreach_rows(db, el)  # export intentionally skips reclassify_stale_sending
 
     header = ["Buyer", "Line", "Channel", "Sent By", "Status", "Sent At", "Last Activity", "Note"]
     not_sent = buyer_affinity_service._NOT_SENT_STATUSES

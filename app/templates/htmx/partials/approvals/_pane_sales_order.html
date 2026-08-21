@@ -42,6 +42,27 @@
     </select>
   </label>
   {% endmacro %}
+  {# One roster drives BOTH the edit form and the read-only display grid.
+     Each entry: (name, kind, label) — kind 'yn' renders qps_yn / the yn() wrap,
+     'text' renders qps_text / the plain value. #}
+  {% set qp_sales_fields = [
+    ('sales_condition', 'text', 'Condition'),
+    ('sales_quantity', 'text', 'Quantity'),
+    ('sales_fw_hw_rev', 'text', 'FW / HW / REV / Date codes'),
+    ('sales_product_commodity', 'text', 'Product commodity'),
+    ('sales_testing_required', 'yn', 'Testing required'),
+    ('sales_testing_option', 'text', 'Testing option'),
+    ('sales_testing_specifics', 'text', 'Testing specifics'),
+    ('sales_test_location', 'text', 'Test location'),
+    ('sales_serial_preapproval_required', 'yn', 'Serial preapproval required'),
+    ('sales_authorized_ship_early', 'yn', 'Authorized to ship early'),
+    ('sales_authorized_ship_partial', 'yn', 'Authorized to ship partial'),
+    ('sales_routing_prescreening_whs', 'text', 'Routing / prescreening whs'),
+    ('sales_third_party_pkg_ok', 'yn', 'Third-party packaging OK'),
+    ('sales_pkg_requirements', 'text', 'Packaging requirements'),
+    ('sales_bom_matrix_links', 'text', 'Acceptable subs / BOM notes'),
+    ('sales_notes', 'text', 'Sales notes'),
+  ] %}
   <div class="rounded-lg border border-line-base bg-white"
        x-data="{ qpOpen: {{ 'false' if qp and qp.sales_section_reviewed_at else 'true' }}, qpEdit: false }">
     <button type="button" @click="qpOpen = !qpOpen"
@@ -72,22 +93,10 @@
         <input type="hidden" name="expected_updated_at" value="{{ qp_stale_token }}">
         <input type="hidden" name="lens" value="{{ lens }}">
         <div class="grid grid-cols-2 md:grid-cols-3 gap-2">
-          {{ qps_text('sales_condition', 'Condition', qp.sales_condition if qp else none) }}
-          {{ qps_text('sales_quantity', 'Quantity', qp.sales_quantity if qp else none) }}
-          {{ qps_text('sales_fw_hw_rev', 'FW / HW / REV / Date codes', qp.sales_fw_hw_rev if qp else none) }}
-          {{ qps_text('sales_product_commodity', 'Product commodity', qp.sales_product_commodity if qp else none) }}
-          {{ qps_yn('sales_testing_required', 'Testing required', qp.sales_testing_required if qp else none) }}
-          {{ qps_text('sales_testing_option', 'Testing option', qp.sales_testing_option if qp else none) }}
-          {{ qps_text('sales_testing_specifics', 'Testing specifics', qp.sales_testing_specifics if qp else none) }}
-          {{ qps_text('sales_test_location', 'Test location', qp.sales_test_location if qp else none) }}
-          {{ qps_yn('sales_serial_preapproval_required', 'Serial preapproval required', qp.sales_serial_preapproval_required if qp else none) }}
-          {{ qps_yn('sales_authorized_ship_early', 'Authorized to ship early', qp.sales_authorized_ship_early if qp else none) }}
-          {{ qps_yn('sales_authorized_ship_partial', 'Authorized to ship partial', qp.sales_authorized_ship_partial if qp else none) }}
-          {{ qps_text('sales_routing_prescreening_whs', 'Routing / prescreening whs', qp.sales_routing_prescreening_whs if qp else none) }}
-          {{ qps_yn('sales_third_party_pkg_ok', 'Third-party packaging OK', qp.sales_third_party_pkg_ok if qp else none) }}
-          {{ qps_text('sales_pkg_requirements', 'Packaging requirements', qp.sales_pkg_requirements if qp else none) }}
-          {{ qps_text('sales_bom_matrix_links', 'Acceptable subs / BOM notes', qp.sales_bom_matrix_links if qp else none) }}
-          {{ qps_text('sales_notes', 'Sales notes', qp.sales_notes if qp else none) }}
+          {% for name, kind, label in qp_sales_fields %}
+          {% if kind == 'yn' %}{{ qps_yn(name, label, qp|attr(name) if qp else none) }}
+          {% else %}{{ qps_text(name, label, qp|attr(name) if qp else none) }}{% endif %}
+          {% endfor %}
         </div>
         <div class="flex items-center justify-end gap-1.5">
           <button type="button" @click="qpEdit = false" class="btn-secondary btn-sm">Cancel</button>
@@ -99,24 +108,8 @@
       {% if qp %}
       {% macro yn(v) %}{% if v is true %}Yes{% elif v is false %}No{% else %}—{% endif %}{% endmacro %}
       <dl class="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-2 text-xs">
-        {% for label, val in [
-          ('Condition', qp.sales_condition),
-          ('Quantity', qp.sales_quantity),
-          ('FW / HW / REV / Date codes', qp.sales_fw_hw_rev),
-          ('Product commodity', qp.sales_product_commodity),
-          ('Testing required', yn(qp.sales_testing_required)),
-          ('Testing option', qp.sales_testing_option),
-          ('Testing specifics', qp.sales_testing_specifics),
-          ('Test location', qp.sales_test_location),
-          ('Serial preapproval required', yn(qp.sales_serial_preapproval_required)),
-          ('Authorized to ship early', yn(qp.sales_authorized_ship_early)),
-          ('Authorized to ship partial', yn(qp.sales_authorized_ship_partial)),
-          ('Routing / prescreening whs', qp.sales_routing_prescreening_whs),
-          ('Third-party packaging OK', yn(qp.sales_third_party_pkg_ok)),
-          ('Packaging requirements', qp.sales_pkg_requirements),
-          ('Acceptable subs / BOM notes', qp.sales_bom_matrix_links),
-          ('Sales notes', qp.sales_notes),
-        ] %}
+        {% for name, kind, label in qp_sales_fields %}
+        {% set val = yn(qp|attr(name)) if kind == 'yn' else qp|attr(name) %}
         <div class="min-w-0">
           <dt class="text-gray-400 uppercase tracking-wide text-[11px]">{{ label }}</dt>
           <dd class="text-gray-800 break-words">{{ val if val not in (none, '') else '—' }}</dd>

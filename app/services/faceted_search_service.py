@@ -197,7 +197,10 @@ def get_facet_counts(
     card_scope_query, _ = _apply_card_filters(db.query(MaterialCard.id), db, commodity=commodity, **card_level)
     card_scope = card_scope_query.subquery()
 
-    def _grouped_counts(narrow_filters: dict, only_spec_key: str | None = None) -> list:
+    def _grouped(narrow_filters: dict, value_column, only_spec_key: str | None = None) -> list:
+        # ONE query builder for enum counts (value_text) and numeric common-value chips
+        # (value_numeric) — identical card_scope + facet-narrowing + group-by shape by
+        # construction, so chip counts can never diverge from the enum/results predicates.
         base = db.query(MaterialSpecFacet.material_card_id).filter(
             MaterialSpecFacet.category == commodity,
             MaterialSpecFacet.material_card_id.in_(db.query(card_scope.c.id)),
@@ -207,41 +210,22 @@ def get_facet_counts(
         card_ids_subq = base.distinct().subquery()
         q = db.query(
             MaterialSpecFacet.spec_key,
-            MaterialSpecFacet.value_text,
+            value_column,
             func.count(MaterialSpecFacet.material_card_id.distinct()),
         ).filter(
             MaterialSpecFacet.category == commodity,
-            MaterialSpecFacet.value_text.isnot(None),
+            value_column.isnot(None),
             MaterialSpecFacet.material_card_id.in_(db.query(card_ids_subq.c.material_card_id)),
         )
         if only_spec_key is not None:
             q = q.filter(MaterialSpecFacet.spec_key == only_spec_key)
-        return q.group_by(MaterialSpecFacet.spec_key, MaterialSpecFacet.value_text).all()
+        return list(q.group_by(MaterialSpecFacet.spec_key, value_column).all())
+
+    def _grouped_counts(narrow_filters: dict, only_spec_key: str | None = None) -> list:
+        return _grouped(narrow_filters, MaterialSpecFacet.value_text, only_spec_key)
 
     def _grouped_numeric_counts(narrow_filters: dict, only_spec_key: str | None = None) -> list:
-        # Twin of _grouped_counts for numeric common-value chips: groups by value_numeric
-        # (IS NOT NULL) instead of value_text. Same card_scope + facet-narrowing shape,
-        # so chip counts can never diverge from the enum/results predicates.
-        base = db.query(MaterialSpecFacet.material_card_id).filter(
-            MaterialSpecFacet.category == commodity,
-            MaterialSpecFacet.material_card_id.in_(db.query(card_scope.c.id)),
-        )
-        if narrow_filters:
-            base = _apply_facet_filters(base, db, commodity, narrow_filters)
-        card_ids_subq = base.distinct().subquery()
-        q = db.query(
-            MaterialSpecFacet.spec_key,
-            MaterialSpecFacet.value_numeric,
-            func.count(MaterialSpecFacet.material_card_id.distinct()),
-        ).filter(
-            MaterialSpecFacet.category == commodity,
-            MaterialSpecFacet.value_numeric.isnot(None),
-            MaterialSpecFacet.material_card_id.in_(db.query(card_ids_subq.c.material_card_id)),
-        )
-        if only_spec_key is not None:
-            q = q.filter(MaterialSpecFacet.spec_key == only_spec_key)
-        rows: list = q.group_by(MaterialSpecFacet.spec_key, MaterialSpecFacet.value_numeric).all()
-        return rows
+        return _grouped(narrow_filters, MaterialSpecFacet.value_numeric, only_spec_key)
 
     # Pass 1: every facet narrowed by ALL active filters — correct for facets the user has NOT
     # filtered on (they should reflect the full current narrowing).

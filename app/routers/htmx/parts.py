@@ -55,7 +55,7 @@ from ...template_env import _part_description, template_response
 from ...utils.csv_export import stream_csv
 from ...utils.search_builder import SearchBuilder
 from ..sightings import run_search_and_publish
-from ._shared import _base_ctx, _parse_task_due_date, _safe_int
+from ._shared import _active_users, _base_ctx, _parse_task_due_date, _safe_int
 
 router = APIRouter(tags=["htmx-views"])
 
@@ -274,7 +274,7 @@ async def parts_list_partial(
                 sub_card_map[display_mpn] = card_id
 
     # Team users for owner filter
-    users_list = db.query(User).filter(User.is_active.is_(True)).order_by(User.name).all()
+    users_list = _active_users(db)
 
     # Spotlight markers: requirement rows carrying new confirmed offers the user hasn't seen.
     from ...services.alerts import markers_for_tab
@@ -512,7 +512,7 @@ async def part_tab_req_details(
         .order_by(Requirement.primary_mpn)
         .all()
     )
-    users_list = db.query(User).filter(User.is_active.is_(True)).order_by(User.name).all()
+    users_list = _active_users(db)
 
     ctx = _base_ctx(request, user, "requisitions")
     ctx.update(
@@ -1023,7 +1023,7 @@ async def part_tab_comms(
         .all()
     )
 
-    users_list = db.query(User).filter(User.is_active.is_(True)).order_by(User.name).all()
+    users_list = _active_users(db)
 
     ctx = _base_ctx(request, user, "requisitions")
     ctx.update({"requirement": req, "tasks": tasks, "users": users_list})

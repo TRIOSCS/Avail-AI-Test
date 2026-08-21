@@ -12,14 +12,14 @@ from ...models import Company, CustomerSite, SiteContact, User, VendorCard, Vend
 from ...rate_limit import limiter
 from ...schemas.crm import AddContactsToVendor, AddContactToSite, CustomerImportRow, EnrichDomainRequest
 from ...services.credential_service import get_credential_cached
+
+# The background waterfall worker lives in the service layer; the local name is kept
+# so existing call sites and test monkeypatches keep working.
+from ...services.customer_enrichment_service import run_company_enrichment as _run_company_enrichment
 from ...template_env import template_response
+from ...utils.normalization import strip_website_to_domain as _normalize_domain
 
 router = APIRouter()
-
-
-def _normalize_domain(value: str) -> str:
-    """Strip scheme, www, and any path from a domain/website string."""
-    return value.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0]
 
 
 def _wants_html(request: Request) -> bool:
@@ -45,77 +45,6 @@ def _require_enrichment_provider() -> None:
 
 
 # ── Enrichment (shared for vendors + customers) ─────────────────────────
-
-
-async def _run_company_enrichment(company_id: int, domain: str, name: str) -> None:
-    """Background worker: run the account enrichment waterfall for one company.
-
-    Scheduled by ``enrich_company`` (HTMX path) so the click never blocks on the ~20-40s of
-    external-provider calls: firmographics (``enrich_entity``: SAM.gov + Clay/Explorium/Lusha
-    + Anthropic) then contact discovery (``find_suggested_contacts_with_errors``: Hunter/Clay).
-    Firmographics are committed here; the transient result (which fields changed, discovered
-    contacts, errored providers) is recorded in ``company_enrich_runs`` so the enrich-status
-    poller can render the same ``_enrich_result.html`` panel the synchronous path produced.
-
-    A firmographics failure marks the outcome ``blocked`` (the poller shows a "couldn't
-    complete" toast). A contact-discovery hiccup is NOT blocked — it degrades to the amber
-    "couldn't reach" banner via ``errored_providers``, mirroring the old inline behavior.
-
-    Opens its own session — FastAPI has already returned the response and closed the request
-    session by the time this runs. Must NEVER raise: it is a fire-and-forget task.
-    """
-    from ...database import SessionLocal
-    from ...services.company_enrich_runs import CompanyEnrichOutcome, company_enrich_runs
-
-    db = SessionLocal()
-    blocked = False
-    updated: list[str] = []
-    suggested: list[dict] = []
-    errored: list[str] = []
-    company_missing = False
-    try:
-        company = db.get(Company, company_id)
-        if company is None:
-            # Company vanished between click and run — nothing to enrich; drop the guard.
-            company_missing = True
-        else:
-            # Firmographics — commit on success; a genuine outage marks the run blocked (toast).
-            try:
-                from ...enrichment_service import apply_enrichment_to_company, enrich_entity
-
-                enrichment = await enrich_entity(domain, name)
-                updated = apply_enrichment_to_company(company, enrichment)
-                db.commit()
-            except Exception as e:
-                logger.opt(exception=e).warning("Account enrichment firmographics failed for {}", company_id)
-                db.rollback()
-                blocked = True
-
-            # Contact discovery — degrade to the amber "couldn't reach" banner, never a toast.
-            try:
-                from ...enrichment_service import find_suggested_contacts_with_errors
-
-                suggested, errored = await find_suggested_contacts_with_errors(domain, name)
-            except Exception as e:
-                logger.opt(exception=e).warning("Account enrichment contact discovery failed for {}", company_id)
-                errored = ["all"]
-    except Exception:
-        logger.exception("Account enrichment task crashed for {}", company_id)
-        blocked = True
-    finally:
-        db.close()
-        if company_missing:
-            company_enrich_runs.clear(company_id)
-        else:
-            company_enrich_runs.finish(
-                company_id,
-                CompanyEnrichOutcome(
-                    blocked=blocked,
-                    updated_fields=updated,
-                    suggested=suggested,
-                    errored_providers=errored,
-                ),
-            )
 
 
 def _resolve_company_domain(company: Company, payload: EnrichDomainRequest) -> str:
@@ -444,7 +373,7 @@ async def list_users_simple(user: User = Depends(require_user), db: Session = De
     return [
         {
             "id": u.id,
-            "name": u.name or u.email.split("@")[0],
+            "name": u.display_name,
             "email": u.email,
             "role": u.role,
         }

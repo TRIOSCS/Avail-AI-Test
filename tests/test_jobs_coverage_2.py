@@ -583,7 +583,7 @@ class TestJobPoVerification:
         from app.jobs.inventory_jobs import _job_po_verification
 
         mock_db = _mock_db()
-        mock_db.query.return_value.filter.return_value.all.return_value = []
+        mock_db.query.return_value.filter.return_value.options.return_value.all.return_value = []
 
         with patch("app.database.SessionLocal", return_value=mock_db):
             _run(_job_po_verification.__wrapped__())
@@ -601,7 +601,7 @@ class TestJobPoVerification:
         plan = MagicMock()
         plan.id = 1
         plan.lines = [line]
-        mock_db.query.return_value.filter.return_value.all.return_value = [plan]
+        mock_db.query.return_value.filter.return_value.options.return_value.all.return_value = [plan]
 
         with patch(
             "app.services.buyplan_workflow.verify_po_sent",
@@ -626,7 +626,7 @@ class TestJobPoVerification:
         plan = MagicMock()
         plan.id = 1
         plan.lines = [line]
-        mock_db.query.return_value.filter.return_value.all.return_value = [plan]
+        mock_db.query.return_value.filter.return_value.options.return_value.all.return_value = [plan]
 
         with patch(
             "app.services.buyplan_workflow.verify_po_sent",
@@ -799,7 +799,7 @@ class TestJobTokenRefresh:
         task_db.get.return_value = user
 
         with patch("app.database.SessionLocal", side_effect=_two_session_factory(selector_db, task_db)):
-            with patch("app.jobs.core_jobs._utc", side_effect=lambda x: x):
+            with patch("app.jobs.core_jobs.as_utc", side_effect=lambda x: x):
                 with patch("app.cache.intel_cache._get_redis", return_value=None):
                     with patch(
                         "app.utils.token_manager.refresh_user_token",
@@ -2496,7 +2496,7 @@ class TestJobTokenRefreshEdgeCases:
         mock_redis.set.return_value = True
 
         with patch("app.database.SessionLocal", side_effect=_two_session_factory(selector_db, task_db)):
-            with patch("app.jobs.core_jobs._utc", side_effect=lambda x: x):
+            with patch("app.jobs.core_jobs.as_utc", side_effect=lambda x: x):
                 with patch("app.cache.intel_cache._get_redis", return_value=mock_redis):
                     with patch(
                         "app.utils.token_manager.refresh_user_token",
@@ -2528,7 +2528,7 @@ class TestJobTokenRefreshEdgeCases:
         mock_redis.set.return_value = False
 
         with patch("app.database.SessionLocal", side_effect=_two_session_factory(selector_db, task_db)):
-            with patch("app.jobs.core_jobs._utc", side_effect=lambda x: x):
+            with patch("app.jobs.core_jobs.as_utc", side_effect=lambda x: x):
                 with patch("app.cache.intel_cache._get_redis", return_value=mock_redis):
                     _run(_job_token_refresh.__wrapped__())
 
@@ -2551,7 +2551,7 @@ class TestJobTokenRefreshEdgeCases:
         task_db.get.return_value = user
 
         with patch("app.database.SessionLocal", side_effect=_two_session_factory(selector_db, task_db)):
-            with patch("app.jobs.core_jobs._utc", side_effect=lambda x: x):
+            with patch("app.jobs.core_jobs.as_utc", side_effect=lambda x: x):
                 with patch("app.cache.intel_cache._get_redis", return_value=None):
                     with patch(
                         "app.utils.token_manager.refresh_user_token",
@@ -2656,7 +2656,7 @@ class TestJobInboxScanEdgeCases:
         with patch("app.database.SessionLocal", return_value=mock_db):
             with patch("app.config.settings") as mock_settings:
                 mock_settings.inbox_scan_interval_min = 5
-                with patch("app.jobs.core_jobs._utc", side_effect=lambda x: x):
+                with patch("app.jobs.core_jobs.as_utc", side_effect=lambda x: x):
                     _run(_job_inbox_scan.__wrapped__())
 
         mock_db.close.assert_called_once()

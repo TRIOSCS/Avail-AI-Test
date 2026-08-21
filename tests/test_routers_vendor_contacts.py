@@ -349,7 +349,7 @@ def test_lookup_tier2_scrape(client, db_session, monkeypatch):
     async def mock_scrape(url):
         return {"emails": ["found@scrapetest.com"], "phones": ["+1-555-9999"]}
 
-    monkeypatch.setattr("app.routers.vendor_contacts.scrape_website_contacts", mock_scrape)
+    monkeypatch.setattr("app.utils.vendor_helpers.scrape_website_contacts", mock_scrape)
 
     resp = client.post(
         "/api/vendor-contact",
@@ -366,7 +366,7 @@ def test_lookup_tier3_ai(client, db_session, monkeypatch):
     make_vendor_card(db_session, "aitest vendor", "AITest Vendor")
 
     monkeypatch.setattr(
-        "app.routers.vendor_contacts.get_credential_cached",
+        "app.utils.vendor_helpers.get_credential_cached",
         lambda *args, **kwargs: "fake-api-key",
     )
 
@@ -395,7 +395,7 @@ def test_lookup_no_api_key(client, db_session, monkeypatch):
     make_vendor_card(db_session, "nokey vendor", "NoKey Vendor")
 
     monkeypatch.setattr(
-        "app.routers.vendor_contacts.get_credential_cached",
+        "app.utils.vendor_helpers.get_credential_cached",
         lambda *args, **kwargs: None,
     )
 
@@ -412,7 +412,7 @@ def test_lookup_no_api_key(client, db_session, monkeypatch):
 def test_lookup_creates_card(client, db_session, monkeypatch):
     """Lookup for nonexistent vendor creates a new VendorCard."""
     monkeypatch.setattr(
-        "app.routers.vendor_contacts.get_credential_cached",
+        "app.utils.vendor_helpers.get_credential_cached",
         lambda *args, **kwargs: None,
     )
 
@@ -438,9 +438,9 @@ def test_lookup_ssrf_blocked(client, db_session, monkeypatch):
     async def mock_scrape(url):
         return {"emails": [], "phones": []}
 
-    monkeypatch.setattr("app.routers.vendor_contacts.scrape_website_contacts", mock_scrape)
+    monkeypatch.setattr("app.utils.vendor_helpers.scrape_website_contacts", mock_scrape)
     monkeypatch.setattr(
-        "app.routers.vendor_contacts.get_credential_cached",
+        "app.utils.vendor_helpers.get_credential_cached",
         lambda *args, **kwargs: None,
     )
 
@@ -472,9 +472,9 @@ def test_lookup_tier2_scrape_no_emails_after_merge(client, db_session, monkeypat
     async def mock_scrape(url):
         return {"emails": ["found@scrape.com"], "phones": []}
 
-    monkeypatch.setattr("app.routers.vendor_contacts.scrape_website_contacts", mock_scrape)
-    monkeypatch.setattr("app.routers.vendor_contacts.merge_contact_into_card", lambda *a, **kw: False)
-    monkeypatch.setattr("app.routers.vendor_contacts.get_credential_cached", lambda *a, **kw: None)
+    monkeypatch.setattr("app.utils.vendor_helpers.scrape_website_contacts", mock_scrape)
+    monkeypatch.setattr("app.utils.vendor_helpers.merge_contact_into_card", lambda *a, **kw: False)
+    monkeypatch.setattr("app.utils.vendor_helpers.get_credential_cached", lambda *a, **kw: None)
 
     resp = client.post("/api/vendor-contact", json={"vendor_name": "Scrape Empty Vendor"})
     assert resp.status_code == 200
@@ -489,8 +489,8 @@ def test_lookup_tier2_scrape_exception(client, db_session, monkeypatch):
     async def mock_scrape(url):
         raise ConnectionError("Timeout")
 
-    monkeypatch.setattr("app.routers.vendor_contacts.scrape_website_contacts", mock_scrape)
-    monkeypatch.setattr("app.routers.vendor_contacts.get_credential_cached", lambda *a, **kw: None)
+    monkeypatch.setattr("app.utils.vendor_helpers.scrape_website_contacts", mock_scrape)
+    monkeypatch.setattr("app.utils.vendor_helpers.get_credential_cached", lambda *a, **kw: None)
 
     resp = client.post("/api/vendor-contact", json={"vendor_name": "Scrape Fail Vendor"})
     assert resp.status_code == 200
@@ -502,7 +502,7 @@ def test_lookup_tier3_ai_string_emails(client, db_session, monkeypatch):
     """Tier 3: AI returns emails as a string instead of list."""
     make_vendor_card(db_session, "stringemail vendor", "StringEmail Vendor")
 
-    monkeypatch.setattr("app.routers.vendor_contacts.get_credential_cached", lambda *a, **kw: "fake-key")
+    monkeypatch.setattr("app.utils.vendor_helpers.get_credential_cached", lambda *a, **kw: "fake-key")
 
     async def mock_claude_json(**kwargs):
         return {
@@ -526,7 +526,7 @@ def test_lookup_tier3_ai_returns_none(client, db_session, monkeypatch):
     """Tier 3: AI returns None/non-dict."""
     make_vendor_card(db_session, "nullai vendor", "NullAI Vendor")
 
-    monkeypatch.setattr("app.routers.vendor_contacts.get_credential_cached", lambda *a, **kw: "fake-key")
+    monkeypatch.setattr("app.utils.vendor_helpers.get_credential_cached", lambda *a, **kw: "fake-key")
 
     async def mock_claude_json(**kwargs):
         return None
@@ -543,7 +543,7 @@ def test_lookup_tier3_ai_exception(client, db_session, monkeypatch):
     """Tier 3: AI lookup throws exception returns tier=0 with error."""
     make_vendor_card(db_session, "ai error vendor", "AI Error Vendor")
 
-    monkeypatch.setattr("app.routers.vendor_contacts.get_credential_cached", lambda *a, **kw: "fake-key")
+    monkeypatch.setattr("app.utils.vendor_helpers.get_credential_cached", lambda *a, **kw: "fake-key")
 
     async def mock_claude_json(**kwargs):
         raise RuntimeError("API quota exceeded")
@@ -565,8 +565,8 @@ def test_lookup_tier3_ai_with_website_hint(client, db_session, monkeypatch):
     async def mock_scrape(url):
         return {"emails": [], "phones": []}
 
-    monkeypatch.setattr("app.routers.vendor_contacts.scrape_website_contacts", mock_scrape)
-    monkeypatch.setattr("app.routers.vendor_contacts.get_credential_cached", lambda *a, **kw: "fake-key")
+    monkeypatch.setattr("app.utils.vendor_helpers.scrape_website_contacts", mock_scrape)
+    monkeypatch.setattr("app.utils.vendor_helpers.get_credential_cached", lambda *a, **kw: "fake-key")
 
     async def mock_claude_json(**kwargs):
         prompt = kwargs.get("prompt", "")
@@ -588,7 +588,7 @@ def test_lookup_vendor_contact_integrity_error_race(client, db_session, monkeypa
     norm = normalize_vendor_name("Integrity Race Vendor")
     make_vendor_card(db_session, norm, "Integrity Race Vendor", emails=["exists@race.com"])
 
-    monkeypatch.setattr("app.routers.vendor_contacts.get_credential_cached", lambda *a, **kw: None)
+    monkeypatch.setattr("app.utils.vendor_helpers.get_credential_cached", lambda *a, **kw: None)
 
     resp = client.post(
         "/api/vendor-contact",

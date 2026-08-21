@@ -46,6 +46,10 @@ from ...models.approvals import ApprovalRequest, ApprovalStep, ApprovalStepRecip
 from ...models.auth import User
 from ...models.buy_plan import BuyPlan, BuyPlanLine
 from ...models.quality_plan import Prepayment, QualityPlan
+from ..prepayment_notifications import beneficiary_name
+
+# Backwards-compatible alias: approvals_hub.py still imports the old private name.
+_beneficiary = beneficiary_name
 
 RESOLVED_STATUSES = (
     ApprovalRequestStatus.APPROVED,
@@ -482,24 +486,6 @@ def _resolve_subject(ar: ApprovalRequest, subjects: dict) -> tuple[str, str | No
     return f"Request #{ar.id}", None, None, None
 
 
-def _beneficiary(pp: Prepayment) -> str:
-    """Who is actually being paid — the legal payee, most-authoritative first.
-
-    Chain (finding #3): vendor_card.legal_name → the request-time vendor_name snapshot →
-    vendor_card.display_name → "—". The approver/AP must never see a blank payee.
-    """
-    vc = pp.vendor_card
-    if vc is not None and vc.legal_name:
-        legal: str = vc.legal_name  # legacy relationship read is untyped
-        return legal
-    if pp.vendor_name:
-        return pp.vendor_name
-    if vc is not None and vc.display_name:
-        display: str = vc.display_name  # legacy relationship read is untyped
-        return display
-    return "—"
-
-
 def _row_vm(
     ar: ApprovalRequest,
     *,
@@ -525,7 +511,7 @@ def _row_vm(
             # (possibly-drifted) request amount — this is the surface where cash is signed off.
             from ..buyplan_workflow import _line_amount  # lazy: avoid an import cycle
 
-            beneficiary = _beneficiary(pp)
+            beneficiary = beneficiary_name(pp)
             test_report_sent = pp.test_report_sent
             buyer_remarks = pp.buyer_remarks
             plan_id = pp.buy_plan_id

@@ -157,12 +157,6 @@ class SourceListResponse(BaseModel):
 # ── Vendor Sub-endpoints ────────────────────────────────────────────────
 
 
-class VendorPartsSummaryResponse(BaseModel):
-    vendor_name: str = ""
-    total: int = 0
-    items: list[dict] = Field(default_factory=list)
-
-
 class VendorEmailMetricsResponse(BaseModel):
     vendor_name: str = ""
     total_rfqs_sent: int = 0
@@ -266,16 +260,6 @@ class CompanyIntelResponse(BaseModel):
 
     available: bool = False
     intel: dict | None = None
-    reason: str = ""
-
-    model_config = ConfigDict(extra="allow")
-
-
-class AiDraftRfqResponse(BaseModel):
-    """Response from AI RFQ draft generation."""
-
-    available: bool = False
-    body: str = ""
     reason: str = ""
 
     model_config = ConfigDict(extra="allow")
@@ -427,19 +411,5 @@ class AttachmentParseResponse(BaseModel):
     parseable: int = 0
     rows_parsed: int = 0
     sightings_created: int = 0
-
-    model_config = ConfigDict(extra="allow")
-
-
-# ── Command Center ─────────────────────────────────────────────────────
-
-
-class CommandCenterResponse(BaseModel):
-    """Response from command center actions endpoint."""
-
-    stale_rfqs: list[dict] = Field(default_factory=list)
-    pending_quotes: list[dict] = Field(default_factory=list)
-    pending_reviews: list[dict] = Field(default_factory=list)
-    today_responses: list[dict] = Field(default_factory=list)
 
     model_config = ConfigDict(extra="allow")

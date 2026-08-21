@@ -95,8 +95,6 @@ class TestM15CreditsRecorded:
         with (
             patch(f"{EXPL}._get_api_key", return_value="key"),
             patch(f"{EXPL}.explorium.discover_businesses", new_callable=AsyncMock, return_value=raw),
-            patch(f"{EXPL}.calculate_fit_score", return_value=(70, "fit")),
-            patch(f"{EXPL}.calculate_readiness_score", return_value=(50, {})),
             patch("asyncio.sleep", new_callable=AsyncMock),
         ):
             await run_explorium_discovery_batch(

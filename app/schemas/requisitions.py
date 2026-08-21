@@ -229,7 +229,3 @@ class RequirementNoteAdd(BaseModel):
         if not v:
             raise ValueError("Note text is required")
         return v
-
-
-class SearchOptions(BaseModel):
-    requirement_ids: list[int] | None = None

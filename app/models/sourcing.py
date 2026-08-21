@@ -26,7 +26,7 @@ from sqlalchemy.orm import relationship, validates
 
 from ..constants import RequisitionStatus, SourcingStatus
 from ..database import UTCDateTime
-from .base import Base
+from .base import AttachmentColumnsMixin, Base, warn_enum_member
 
 
 class Requisition(Base):
@@ -123,14 +123,7 @@ class Requisition(Base):
 
     @validates("status")
     def _validate_status(self, _key, value):
-        from ..constants import RequisitionStatus
-
-        valid = {e.value for e in RequisitionStatus}
-        if value and value not in valid:
-            from loguru import logger
-
-            logger.warning("Unexpected requisition status: {}. Expected one of {}", value, valid)
-        return value
+        return warn_enum_member(RequisitionStatus, value, "requisition status")
 
 
 class Requirement(Base):
@@ -386,54 +379,26 @@ class Sighting(Base):
     )
 
 
-class RequisitionAttachment(Base):
+class RequisitionAttachment(AttachmentColumnsMixin, Base):
     """File attachment on a requisition (stored in OneDrive or company SharePoint
-    library).
-
-    library_drive_id NULL  → OneDrive fallback row (user token, item in /me/drive)
-    library_drive_id set   → company SharePoint library row (app token)
-    """
+    library — shared payload columns on AttachmentColumnsMixin)."""
 
     __tablename__ = "requisition_attachments"
     id = Column(Integer, primary_key=True)
     requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False, index=True)
-    file_name = Column(String(500), nullable=False)
-    library_item_id = Column(String(500))
-    library_drive_id = Column(String(200))
-    library_web_url = Column(Text)
-    thumbnail_url = Column(Text)
-    content_type = Column(String(100))
-    size_bytes = Column(Integer)
-    uploaded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     requisition = relationship("Requisition", back_populates="attachments")
-    uploaded_by = relationship("User", foreign_keys=[uploaded_by_id])
 
 
-class RequirementAttachment(Base):
+class RequirementAttachment(AttachmentColumnsMixin, Base):
     """File attachment on a requirement (stored in OneDrive or company SharePoint
-    library).
-
-    library_drive_id NULL  → OneDrive fallback row (user token, item in /me/drive)
-    library_drive_id set   → company SharePoint library row (app token)
-    """
+    library — shared payload columns on AttachmentColumnsMixin)."""
 
     __tablename__ = "requirement_attachments"
     id = Column(Integer, primary_key=True)
     requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="CASCADE"), nullable=False, index=True)
-    file_name = Column(String(500), nullable=False)
-    library_item_id = Column(String(500))
-    library_drive_id = Column(String(200))
-    library_web_url = Column(Text)
-    thumbnail_url = Column(Text)
-    content_type = Column(String(100))
-    size_bytes = Column(Integer)
-    uploaded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
     requirement = relationship("Requirement", back_populates="attachments")
-    uploaded_by = relationship("User", foreign_keys=[uploaded_by_id])
 
 
 class OemSpecCode(Base):

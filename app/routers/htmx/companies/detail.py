@@ -37,7 +37,7 @@ from ....services.crm_service import cadence_state, company_commercial_stats, co
 from ....services.tagging import list_all_segment_tags, list_company_segment_tags
 from ....services.task_service import get_next_task_for_company
 from ....template_env import template_response
-from .._shared import _base_ctx
+from .._shared import _active_users, _base_ctx
 from .._shared_tabs import company_tab as _company_tab_impl
 from . import router
 from ._registries import CANONICAL_ROLES, KNOWN_ACCOUNT_FIELDS
@@ -45,6 +45,21 @@ from ._registries import CANONICAL_ROLES, KNOWN_ACCOUNT_FIELDS
 _VALID_CUSTOMER_TABS = frozenset(
     {"contacts", "sites", "requisitions", "activity", "quotes", "buy_plans", "files", "history"}
 )
+
+
+def _company_requisition_clause(company):
+    """SQL clause for "this requisition belongs to this account": company_id FK match OR
+    normalized customer-name match (lower/trim — unindexable, so callers needing the id
+    set repeatedly should compute it once and pass ``req_ids`` around).
+
+    The single source of truth for the account↔requisition linkage rule, used by the
+    detail counts, the quotes/buy-plan scoping below, and the requisitions/activity
+    tabs in .._shared_tabs.
+    """
+    return or_(
+        Requisition.company_id == company.id,
+        sqlfunc.lower(sqlfunc.trim(Requisition.customer_name)) == company.name.lower().strip(),
+    )
 
 
 def _company_quotes_query(db: Session, company, *, req_ids=None):
@@ -62,17 +77,7 @@ def _company_quotes_query(db: Session, company, *, req_ids=None):
     """
     site_ids = [s.id for s in db.query(CustomerSite.id).filter(CustomerSite.company_id == company.id).all()]
     if req_ids is None:
-        req_ids = [
-            r.id
-            for r in db.query(Requisition.id)
-            .filter(
-                or_(
-                    Requisition.company_id == company.id,
-                    sqlfunc.lower(sqlfunc.trim(Requisition.customer_name)) == company.name.lower().strip(),
-                )
-            )
-            .all()
-        ]
+        req_ids = [r.id for r in db.query(Requisition.id).filter(_company_requisition_clause(company)).all()]
     conds = []
     if site_ids:
         conds.append(Quote.customer_site_id.in_(site_ids))
@@ -93,17 +98,7 @@ def _company_buy_plans_query(db: Session, company, *, req_ids=None):
     when omitted the same match is recomputed here (unchanged for _shared_tabs callers).
     """
     if req_ids is None:
-        req_ids = [
-            r.id
-            for r in db.query(Requisition.id)
-            .filter(
-                or_(
-                    Requisition.company_id == company.id,
-                    sqlfunc.lower(sqlfunc.trim(Requisition.customer_name)) == company.name.lower().strip(),
-                )
-            )
-            .all()
-        ]
+        req_ids = [r.id for r in db.query(Requisition.id).filter(_company_requisition_clause(company)).all()]
     if not req_ids:
         return None
     return (
@@ -167,16 +162,7 @@ async def _render_company_detail(
     # render; now 1). Status is filtered in Python for the count so no extra
     # scan is needed; StrEnum members compare equal to the stored String value,
     # matching the previous SQL `status IN (...)` exactly (incl. NULL -> excluded).
-    _matching_reqs = (
-        db.query(Requisition.id, Requisition.status)
-        .filter(
-            or_(
-                Requisition.company_id == company.id,
-                sqlfunc.lower(sqlfunc.trim(Requisition.customer_name)) == company.name.lower().strip(),
-            )
-        )
-        .all()
-    )
+    _matching_reqs = db.query(Requisition.id, Requisition.status).filter(_company_requisition_clause(company)).all()
     _req_ids = [r.id for r in _matching_reqs]
     open_req_count = sum(1 for r in _matching_reqs if r.status in (RequisitionStatus.OPEN, RequisitionStatus.DRAFT))
 
@@ -207,7 +193,7 @@ async def _render_company_detail(
         .all()
     )
     can_manage_team = can_manage_account_team(user, company)
-    all_users = db.query(User).filter(User.is_active.is_(True)).order_by(User.name).all() if can_manage_team else []
+    all_users = _active_users(db) if can_manage_team else []
 
     ctx = _base_ctx(request, user, "customers")
     ctx.update(

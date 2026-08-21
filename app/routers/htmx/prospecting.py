@@ -12,7 +12,6 @@ Depends on: app.models, app.dependencies, app.database, app.services, ._shared
 """
 
 import html as html_mod
-import json
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
@@ -40,7 +39,7 @@ from ...models.prospect_account import ProspectAccount
 from ...services.prospect_priority import build_priority_snapshot, build_signal_tags, contacts_summary
 from ...template_env import template_response
 from ...utils.search_builder import SearchBuilder
-from ._shared import _base_ctx, set_canonical_url
+from ._shared import _active_users, _base_ctx, set_canonical_url, set_toast, toast_error_response
 
 router = APIRouter(tags=["htmx-views"])
 
@@ -90,25 +89,6 @@ def _enrich_in_progress(enrichment_data) -> bool:
     """
     ed = enrichment_data or {}
     return ed.get("enrich_status") == "running" and not _enrich_is_stale(ed.get("enrich_started_at"))
-
-
-def _prospect_toast(response, message: str, kind: str = "success") -> None:
-    """Attach a showToast HX-Trigger so the Alpine $store.toast surfaces feedback."""
-    response.headers["HX-Trigger"] = json.dumps({"showToast": {"message": message, "type": kind}})
-
-
-def _prospect_error_toast(message: str) -> HTMLResponse:
-    """Honest error feedback for an HTMX action that has no card to re-render.
-
-    HTMX suppresses non-2xx swaps and the JSON HTTPException handler carries no
-    showToast, so raising a 4xx here would leave the modal open with ZERO feedback (a
-    silent no-op). Instead return a 200 that swaps nothing (HX-Reswap: none) but fires
-    an error showToast — mirroring the reassign handler's ValueError path, which also
-    returns 200 + a toast.
-    """
-    resp = HTMLResponse("", headers={"HX-Reswap": "none"})
-    _prospect_toast(resp, message, "error")
-    return resp
 
 
 def _wants_detail(request: Request) -> bool:
@@ -216,7 +196,7 @@ def _prospect_action_response(
         ctx["include_card"] = _status_visible_under_filter(prospect.status, flt_status)
         ctx.update(_prospect_stats_ctx(db))
         resp = template_response("htmx/partials/prospecting/_action_oob.html", ctx)
-    _prospect_toast(resp, message, kind)
+    set_toast(resp, message, kind)
     return resp
 
 
@@ -408,7 +388,7 @@ async def add_prospect_domain(
             '<div class="bg-rose-50 border border-rose-200 rounded p-2 text-sm text-rose-700">'
             "Enter a domain (e.g. acme.com).</div>"
         )
-        _prospect_toast(resp, "Enter a domain first", "error")
+        set_toast(resp, "Enter a domain first", "error")
         return resp
 
     try:
@@ -419,7 +399,7 @@ async def add_prospect_domain(
             '<div class="bg-rose-50 border border-rose-200 rounded p-2 text-sm text-rose-700">'
             f"Could not add {html_mod.escape(domain)}.</div>"
         )
-        _prospect_toast(resp, "Could not add prospect", "error")
+        set_toast(resp, "Could not add prospect", "error")
         return resp
 
     # Service returns a dict ({prospect_id, name, domain, status, is_new}), not an ORM row.
@@ -430,7 +410,7 @@ async def add_prospect_domain(
         "htmx/partials/prospecting/add_result.html",
         {"request": request, "pid": pid, "name": name, "verb": verb, "is_new": result.get("is_new")},
     )
-    _prospect_toast(resp, f"{verb}: {result.get('name') or domain}", "success" if result.get("is_new") else "info")
+    set_toast(resp, f"{verb}: {result.get('name') or domain}", "success" if result.get("is_new") else "info")
     return resp
 
 
@@ -659,9 +639,9 @@ async def enrich_status_partial(
     if state != "running":
         resp.status_code = 286  # htmx stop-polling status — the final fragment still swaps
         if state == "error":
-            _prospect_toast(resp, "Enrichment failed — try again", "warning")
+            set_toast(resp, "Enrichment failed — try again", "warning")
         else:
-            _prospect_toast(resp, f"Enriched {prospect.name}", "success")
+            set_toast(resp, f"Enriched {prospect.name}", "success")
     return resp
 
 
@@ -693,7 +673,7 @@ async def assign_prospect_form(
     if not prospect:
         raise HTTPException(404, "Prospect not found")
 
-    users = db.query(User).filter(User.is_active.is_(True)).order_by(User.name).all()
+    users = _active_users(db)
     return template_response(
         "htmx/partials/prospecting/assign_modal.html",
         {
@@ -733,7 +713,7 @@ async def assign_prospect_htmx(
     except PermissionError as e:
         raise HTTPException(403, "Only a manager or admin can assign an account") from e
     except (LookupError, ValueError) as e:
-        return _prospect_error_toast(str(e))
+        return toast_error_response(str(e))
 
     # Same background deep-enrichment a self-claim triggers, so an assigned account is
     # enriched for the rep it landed with.
@@ -746,7 +726,7 @@ async def assign_prospect_htmx(
         .first()
     )
     if not prospect:
-        return _prospect_error_toast("Prospect not found")
+        return toast_error_response("Prospect not found")
 
     form = await request.form()
     return _prospect_action_response(

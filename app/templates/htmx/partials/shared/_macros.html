@@ -6,40 +6,9 @@ Usage:
   {{ req_status_badge(req.status) }}
   {{ urgency_badge(req.urgency) }}
   {{ risk_badge(lead.risk_level) }}
-  {{ btn_primary("Save", {"hx-post": "/api/save", "hx-target": "#main"}) }}
   {{ filter_pill("Active", "active", current_status, {"hx-get": "/api/list?status=active"}) }}
   {{ stat_card("Total", 42, "$1,234") }}
 #}
-
-
-{# ── Deadline / ASAP Widget ───────────────────────────────────────── #}
-{#
-  Renders a date input + ASAP toggle button wired to Alpine.js.
-  When ASAP is active, urgency is submitted as "critical" and the date input is disabled.
-
-  Args:
-    deadline_value: Pre-filled date string (YYYY-MM-DD), default ''.
-    urgency_value:  Current urgency ('critical' activates ASAP on load), default 'normal'.
-
-  Usage:
-    {% from "htmx/partials/shared/_macros.html" import deadline_asap_widget %}
-    {{ deadline_asap_widget() }}
-    {{ deadline_asap_widget(deadline_value=req.deadline, urgency_value=req.urgency) }}
-#}
-
-{% macro deadline_asap_widget(deadline_value='', urgency_value='normal') %}
-<div x-data="{ asap: {{ 'true' if urgency_value == 'critical' else 'false' }} }" class="flex items-center gap-2">
-  <input aria-label="Deadline" type="date" name="deadline" :disabled="asap"
-         value="{{ deadline_value }}"
-         class="px-2 py-1 text-xs border border-gray-300 rounded input-focus">
-  <input type="hidden" name="urgency" :value="asap ? 'critical' : 'normal'">
-  <button type="button" @click="asap = !asap"
-          :class="asap ? 'bg-amber-500 text-white' : 'bg-gray-100 text-gray-600'"
-          class="px-2 py-1 text-xs font-semibold rounded transition-colors whitespace-nowrap">
-    ASAP
-  </button>
-</div>
-{% endmacro %}
 
 
 {# ── Semantic color vocabulary ────────────────────────────────────── #}
@@ -379,30 +348,29 @@ Usage:
 {%- endmacro %}
 
 
-{# ── Buttons ──────────────────────────────────────────────────────── #}
-{# btn_primary / btn_secondary / btn_danger share one shape and differ only in
-   the button + spinner color classes — _btn is the single source of truth. #}
+{# ── Close-modal Form Attributes ──────────────────────────────────── #}
+{#
+  The two house idioms for "close the enclosing modal after a successful HTMX
+  submit", previously copy-pasted inline across ~20 modal forms. Both emit
+  ATTRIBUTES — call them inside a <form ...> (or <button ...>) open tag.
 
-{% macro _btn(text, btn_cls, spinner_cls, attrs={}) %}
-<button class="{{ btn_cls }}"
-  data-loading-disable
-  {% for key, val in attrs.items() %}{{ key }}="{{ val }}" {% endfor %}
-  {% if attrs.get('hx-post') or attrs.get('hx-put') or attrs.get('hx-delete') or attrs.get('hx-patch') %}hx-indicator="find .htmx-spinner"{% endif %}>
-  <span class="{{ spinner_cls }}"></span>
-  {{ text }}
-</button>
+  close_modal_on_success(): plain-JS idiom — bubbles a close-modal CustomEvent
+    up to the modal shell (no Alpine needed on the form).
+  close_modal_toast(message): Alpine idiom (resell modals) — $dispatch
+    ('close-modal') plus a success toast. `message` must be plain text with no
+    quote characters (it lands inside a single-quoted JS string).
+
+  Usage:
+    {% from "htmx/partials/shared/_macros.html" import close_modal_on_success %}
+    <form hx-post="..." {{ close_modal_on_success() }}>
+    <form hx-post="..." {{ close_modal_toast('Line added') }}>
+#}
+{% macro close_modal_on_success() -%}
+hx-on::after-request="if(event.detail.successful) this.dispatchEvent(new CustomEvent('close-modal', {bubbles: true}))"
 {%- endmacro %}
 
-{% macro btn_primary(text, attrs={}) -%}
-{{ _btn(text, 'btn btn-sm btn-primary', 'htmx-spinner htmx-indicator inline-block w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin mr-1', attrs) }}
-{%- endmacro %}
-
-{% macro btn_secondary(text, attrs={}) -%}
-{{ _btn(text, 'btn btn-sm btn-secondary', 'htmx-spinner htmx-indicator inline-block w-3 h-3 border-2 border-gray-400/30 border-t-gray-600 rounded-full animate-spin mr-1', attrs) }}
-{%- endmacro %}
-
-{% macro btn_danger(text, attrs={}) -%}
-{{ _btn(text, 'btn btn-sm btn-danger', 'htmx-spinner htmx-indicator inline-block w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin mr-1', attrs) }}
+{% macro close_modal_toast(message) -%}
+@htmx:after-request.camel="if(event.detail.successful){ $dispatch('close-modal'); $store.toast.message='{{ message }}'; $store.toast.type='success'; $store.toast.show=true; }"
 {%- endmacro %}
 
 
@@ -431,6 +399,31 @@ Usage:
 {%- endmacro %}
 
 
+{# ── Spinner ──────────────────────────────────────────────────────── #}
+{#
+  The one circle+arc loading spinner (the classic quarter-arc SVG). Replaces
+  the identical inline SVG that was copy-pasted across ~38 templates.
+
+  Args:
+    cls:          Class string on the <svg> — pass each site's exact classes
+                  (size, color, htmx-indicator, margins) unchanged.
+    stroke_width: Circle stroke width (default 4; a few dense sites use 3).
+    attrs:        Extra raw attributes appended verbatim after class= (e.g.
+                  'x-show="saving" x-cloak', 'id="draft-spinner"').
+                  SECURITY: `attrs|safe` is sound because every call site passes
+                  a hardcoded template-author literal — it NEVER carries user/DB
+                  data. Keep it that way; dynamic values would bypass escaping.
+  Usage:
+    {% from "htmx/partials/shared/_macros.html" import spinner %}
+    {{ spinner('h-4 w-4 animate-spin') }}
+    {{ spinner('h-3 w-3 animate-spin', stroke_width=3) }}
+    {{ spinner('h-4 w-4 animate-spin', attrs='x-show="saving" x-cloak') }}
+#}
+{% macro spinner(cls='h-4 w-4 animate-spin', stroke_width=4, attrs='') -%}
+<svg class="{{ cls }}"{% if attrs %} {{ attrs|safe }}{% endif %} fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="{{ stroke_width }}"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+{%- endmacro %}
+
+
 {# ── Search Button ───────────────────────────────────────────────── #}
 
 {% macro search_button(requirement, target="#sightings-detail", swap="innerHTML") %}
@@ -450,10 +443,7 @@ Usage:
       <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/>
     </svg>
     <span id="search-spinner-{{ requirement.id }}" class="htmx-indicator">
-      <svg class="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"></circle>
-        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-      </svg>
+      {{ spinner('h-3.5 w-3.5 animate-spin', stroke_width=3) }}
     </span>
     Search
   </button>
@@ -578,6 +568,62 @@ Usage:
     <p class="text-[11px] text-gray-400 whitespace-nowrap">{{ (a.occurred_at or a.created_at)|timeago }}</p>
   </div>
 </div>
+{% endmacro %}
+
+
+{# ── Activity Day-group Header ────────────────────────────────────── #}
+{#
+  Purpose:     The Today / Yesterday / "%b %d, %Y" date-group label used by
+               every date-grouped activity feed. Previously copy-pasted five
+               times across the customer/vendor Activity tabs and the
+               requisition Timeline.
+  Args:
+    ts:     The row's timestamp (datetime) — used for the fallback date label.
+    ts_day: ts|localday (the caller already computed it for its ns.day check).
+    today:  now()|localday.
+  Usage (inside a loop that keeps its own ns.day bookkeeping):
+    {% if ts and ts_day != ns.day %}
+      {%- set ns.day = ts_day -%}
+      {{ day_group_header(ts, ts_day, today) }}
+    {% endif %}
+#}
+{% macro day_group_header(ts, ts_day, today) -%}
+{%- set day_delta = (today - ts_day).days -%}
+<p class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mt-4 mb-1 first:mt-1">
+  {%- if day_delta == 0 %}Today
+  {%- elif day_delta == 1 %}Yesterday
+  {%- else %}{{ ts|localdate('%b %d, %Y') }}{% endif -%}
+</p>
+{%- endmacro %}
+
+
+{# ── Activity Day-grouped Rows ────────────────────────────────────── #}
+{#
+  Purpose:     The whole date-grouped activity loop for a plain list of
+               ActivityLog rows: day bookkeeping + day_group_header +
+               activity_row per item. The single source of truth for the loop
+               that was pasted into the customer/vendor Activity tab sections
+               and the requisition Timeline. Feeds that mix in non-ActivityLog
+               items (e.g. the customer Emails section's RFQ dicts) keep their
+               own loop and call day_group_header directly.
+  Args:
+    items: list[ActivityLog], newest-first.
+  Usage:
+    {% from "htmx/partials/shared/_macros.html" import activity_day_rows %}
+    {{ activity_day_rows(section_items) }}
+#}
+{% macro activity_day_rows(items) %}
+{%- set today = now()|localday -%}
+{%- set ns = namespace(day=None) -%}
+{% for a in items %}
+  {%- set ts = a.occurred_at or a.created_at -%}
+  {%- set ts_day = ts|localday -%}
+  {% if ts and ts_day != ns.day %}
+    {%- set ns.day = ts_day -%}
+    {{ day_group_header(ts, ts_day, today) }}
+  {% endif %}
+  {{ activity_row(a) }}
+{% endfor %}
 {% endmacro %}
 
 

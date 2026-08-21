@@ -6,6 +6,7 @@ Depends on: app.database, app.models, app.email_service, app.services.webhook_se
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+from typing import cast
 
 import httpx
 import sqlalchemy.exc
@@ -14,7 +15,7 @@ from loguru import logger
 
 from ..scheduler import _traced_job
 from ..services.m365_status import REASON_TRANSIENT, reason_for
-from ..utils.token_manager import _utc
+from ..utils.timezones import as_utc
 
 
 def register_core_jobs(scheduler, settings, db=None):
@@ -63,7 +64,7 @@ async def _job_token_refresh():
         for user in users:
             needs_refresh = False
             if user.token_expires_at:
-                exp = _utc(user.token_expires_at)
+                exp = as_utc(cast("datetime", user.token_expires_at))
                 needs_refresh = now > exp - timedelta(minutes=15)
             elif not user.access_token:
                 needs_refresh = True
@@ -129,22 +130,19 @@ async def _job_inbox_scan():
     from ..database import SessionLocal
     from ..models import User
     from ..services.admin_service import get_effective_int
-    from .email_jobs import _scan_user_inbox
+    from .email_jobs import _connected_users, _scan_user_inbox
 
     # Use a short-lived session just to identify users that need scanning
     db = SessionLocal()
     try:
         now = datetime.now(UTC)
-        users = db.query(User).filter(User.refresh_token.isnot(None)).all()
         scan_interval = timedelta(
             minutes=get_effective_int(db, "inbox_scan_interval_min", settings.inbox_scan_interval_min)
         )
 
         users_to_scan = []
-        for user in users:
-            if not user.access_token or not user.m365_connected:
-                continue
-            should_scan = not user.last_inbox_scan or now - _utc(user.last_inbox_scan) > scan_interval
+        for user in _connected_users(db):
+            should_scan = not user.last_inbox_scan or now - as_utc(user.last_inbox_scan) > scan_interval
             if should_scan:
                 # Detach user data we need so we can close this session
                 users_to_scan.append(user.id)

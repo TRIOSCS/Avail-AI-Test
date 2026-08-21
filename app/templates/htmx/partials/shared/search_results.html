@@ -124,6 +124,22 @@
       {% endif %}
     {% endmacro %}
 
+    {# ── Result anchor shell (reusable macro) ─ one source for the grouped rows:
+       icon + label spans (caller body) inside the hx-boosted anchor. The partial
+       URL defaults to the page URL with /v2/ → /v2/partials/ (companies is the
+       one asymmetric pair and passes partial_url explicitly). #}
+    {% macro result_link(icon_key, page_url, partial_url=None) %}
+          <a href="{{ page_url }}"
+             hx-get="{{ partial_url if partial_url else page_url|replace('/v2/', '/v2/partials/', 1) }}"
+             hx-target="#main-content"
+             hx-push-url="{{ page_url }}"
+             @click="searchOpen = false"
+             class="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-gray-700 hover:bg-brand-50 transition-colors">
+            {{ entity_icon(icon_key) }}
+            {{ caller() }}
+          </a>
+    {% endmacro %}
+
     {# ── Group display names ── #}
     {% set group_labels = {
       "requisitions": "Requisitions",
@@ -147,61 +163,37 @@
 
           {# ── Requisitions ── #}
           {% if group_key == "requisitions" %}
-          <a href="/v2/requisitions/{{ item.id }}"
-             hx-get="/v2/partials/requisitions/{{ item.id }}"
-             hx-target="#main-content"
-             hx-push-url="/v2/requisitions/{{ item.id }}"
-             @click="searchOpen = false"
-             class="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-gray-700 hover:bg-brand-50 transition-colors">
-            {{ entity_icon("requisitions") }}
+          {% call result_link("requisitions", "/v2/requisitions/" ~ item.id) %}
             <span>
               <span class="font-medium">{{ item.name }}</span>
               {% if item.customer_name %}
               <span class="ml-1 text-gray-400">{{ item.customer_name }}</span>
               {% endif %}
             </span>
-          </a>
+          {% endcall %}
 
-          {# ── Companies ── #}
+          {# ── Companies — page URL is /v2/companies/ but the partial is customers/ ── #}
           {% elif group_key == "companies" %}
-          <a href="/v2/companies/{{ item.id }}"
-             hx-get="/v2/partials/customers/{{ item.id }}"
-             hx-target="#main-content"
-             hx-push-url="/v2/companies/{{ item.id }}"
-             @click="searchOpen = false"
-             class="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-gray-700 hover:bg-brand-50 transition-colors">
-            {{ entity_icon("companies") }}
+          {% call result_link("companies", "/v2/companies/" ~ item.id, "/v2/partials/customers/" ~ item.id) %}
             <span class="font-medium">{{ item.name }}</span>
-          </a>
+          {% endcall %}
 
           {# ── Vendors ── #}
           {% elif group_key == "vendors" %}
-          <a href="/v2/vendors/{{ item.id }}"
-             hx-get="/v2/partials/vendors/{{ item.id }}"
-             hx-target="#main-content"
-             hx-push-url="/v2/vendors/{{ item.id }}"
-             @click="searchOpen = false"
-             class="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-gray-700 hover:bg-brand-50 transition-colors">
-            {{ entity_icon("vendors") }}
+          {% call result_link("vendors", "/v2/vendors/" ~ item.id) %}
             <span class="font-medium">{{ item.display_name }}</span>
-          </a>
+          {% endcall %}
 
           {# ── Vendor Contacts ── #}
           {% elif group_key == "vendor_contacts" %}
-          <a href="/v2/vendors/{{ item.vendor_card_id|default(item.id) }}"
-             hx-get="/v2/partials/vendors/{{ item.vendor_card_id|default(item.id) }}"
-             hx-target="#main-content"
-             hx-push-url="/v2/vendors/{{ item.vendor_card_id|default(item.id) }}"
-             @click="searchOpen = false"
-             class="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-gray-700 hover:bg-brand-50 transition-colors">
-            {{ entity_icon("vendor_contacts") }}
+          {% call result_link("vendor_contacts", "/v2/vendors/" ~ (item.vendor_card_id|default(item.id))) %}
             <span>
               <span class="font-medium">{{ item.full_name }}</span>
               {% if item.email %}
               <span class="ml-1 text-gray-400">{{ item.email }}</span>
               {% endif %}
             </span>
-          </a>
+          {% endcall %}
 
           {# ── Site Contacts ── #}
           {% elif group_key == "site_contacts" %}
@@ -217,30 +209,18 @@
 
           {# ── Parts ── #}
           {% elif group_key == "parts" %}
-          <a href="/v2/requisitions/{{ item.requisition_id|default('') }}"
-             hx-get="/v2/partials/requisitions/{{ item.requisition_id|default('') }}"
-             hx-target="#main-content"
-             hx-push-url="/v2/requisitions/{{ item.requisition_id|default('') }}"
-             @click="searchOpen = false"
-             class="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-gray-700 hover:bg-brand-50 transition-colors">
-            {{ entity_icon("parts") }}
+          {% call result_link("parts", "/v2/requisitions/" ~ item.requisition_id|default('')) %}
             <span>
               <span class="font-medium font-mono">{{ item.primary_mpn }}</span>
               {% if item.brand %}
               <span class="ml-1 text-gray-400">{{ item.brand }}</span>
               {% endif %}
             </span>
-          </a>
+          {% endcall %}
 
           {# ── Offers ── #}
           {% elif group_key == "offers" %}
-          <a href="/v2/requisitions/{{ item.requisition_id|default('') }}"
-             hx-get="/v2/partials/requisitions/{{ item.requisition_id|default('') }}"
-             hx-target="#main-content"
-             hx-push-url="/v2/requisitions/{{ item.requisition_id|default('') }}"
-             @click="searchOpen = false"
-             class="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-gray-700 hover:bg-brand-50 transition-colors">
-            {{ entity_icon("offers") }}
+          {% call result_link("offers", "/v2/requisitions/" ~ item.requisition_id|default('')) %}
             <span>
               <span class="font-medium font-mono">{{ item.mpn }}</span>
               {% if item.vendor_name %}
@@ -250,34 +230,22 @@
               <span class="ml-1 text-emerald-600 font-medium">${{ "%.2f"|format(item.unit_price) }}</span>
               {% endif %}
             </span>
-          </a>
+          {% endcall %}
 
           {# ── Material Hub cards ── #}
           {% elif group_key == "material_cards" %}
-          <a href="/v2/search?mpn={{ item.display_mpn|default(item.normalized_mpn|default(''))|urlencode }}"
-             hx-get="/v2/partials/search?mpn={{ item.display_mpn|default(item.normalized_mpn|default(''))|urlencode }}"
-             hx-target="#main-content"
-             hx-push-url="/v2/search?mpn={{ item.display_mpn|default(item.normalized_mpn|default(''))|urlencode }}"
-             @click="searchOpen = false"
-             class="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-gray-700 hover:bg-brand-50 transition-colors">
-            {{ entity_icon("material_cards") }}
+          {% call result_link("material_cards", "/v2/search?mpn=" ~ (item.display_mpn|default(item.normalized_mpn|default(''))|urlencode)) %}
             <span>
               <span class="font-medium font-mono">{{ item.display_mpn }}</span>
               {% if item.manufacturer %}
               <span class="ml-1 text-gray-400">{{ item.manufacturer }}</span>
               {% endif %}
             </span>
-          </a>
+          {% endcall %}
 
           {# ── Sightings ── #}
           {% elif group_key == "sightings" %}
-          <a href="/v2/requisitions/{{ item.requisition_id|default('') }}"
-             hx-get="/v2/partials/requisitions/{{ item.requisition_id|default('') }}"
-             hx-target="#main-content"
-             hx-push-url="/v2/requisitions/{{ item.requisition_id|default('') }}"
-             @click="searchOpen = false"
-             class="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-gray-700 hover:bg-brand-50 transition-colors">
-            {{ entity_icon("sightings") }}
+          {% call result_link("sightings", "/v2/requisitions/" ~ item.requisition_id|default('')) %}
             <span>
               <span class="font-medium font-mono">{{ item.mpn_matched }}</span>
               {% if item.vendor_name %}
@@ -287,7 +255,7 @@
               <span class="ml-1 text-emerald-600 font-medium">${{ "%.2f"|format(item.unit_price) }}</span>
               {% endif %}
             </span>
-          </a>
+          {% endcall %}
           {% endif %}
 
         {% endfor %}

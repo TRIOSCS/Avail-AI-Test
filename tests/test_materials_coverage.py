@@ -440,7 +440,7 @@ class TestImportStockInvalidFile:
 
     def test_import_stock_invalid_file_type_returns_400(self, client, db_session, monkeypatch):
         """POST /api/materials/import-stock with invalid file type returns 400."""
-        monkeypatch.setattr("app.routers.materials.get_credential_cached", lambda *a, **kw: None)
+        monkeypatch.setattr("app.services.credential_service.get_credential_cached", lambda *a, **kw: None)
 
         content = b"this is a pdf file"
         resp = client.post(
@@ -452,7 +452,7 @@ class TestImportStockInvalidFile:
 
     def test_import_stock_vendor_name_too_long_returns_400(self, client, db_session, monkeypatch):
         """POST /api/materials/import-stock with > 255 char vendor_name returns 400."""
-        monkeypatch.setattr("app.routers.materials.get_credential_cached", lambda *a, **kw: None)
+        monkeypatch.setattr("app.services.credential_service.get_credential_cached", lambda *a, **kw: None)
 
         content = b"mpn,qty\nTEST001,100"
         resp = client.post(
@@ -464,7 +464,7 @@ class TestImportStockInvalidFile:
 
     def test_import_stock_vendor_name_with_html_only_stripped_to_empty(self, client, db_session, monkeypatch):
         """POST /api/materials/import-stock strips HTML tags; all-HTML name → 400."""
-        monkeypatch.setattr("app.routers.materials.get_credential_cached", lambda *a, **kw: None)
+        monkeypatch.setattr("app.services.credential_service.get_credential_cached", lambda *a, **kw: None)
         monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close())
 
         content = b"mpn,qty,price\nHTML001,100,0.50"
@@ -479,7 +479,7 @@ class TestImportStockInvalidFile:
 
     def test_import_stock_tsv_file_accepted(self, client, db_session, monkeypatch):
         """POST /api/materials/import-stock accepts .tsv files."""
-        monkeypatch.setattr("app.routers.materials.get_credential_cached", lambda *a, **kw: None)
+        monkeypatch.setattr("app.services.credential_service.get_credential_cached", lambda *a, **kw: None)
         monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close())
 
         content = b"mpn\tqty\tprice\nTSV001\t100\t0.75"
@@ -492,7 +492,7 @@ class TestImportStockInvalidFile:
 
     def test_import_stock_xlsx_file_accepted(self, client, db_session, monkeypatch):
         """POST /api/materials/import-stock accepts .xlsx files."""
-        monkeypatch.setattr("app.routers.materials.get_credential_cached", lambda *a, **kw: None)
+        monkeypatch.setattr("app.services.credential_service.get_credential_cached", lambda *a, **kw: None)
         monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close())
 
         # Create a minimal xlsx-like CSV content (parse_tabular_file handles xlsx)
@@ -508,7 +508,7 @@ class TestImportStockInvalidFile:
     def test_import_stock_integrity_error_on_duplicate_vendor(self, client, db_session, monkeypatch):
         """POST /api/materials/import-stock handles IntegrityError on duplicate
         vendor."""
-        monkeypatch.setattr("app.routers.materials.get_credential_cached", lambda *a, **kw: None)
+        monkeypatch.setattr("app.services.credential_service.get_credential_cached", lambda *a, **kw: None)
         monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close())
 
         from app.vendor_utils import normalize_vendor_name

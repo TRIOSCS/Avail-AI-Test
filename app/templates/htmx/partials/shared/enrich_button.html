@@ -5,6 +5,7 @@
   Depends on: HTMX, Alpine.js
   Context vars: entity_type (str: "company", "vendor", "prospect"), entity_id (int)
 #}
+{% from "htmx/partials/shared/_macros.html" import spinner -%}
 <div x-data="{ enriching: false }">
   <button class="inline-flex items-center rounded-lg border border-brand-200 bg-brand-50 p-1.5 text-sm font-medium text-brand-600 hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-50 transition-colors focus:outline-none focus:ring-2 focus:ring-accent-500"
           title="Enrich"
@@ -28,10 +29,7 @@
     {# Loading state: spinner + sr-only label #}
     <template x-if="enriching" x-cloak>
       <span class="inline-flex items-center">
-        <svg class="h-4 w-4 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-        </svg>
+        {{ spinner('h-4 w-4 animate-spin') }}
         <span class="sr-only">Enriching...</span>
       </span>
     </template>

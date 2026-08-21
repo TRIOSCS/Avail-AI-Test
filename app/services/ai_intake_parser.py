@@ -1,7 +1,7 @@
 """services/ai_intake_parser.py — AI parser for pasted customer/vendor text.
 
 Called by: app/routers/ai.py (/api/ai/intake-draft)
-Depends on: app/utils/llm_router.py and normalization helpers
+Depends on: app/utils/claude_client.py and normalization helpers
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from typing import Any
 
 from loguru import logger
 
-from app.utils.llm_router import routed_structured
+from app.utils.claude_client import claude_structured
 from app.utils.normalization import (
     detect_currency,
     normalize_condition,
@@ -131,7 +131,7 @@ async def parse_freeform_intake(
     prompt = f"Pasted text:\n{cleaned}{context_block}"
 
     try:
-        result = await routed_structured(
+        result = await claude_structured(
             prompt=prompt,
             schema=INTAKE_SCHEMA,
             system=SYSTEM_PROMPT,

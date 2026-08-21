@@ -23,6 +23,7 @@ from sqlalchemy import and_, or_
 
 from ..constants import MEANINGFUL_CALL_OUTCOMES, CallOutcome, RequisitionStatus
 from ..scheduler import _traced_job
+from ..utils.timezones import as_utc
 
 
 def register_eight_by_eight_jobs(scheduler, settings):
@@ -316,8 +317,7 @@ def _find_optimistic_row(db, user_id, direction, external_phone, cdr_occurred_at
         if row_time is None:
             continue
         # Make timezone-aware for comparison
-        if row_time.tzinfo is None:
-            row_time = row_time.replace(tzinfo=UTC)
+        row_time = as_utc(row_time)
         if window_start <= row_time <= window_end:
             matches.append((abs((row_time - cdr_occurred_at).total_seconds()), row.id, row))
 

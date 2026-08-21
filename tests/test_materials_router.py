@@ -396,7 +396,7 @@ class TestImportStockList:
     @patch("app.file_utils.parse_tabular_file")
     @patch("app.file_utils.normalize_stock_row")
     @patch("app.services.stock_list_ingest.record_price_snapshot")
-    @patch("app.routers.materials.get_credential_cached", return_value=None)
+    @patch("app.services.credential_service.get_credential_cached", return_value=None)
     def test_import_success(
         self,
         mock_cred,
@@ -423,7 +423,7 @@ class TestImportStockList:
     @patch("app.file_utils.parse_tabular_file")
     @patch("app.file_utils.normalize_stock_row")
     @patch("app.services.stock_list_ingest.record_price_snapshot")
-    @patch("app.routers.materials.get_credential_cached", return_value=None)
+    @patch("app.services.credential_service.get_credential_cached", return_value=None)
     def test_import_updates_existing_mvh(
         self,
         mock_cred,
@@ -472,7 +472,7 @@ class TestImportStockList:
 
     @patch("app.file_utils.parse_tabular_file")
     @patch("app.file_utils.normalize_stock_row", return_value=None)
-    @patch("app.routers.materials.get_credential_cached", return_value=None)
+    @patch("app.services.credential_service.get_credential_cached", return_value=None)
     def test_import_skips_bad_rows(
         self,
         mock_cred,

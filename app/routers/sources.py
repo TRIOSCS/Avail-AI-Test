@@ -14,7 +14,6 @@ Depends on: models, config, dependencies, connectors/, services/
 """
 
 import base64
-import json
 import time
 from datetime import UTC, datetime
 
@@ -35,8 +34,6 @@ from ..dependencies import (
 )
 from ..models import (
     ApiSource,
-    Requirement,
-    Sighting,
     User,
     VendorCard,
     VendorResponse,
@@ -58,10 +55,11 @@ from ..schemas.responses import (
 )
 from ..schemas.sources import MiningOptions, SourceStatusToggle
 from ..services.admin_service import get_effective_flag
+from ..services.attachment_parser import create_sightings_from_rows as _create_sightings_from_attachment
 from ..services.connector_registry import get_connector_for_source as _get_connector_for_source
-from ..services.vendor_unavailability import apply_to_fresh_sightings
 from ..utils.vendor_helpers import find_vendor_card_by_name
 from ..vendor_utils import normalize_vendor_name
+from .htmx._shared import set_toast
 
 router = APIRouter()
 
@@ -89,117 +87,6 @@ async def _parse_mining_options(request: Request) -> MiningOptions:
     return MiningOptions()
 
 
-def _create_sightings_from_attachment(
-    db: Session,
-    vr: VendorResponse,
-    rows: list[dict],
-) -> int:
-    """Create Sighting records from parsed attachment rows, matching to Requirements."""
-    from ..utils.normalization import (
-        detect_currency,
-        fuzzy_mpn_match,
-        normalize_condition,
-        normalize_date_code,
-        normalize_lead_time,
-        normalize_mpn,
-        normalize_packaging,
-        normalize_price,
-        normalize_quantity,
-    )
-
-    reqs = db.query(Requirement).filter_by(requisition_id=vr.requisition_id).all()
-    if not reqs:
-        return 0
-
-    req_map: dict[str, Requirement] = {}
-    for req in reqs:
-        norm = (req.primary_mpn or "").upper().strip()
-        if norm:
-            req_map[norm] = req
-
-    created = 0
-    created_by_req: dict[int, list[Sighting]] = {}
-    for row in rows:
-        mpn = (row.get("mpn") or "").upper().strip()
-        if not mpn:
-            continue
-
-        matched_req = req_map.get(mpn)
-        if not matched_req:
-            for req_mpn, req in req_map.items():
-                if fuzzy_mpn_match(mpn, req_mpn):
-                    matched_req = req
-                    break
-
-        if not matched_req:
-            continue
-
-        existing = (
-            db.query(Sighting)
-            .filter_by(
-                requirement_id=matched_req.id,
-                vendor_name=vr.vendor_name or "",
-                mpn_matched=mpn,
-                source_type="email_attachment",
-            )
-            .first()
-        )
-        if existing:
-            # A RE-SENT vendor stock list is fresh HUMAN_DIRECT evidence: refresh
-            # the deduped row's qty/price from the new parse and include it in the
-            # apply batch so the override matrix evaluates it (O3 release). A bare
-            # `continue` here silently defeated the documented vendor-email release.
-            new_qty = normalize_quantity(row.get("qty"))
-            if new_qty is not None:
-                existing.qty_available = new_qty
-            new_price = normalize_price(row.get("unit_price"))
-            if new_price is not None:
-                existing.unit_price = new_price
-            created_by_req.setdefault(matched_req.id, []).append(existing)
-            continue
-
-        # Resolve material card
-        from ..search_service import resolve_material_card
-
-        mat_card = resolve_material_card(mpn, db)
-
-        sighting = Sighting(
-            requirement_id=matched_req.id,
-            material_card_id=mat_card.id if mat_card else None,
-            vendor_name=vr.vendor_name or "",
-            vendor_name_normalized=normalize_vendor_name(vr.vendor_name or ""),
-            vendor_email=vr.vendor_email,
-            mpn_matched=normalize_mpn(mpn) or mpn,
-            manufacturer=row.get("manufacturer", ""),
-            qty_available=normalize_quantity(row.get("qty")),
-            unit_price=normalize_price(row.get("unit_price")),
-            currency=detect_currency(row.get("currency") or row.get("unit_price")),
-            moq=normalize_quantity(row.get("moq")),
-            source_type="email_attachment",
-            condition=normalize_condition(row.get("condition")),
-            date_code=normalize_date_code(row.get("date_code")),
-            packaging=normalize_packaging(row.get("packaging")),
-            lead_time_days=normalize_lead_time(row.get("lead_time")),
-            lead_time=row.get("lead_time"),
-            confidence=0.7,
-            raw_data=row,
-        )
-        db.add(sighting)
-        created_by_req.setdefault(matched_req.id, []).append(sighting)
-        created += 1
-
-    # Re-apply durable vendor+part unavailability knowledge per requirement
-    # (created rows AND dedup-refreshed re-sent rows). This is the HUMAN_DIRECT
-    # path: a buyer-routed attachment row with qty>0 triggers override O3
-    # (record release) instead of stamping.
-    req_by_id = {req.id: req for req in reqs}
-    for req_id, fresh_rows in created_by_req.items():
-        apply_to_fresh_sightings(db, req_by_id[req_id], fresh_rows)
-
-    db.flush()
-    return created
-
-
 # ══════════════════════════════════════════════════════════════════════
 # API SOURCES — Data Source Management & Tracking
 # ══════════════════════════════════════════════════════════════════════
@@ -210,12 +97,12 @@ async def list_api_sources(user: User = Depends(require_user), db: Session = Dep
     """Return all API sources grouped by status."""
     sources = db.query(ApiSource).order_by(ApiSource.display_name).all()
 
-    from ..services.credential_service import credential_is_set, get_credential, mask_value
+    from ..services.credential_service import decrypt_from, is_set_for, mask_value
 
     for src in sources:
         env_vars = src.env_vars or []
         if env_vars:
-            any_set = any(credential_is_set(db, src.name, v) for v in env_vars)
+            any_set = any(is_set_for(src, v) for v in env_vars)
             # Only downgrade to pending if ALL credentials are missing
             # Never auto-upgrade to "live" — that's the health checker's job
             if not any_set and src.status not in (ApiSourceStatus.DISABLED, ApiSourceStatus.ERROR):
@@ -227,10 +114,10 @@ async def list_api_sources(user: User = Depends(require_user), db: Session = Dep
         env_status = {}
         credentials_masked = {}
         for v in src.env_vars or []:
-            is_set = credential_is_set(db, src.name, v)
+            is_set = is_set_for(src, v)
             env_status[v] = is_set
             if is_set:
-                plain = get_credential(db, src.name, v)
+                plain = decrypt_from(src, v)
                 credentials_masked[v] = mask_value(plain) if plain else ""
 
         result.append(
@@ -341,24 +228,20 @@ async def run_source_test(src: ApiSource, db: Session) -> dict:
     )
 
 
-def _test_toast_header(result: dict) -> str:
-    """Build the ``HX-Trigger`` payload (a ``showToast`` event) for a single Test.
+def _test_toast_message(result: dict) -> tuple[str, str]:
+    """Build the toast ``(message, kind)`` for a single Test.
 
     Gives the per-source Test button real pass/fail feedback — the JSON body is
     discarded by ``hx-swap="none"``, so without this a re-test on a Live source was
-    zero-feedback. Bridged client-side by the ``showToast`` listener in htmx_app.js.
+    zero-feedback. Attached via the shared ``set_toast`` helper and bridged
+    client-side by the ``showToast`` listener in htmx_app.js.
     """
     name = result["source"]
     if result["status"] == "ok":
-        message = f"{name}: Live — {result['results_count']} result(s) in {result['elapsed_ms']}ms"
-        kind = "success"
-    elif result["status"] == "no_results":
-        message = f"{name}: connected but returned no results ({result['elapsed_ms']}ms)"
-        kind = "info"
-    else:
-        message = f"{name}: error — {result.get('error') or 'test failed'}"
-        kind = "error"
-    return json.dumps({"showToast": {"message": message, "type": kind}})
+        return f"{name}: Live — {result['results_count']} result(s) in {result['elapsed_ms']}ms", "success"
+    if result["status"] == "no_results":
+        return f"{name}: connected but returned no results ({result['elapsed_ms']}ms)", "info"
+    return f"{name}: error — {result.get('error') or 'test failed'}", "error"
 
 
 @router.post("/api/sources/{source_id}/test", response_model=ApiTestResponse)
@@ -376,7 +259,8 @@ async def test_api_source(
         raise HTTPException(404, "API source not found")
 
     result = await run_source_test(src, db)
-    response.headers["HX-Trigger"] = _test_toast_header(result)
+    message, kind = _test_toast_message(result)
+    set_toast(response, message, kind)
     return result
 
 
@@ -388,7 +272,7 @@ async def toggle_api_source(
     db: Session = Depends(get_db),
 ):
     """Enable or disable a source (admins + MANAGE_CONNECTORS holders)."""
-    from ..services.credential_service import credential_is_set
+    from ..services.credential_service import is_set_for
 
     src = db.get(ApiSource, source_id)
     if not src:
@@ -397,7 +281,7 @@ async def toggle_api_source(
     # When enabling, auto-detect correct status based on credentials
     if new_status != ApiSourceStatus.DISABLED:
         env_vars = src.env_vars or []
-        if env_vars and all(credential_is_set(db, src.name, v) for v in env_vars):
+        if env_vars and all(is_set_for(src, v) for v in env_vars):
             new_status = ApiSourceStatus.LIVE
         else:
             new_status = ApiSourceStatus.PENDING
@@ -414,15 +298,13 @@ async def toggle_source_active(
     db: Session = Depends(get_db),
 ):
     """Toggle is_active flag on a source (admins + MANAGE_CONNECTORS holders)."""
-    from ..routers.htmx.settings import settings_toast
-
     src = db.get(ApiSource, source_id)
     if not src:
         raise HTTPException(404, "API source not found")
     src.is_active = not src.is_active
     db.commit()
     name = src.display_name or src.name
-    settings_toast(response, f"{name} {'enabled' if src.is_active else 'disabled'}.")
+    set_toast(response, f"{name} {'enabled' if src.is_active else 'disabled'}.")
     return {"ok": True, "is_active": src.is_active}
 
 
@@ -507,7 +389,6 @@ async def update_source_credentials(
 
     Skips blank values (preserves existing).
     """
-    from ..routers.htmx.settings import settings_toast
     from ..services.credential_service import _cred_cache, encrypt_value
 
     src = db.query(ApiSource).filter_by(name=source_name).first()
@@ -535,7 +416,7 @@ async def update_source_credentials(
     logger.info("Credentials updated for source '{}' by user {}", source_name, user.email)
     # A single-key source ("Save key") vs. a multi-field one ("Save credentials").
     label = "Key saved." if len(src.env_vars or []) <= 1 else "Credentials saved."
-    settings_toast(response, label)
+    set_toast(response, label)
     return {"saved": True, "source": source_name}
 
 

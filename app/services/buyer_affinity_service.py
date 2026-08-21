@@ -58,6 +58,7 @@ from ..models.excess import (
 from ..models.intelligence import MaterialCard
 from ..models.vendors import VendorContact
 from ..services.vendor_reachability import cards_with_resolvable_email, dnc_emails_for_cards
+from ..utils.timezones import as_utc
 
 # Tier ranks (lower = stronger signal), mirroring the coverage-then-engagement bucket
 # ordering in _coverage_ranked_vendor_rows but keyed on the BUYER's affinity signal.
@@ -551,11 +552,11 @@ def recompute_buyer_score(db: Session, vendor_card_id: int) -> BuyerScore:
         # the fallback for a manual-log touch (which legitimately has no ``sent_at``).
         stamp = o.sent_at or o.created_at
         if stamp is not None:
-            stamp = _aware(stamp)
+            stamp = as_utc(stamp)
             if last_offered_at is None or stamp > last_offered_at:
                 last_offered_at = stamp
         if o.status in _RESPONDED_STATUSES and o.sent_at and o.updated_at:
-            gap = (_aware(o.updated_at) - _aware(o.sent_at)).total_seconds() / 3600
+            gap = (as_utc(o.updated_at) - as_utc(o.sent_at)).total_seconds() / 3600
             if gap >= 0:
                 response_gaps.append(gap)
     median_response_hours = Decimal(str(round(_median(response_gaps), 2))) if response_gaps else None
@@ -651,48 +652,20 @@ def overlap_warning(
     """Advisory: has a TEAMMATE already offered this buyer this list recently?
 
     NEVER blocks and never raises on a missing row — purely informational (the user is
-    HYBRID-assertive: warn, log the override, proceed). Looks for an ExcessOutreach on
-    ``excess_list_id`` to ``target_vendor_card_id`` whose ``submitted_by`` is NOT
-    ``owner_id``, whose status is a GENUINELY-sent one (a sending/failed/interrupted touch
-    never reached the buyer, so it is not a real prior offer), and whose ``sent_at``
-    (falling back to ``created_at``) is within ``within_days``. Returns the MOST RECENT
-    such touch as
-    ``{by_user_id, by_user_name, when, line_item_ids}`` (line_item_ids unions the
-    overlapping teammate touches), or None when there is no recent teammate overlap.
-    """
-    cutoff = datetime.now(UTC) - timedelta(days=within_days)
-    touches = (
-        db.query(ExcessOutreach)
-        .filter(
-            ExcessOutreach.excess_list_id == excess_list_id,
-            ExcessOutreach.target_vendor_card_id == target_vendor_card_id,
-            ExcessOutreach.submitted_by != owner_id,
-            # Only a GENUINELY-sent touch is a real prior offer: a sending/failed/interrupted
-            # row never reached the buyer, so it must not warn a teammate off a still-
-            # uncontacted buyer (the same not-sent exclusion the nudge/offered readers use).
-            ExcessOutreach.status.notin_([s.value for s in _NOT_SENT_STATUSES]),
-        )
-        .all()
-    )
-    # Defensive: a row whose sent_at AND created_at are both NULL has no usable timestamp
-    # to compare — skip it rather than let _aware(None) raise (the warning is advisory and
-    # must never blow up the offer panel).
-    recent = [
-        t for t in touches if (t.sent_at or t.created_at) is not None and _aware(t.sent_at or t.created_at) >= cutoff
-    ]
-    if not recent:
-        return None
+    HYBRID-assertive: warn, log the override, proceed). Returns the MOST RECENT teammate
+    touch as ``{by_user_id, by_user_name, when, line_item_ids}`` (line_item_ids unions
+    the overlapping teammate touches), or None when there is no recent teammate overlap.
 
-    recent.sort(key=lambda t: _aware(t.sent_at or t.created_at), reverse=True)
-    latest = recent[0]
-    teammate = db.get(User, latest.submitted_by)
-    line_item_ids = sorted({t.excess_line_item_id for t in recent if t.excess_line_item_id is not None})
-    return {
-        "by_user_id": latest.submitted_by,
-        "by_user_name": teammate.name if teammate else None,
-        "when": _aware(latest.sent_at or latest.created_at),
-        "line_item_ids": line_item_ids,
-    }
+    Thin delegate over the batched :func:`overlap_warnings_for` (the ONE owner of the
+    predicate/shape), scoped to a single buyer.
+    """
+    return overlap_warnings_for(
+        db,
+        excess_list_id=excess_list_id,
+        target_vendor_card_ids=[target_vendor_card_id],
+        owner_id=owner_id,
+        within_days=within_days,
+    ).get(target_vendor_card_id)
 
 
 def overlap_warnings_for(
@@ -739,7 +712,7 @@ def overlap_warnings_for(
     for t in touches:
         stamp = t.sent_at or t.created_at
         # Skip a row with no usable timestamp (advisory — must never blow up the panel).
-        if stamp is None or _aware(stamp) < cutoff:
+        if stamp is None or as_utc(stamp) < cutoff:
             continue
         by_card.setdefault(t.target_vendor_card_id, []).append(t)
     if not by_card:
@@ -750,12 +723,12 @@ def overlap_warnings_for(
 
     result: dict[int, dict] = {}
     for card_id, touches_ in by_card.items():
-        touches_.sort(key=lambda t: _aware(t.sent_at or t.created_at), reverse=True)
+        touches_.sort(key=lambda t: as_utc(t.sent_at or t.created_at), reverse=True)
         latest = touches_[0]
         result[card_id] = {
             "by_user_id": latest.submitted_by,
             "by_user_name": names.get(latest.submitted_by),
-            "when": _aware(latest.sent_at or latest.created_at),
+            "when": as_utc(latest.sent_at or latest.created_at),
             "line_item_ids": sorted({t.excess_line_item_id for t in touches_ if t.excess_line_item_id is not None}),
         }
     return result
@@ -811,11 +784,6 @@ def not_yet_offered_strip(
 # ═══════════════════════════════════════════════════════════════════════
 #  SMALL UTILITIES
 # ═══════════════════════════════════════════════════════════════════════
-
-
-def _aware(dt: datetime) -> datetime:
-    """Coerce a naive timestamp (SQLite returns naive) to UTC-aware for comparison."""
-    return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt
 
 
 def _median(values: list[float]) -> float:

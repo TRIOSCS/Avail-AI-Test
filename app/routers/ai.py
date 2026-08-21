@@ -52,6 +52,7 @@ from ..schemas.responses import (
     SimpleOkIdResponse,
     SimpleOkResponse,
 )
+from ..utils.column_limits import column_max_length
 
 router = APIRouter(tags=["ai"])
 
@@ -140,11 +141,12 @@ async def ai_find_contacts(
             seen_emails.add(key)
             merged.append(c)
 
-    _MAX_LEN = {"full_name": 255, "title": 255, "email": 255, "phone": 50, "linkedin_url": 512, "source": 100}
+    # Truncate to the model's declared column lengths (derived, so they can't drift).
     for c in merged:
-        for field, max_len in _MAX_LEN.items():
+        for field in ("full_name", "title", "email", "phone", "linkedin_url", "source"):
+            max_len = column_max_length(ProspectContact, field)
             val = c.get(field)
-            if isinstance(val, str) and len(val) > max_len:
+            if max_len is not None and isinstance(val, str) and len(val) > max_len:
                 c[field] = val[:max_len]
 
     saved_ids = []

@@ -3,7 +3,7 @@
 Last resort in the classification waterfall. Submits MPNs to Claude Haiku
 for manufacturer + commodity classification.
 
-Called by: tagging_ai_batch (batch backfill), app.routers.tagging_admin
+Called by: app/jobs/tagging_jobs.py (nightly AI-classify job, via the tagging_ai façade)
 Depends on: app.utils.claude_client, app.services.tagging
 """
 

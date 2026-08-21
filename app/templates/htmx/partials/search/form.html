@@ -4,6 +4,7 @@
    Loaded via HTMX GET /v2/partials/search (no mpn) into #main-content.
    Called by: htmx_views.search_form_partial (no mpn).
    Depends on: part_dossier.py (dossier shell + recent endpoint). #}
+{% from "htmx/partials/shared/_macros.html" import spinner -%}
 
 <title hx-swap-oob="true">Part Search — AvailAI</title>
 
@@ -20,7 +21,7 @@
         <button type="submit" :disabled="!q.trim()"
                 class="btn-primary whitespace-nowrap">
           <span id="ds-landing-spin" class="htmx-indicator">
-            <svg class="inline h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+            {{ spinner('inline h-4 w-4 animate-spin') }}
           </span>
           Search
         </button>

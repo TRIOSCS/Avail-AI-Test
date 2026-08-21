@@ -5,8 +5,10 @@
   Called by: htmx_views.py settings_connectors_tab.
   Depends on: _connector_macros.html, HTMX (loading-states ext), Alpine.js, Tailwind brand palette.
 #}
+{% from "htmx/partials/shared/_macros.html" import spinner -%}
 <title hx-swap-oob="true">Connectors · Settings</title>
 {% import 'htmx/partials/settings/_connector_macros.html' as cm %}
+{% from "htmx/partials/shared/empty_state.html" import empty_state %}
 
 {# "live" counts working connectors: direct-API live + worker-backed healthy.
    "need setup" counts everything not working and not deliberately off (incl. worker_down). #}
@@ -42,10 +44,7 @@
               hx-request='"timeout":120000'
               data-loading-disable
               title="Runs a live search on every connector — uses a small amount of each provider's paid quota.">
-        <svg class="w-3.5 h-3.5 animate-spin motion-reduce:hidden" data-loading viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-        </svg>
+        {{ spinner('w-3.5 h-3.5 animate-spin motion-reduce:hidden', attrs='data-loading aria-hidden="true"') }}
         <span>Test all</span>
       </button>
       <p class="text-secondary">Each test runs a live search and uses a little provider quota.</p>
@@ -56,14 +55,12 @@
   </div>
 
   {% if not connector_groups %}
-  <div class="py-10 text-center">
-    <svg class="mx-auto h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
-            d="M13 10V3L4 14h7v7l9-11h-7z"/>
-    </svg>
-    <p class="text-sm text-gray-600 mt-3">No connectors yet.</p>
+  {% call empty_state('M13 10V3L4 14h7v7l9-11h-7z',
+                      'No connectors yet.',
+                      wrapper_class='py-10 text-center',
+                      message_class='text-sm text-gray-600 mt-3') %}
     <p class="text-secondary mt-1">Data providers appear here once they're configured for your workspace.</p>
-  </div>
+  {% endcall %}
   {% endif %}
 
   {% for group in connector_groups %}

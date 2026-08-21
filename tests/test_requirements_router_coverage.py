@@ -139,29 +139,29 @@ def _make_sourcing_lead(db: Session, req: Requisition, user: User, **kw):
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# _dedupe_substitutes helper function
+# substitute dedup (requirements router uses the shared parse_substitute_mpns)
 # ══════════════════════════════════════════════════════════════════════════
 
 
 class TestDedupeSubstitutes:
     def test_basic_dedup(self):
-        from app.routers.requisitions.requirements import _dedupe_substitutes
+        from app.utils.normalization import parse_substitute_mpns
 
-        result = _dedupe_substitutes(["NE555P", "LM317T", "NE555P"], "LM317T")
+        result = parse_substitute_mpns(["NE555P", "LM317T", "NE555P"], "LM317T")
         mpns = [r["mpn"] for r in result]
         assert "LM317T" not in mpns  # primary excluded
         assert len([m for m in mpns if "NE555P" in m.upper()]) == 1  # deduped
 
     def test_empty_list(self):
-        from app.routers.requisitions.requirements import _dedupe_substitutes
+        from app.utils.normalization import parse_substitute_mpns
 
-        assert _dedupe_substitutes([], "LM317T") == []
+        assert parse_substitute_mpns([], "LM317T") == []
 
     def test_normalize_short_mpn(self):
-        from app.routers.requisitions.requirements import _dedupe_substitutes
+        from app.utils.normalization import parse_substitute_mpns
 
         # Very short strings that normalize_mpn returns None for
-        result = _dedupe_substitutes(["AB"], "LM317T")
+        result = parse_substitute_mpns(["AB"], "LM317T")
         # Should handle gracefully (AB < 3 chars may be excluded by normalize_mpn)
         assert isinstance(result, list)
 

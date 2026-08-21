@@ -64,8 +64,8 @@ class TestSightingsRootXDataIntegrity:
     def test_root_x_data_not_truncated(self, client: TestClient):
         resp = client.get("/v2/partials/sightings/workspace", headers={"HX-Request": "true"})
         assert resp.status_code == 200
-        # The root x-data is the one declaring splitRatio (drag) + selectReq (panel).
-        attr = _extract_attr_value(resp.text, 'x-data="', "splitRatio")
+        # The root x-data is the one spreading ratioSplitMixin (drag) + selectReq (panel).
+        attr = _extract_attr_value(resp.text, 'x-data="', "ratioSplitMixin")
 
         # If a stray double-quote truncates the attribute, these members defined
         # AFTER the truncation point fall outside the parsed value.

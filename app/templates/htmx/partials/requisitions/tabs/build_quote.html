@@ -227,7 +227,7 @@
             <td>{{ li.condition or '—' }}</td>
             <td class="text-right tabular-nums">{{ "{:,}".format(li.quantity) }}</td>
             <td class="text-right tabular-nums">${{ "{:,.4f}".format(li.sell) }}</td>
-            <td class="text-right tabular-nums">${{ "{:,.2f}".format(li.extended) }}</td>
+            <td class="text-right tabular-nums">${{ li.extended|money }}</td>
           </tr>
           {% endfor %}
         </tbody>
@@ -236,7 +236,7 @@
 
     <div class="mt-3 text-right text-sm">
       <span class="text-gray-400 uppercase tracking-wide text-xs mr-2">Quote total</span>
-      <span class="font-semibold text-gray-900 tabular-nums">${{ "{:,.2f}".format(summary.subtotal) }}</span>
+      <span class="font-semibold text-gray-900 tabular-nums">${{ summary.subtotal|money }}</span>
     </div>
   </div>
   {% endif %}

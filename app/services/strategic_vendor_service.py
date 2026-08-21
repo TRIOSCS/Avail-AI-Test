@@ -18,16 +18,10 @@ from sqlalchemy.orm import Session, joinedload
 from app.models.strategic import StrategicVendor
 from app.models.vendors import VendorCard
 from app.utils.sql_helpers import escape_like
+from app.utils.timezones import as_utc
 
 MAX_STRATEGIC_VENDORS = 10
 TTL_DAYS = 39
-
-
-def _ensure_utc(dt: datetime) -> datetime:
-    """Ensure a datetime is tz-aware UTC (SQLite strips tzinfo)."""
-    if dt is not None and dt.tzinfo is None:
-        return dt.replace(tzinfo=UTC)
-    return dt
 
 
 def get_my_strategic(db: Session, user_id: int) -> list[StrategicVendor]:
@@ -258,7 +252,7 @@ def get_vendor_status(db: Session, vendor_card_id: int) -> dict | None:
         return None
 
     now = datetime.now(UTC)
-    expires = _ensure_utc(record.expires_at)
+    expires = as_utc(record.expires_at)
     days_left = max(0, (expires - now).days)
     return {
         "vendor_card_id": vendor_card_id,

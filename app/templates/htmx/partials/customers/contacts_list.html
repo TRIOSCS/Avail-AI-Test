@@ -89,18 +89,11 @@
     <span class="inline-flex items-center gap-1.5"><span class="inline-block h-2 w-2 rounded-full {{ CADENCE_DOT['overdue'] }}"></span>Overdue</span>
   </div>
 
-  {# ── Bulk select + actions (mirrors _account_list.html) ──────────────────
-     selectedIds: Object used as a Set — keys are contact id strings. The list is
-     re-rendered into #main-content on a bulk apply, so the scope resets fresh. #}
-  <div x-data="{
-    selectedIds: {},
-    get count() { return Object.keys(this.selectedIds).length },
-    get allSelected() { return {{ contacts|length }} > 0 && Object.keys(this.selectedIds).length === {{ contacts|length }} },
-    toggle(id) { if (this.selectedIds[id]) { delete this.selectedIds[id] } else { this.selectedIds[id] = true } },
-    toggleAll(checked) { if (checked) { {% for c in contacts %}this.selectedIds['{{ c.id }}'] = true;{% endfor %} } else { this.selectedIds = {} } },
-    idsStr() { return Object.keys(this.selectedIds).join(',') },
-    clear() { this.selectedIds = {} }
-  }" @clear-selection.window="clear()">
+  {# ── Bulk select + actions — shared bulkSelect Alpine component (htmx_app.js),
+     seeded with this page's contact ids (same scope as _account_list.html). The list
+     is re-rendered into #main-content on a bulk apply, so the scope resets fresh.
+     Single-quoted x-data per the attribute-truncation rule. #}
+  <div x-data='bulkSelect({{ contacts|map(attribute="id")|list|tojson }})' @clear-selection.window="clear()">
 
   {# Bulk action bar — visible only when ≥1 row is checked #}
   <div x-show="count > 0" x-cloak class="mb-3 flex items-center gap-2 flex-wrap rounded-lg border border-brand-200 bg-brand-50 px-3 py-2">
@@ -216,29 +209,18 @@
   </div>
 
   {# Pagination #}
-  {% if total > limit %}
-  <div class="mt-4 flex justify-center">
-    <nav class="flex gap-1 items-center">
-      {% if offset > 0 %}
-      <a hx-get="/v2/partials/contacts"
-         hx-target="#main-content"
-         hx-include="#contacts-filters"
-         hx-vals='{"offset": "{{ offset - limit }}"}'
-         preload="mouseover"
-         class="px-3 py-1.5 text-sm bg-white border border-gray-200 rounded-lg hover:bg-brand-50 cursor-pointer">Prev</a>
-      {% endif %}
-      <span class="px-3 py-1.5 text-sm text-gray-600">{{ offset + 1 }}&ndash;{{ [offset + limit, total]|min }} of {{ total }}</span>
-      {% if offset + limit < total %}
-      <a hx-get="/v2/partials/contacts"
-         hx-target="#main-content"
-         hx-include="#contacts-filters"
-         hx-vals='{"offset": "{{ offset + limit }}"}'
-         preload="mouseover"
-         class="px-3 py-1.5 text-sm bg-white border border-gray-200 rounded-lg hover:bg-brand-50 cursor-pointer">Next</a>
-      {% endif %}
-    </nav>
-  </div>
-  {% endif %}
+  {% from "htmx/partials/shared/_offset_pager.html" import offset_pager %}
+  {% set _pager_prev %}hx-get="/v2/partials/contacts"
+       hx-target="#main-content"
+       hx-include="#contacts-filters"
+       hx-vals='{"offset": "{{ offset - limit }}"}'
+       preload="mouseover"{% endset %}
+  {% set _pager_next %}hx-get="/v2/partials/contacts"
+       hx-target="#main-content"
+       hx-include="#contacts-filters"
+       hx-vals='{"offset": "{{ offset + limit }}"}'
+       preload="mouseover"{% endset %}
+  {{ offset_pager(offset, limit, total, _pager_prev, _pager_next) }}
 
   {% else %}
   {% with message="No contacts found" %}

@@ -9,6 +9,7 @@
   Called by: resell.resell_outreach_reply.
   Depends on: sanitize_html + localtime filters; POSTs resell.resell_outreach_convert_offer.
 #}
+{% from "htmx/partials/shared/_macros.html" import close_modal_toast -%}
 {% set el = list %}
 {% set buyer = outreach.target_vendor_card.display_name if outreach.target_vendor_card else 'this buyer' %}
 {# Reused by BOTH the email reply viewer (default) and the manual Log-bid modal (finding
@@ -87,7 +88,7 @@
           hx-target="#tab-outreach-{{ el.id }}"
           hx-swap="innerHTML"
           data-loading-disable
-          @htmx:after-request.camel="if(event.detail.successful){ $dispatch('close-modal'); $store.toast.message='{{ 'Bid logged' if manual else 'Offer created from reply' }}'; $store.toast.type='success'; $store.toast.show=true; }"
+          {{ close_modal_toast('Bid logged' if manual else 'Offer created from reply') }}
           class="space-y-3 mt-3">
       <div>
         <label class="form-label">Part number <span class="text-rose-500">*</span></label>

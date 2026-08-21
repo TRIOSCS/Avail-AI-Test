@@ -808,11 +808,11 @@ class TestSchedulerCoverageGaps:
     """Cover exception paths and edge cases."""
 
     def test_ensure_utc_with_tz(self):
-        """Line 35: _ensure_utc returns dt unchanged when it already has tzinfo."""
-        from app.services.prospect_scheduler import _ensure_utc
+        """as_utc returns dt unchanged when it already has tzinfo."""
+        from app.utils.timezones import as_utc
 
         dt = datetime(2026, 1, 1, tzinfo=UTC)
-        result = _ensure_utc(dt)
+        result = as_utc(dt)
         assert result is dt  # same object, unchanged
 
     @pytest.mark.asyncio

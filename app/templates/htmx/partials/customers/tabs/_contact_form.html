@@ -22,6 +22,7 @@
      GET /v2/partials/customers/{company_id}/contacts/{contact_id}/edit-form
    Depends on: HTMX, Alpine.js, brand palette.
 #}
+{% from "htmx/partials/shared/_macros.html" import close_modal_on_success -%}
 <div class='p-5'>
   <h3 id="modal-title" class='text-sm font-semibold text-gray-900 mb-4'>
     {% if mode == 'add' %}Add Contact{% else %}Edit Contact{% endif %}
@@ -31,7 +32,7 @@
   <form hx-post='/v2/partials/customers/{{ company.id }}/contacts'
         hx-target='#contacts-tab-list'
         hx-swap='innerHTML'
-        hx-on::after-request='if(event.detail.successful) this.dispatchEvent(new CustomEvent("close-modal", {bubbles: true}))'
+        {{ close_modal_on_success() }}
         data-loading-disable
         x-data='{"newSite": false}'
         class='space-y-3'>
@@ -40,7 +41,7 @@
   <form hx-post='/v2/partials/customers/{{ company.id }}/sites/{{ site.id }}/contacts/{{ contact.id }}/edit'
         hx-target='{{ "#main-content" if _from_contacts else "#contacts-tab-list" }}'
         hx-swap='innerHTML'
-        hx-on::after-request='if(event.detail.successful) this.dispatchEvent(new CustomEvent("close-modal", {bubbles: true}))'
+        {{ close_modal_on_success() }}
         data-loading-disable
         class='space-y-3'>
     {% if _from_contacts %}

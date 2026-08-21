@@ -15,7 +15,7 @@ Called by: scheduler.py (daily), routers/performance.py (on-demand)
 Depends on: models (Requisition, Contact, Offer, Quote, BuyPlan, ActivityLog, etc.)
 """
 
-from datetime import UTC, date, timedelta
+from datetime import date, timedelta
 
 from loguru import logger
 from sqlalchemy import and_, or_
@@ -47,6 +47,7 @@ from ..models import (
     User,
 )
 from ..models.performance import AvailScoreSnapshot
+from ..utils.timezones import as_utc
 from .scoring_helpers import month_range
 
 # ── Bonus thresholds ─────────────────────────────────────────────────
@@ -73,11 +74,69 @@ def _tier(value, thresholds):
     return 0
 
 
-def _as_utc(dt):
-    """Treat a naive datetime as UTC; pass tz-aware datetimes through unchanged."""
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=UTC)
-    return dt
+# ── Shared user-independent loaders + counters ───────────────────────
+
+
+def _load_quoted_offer_ids(db: Session) -> set[int]:
+    """Offer ids referenced by any sent/won/lost quote's line_items.
+
+    No arbitrary row cap: a global .limit() silently dropped offers past the cap and
+    undercounted O2/O4 (which drive real payouts). Scan all sent/won/lost quotes.
+    """
+    quoted_offer_ids: set[int] = set()
+    for (items,) in (
+        db.query(Quote.line_items).filter(Quote.status.in_([QuoteStatus.SENT, QuoteStatus.WON, QuoteStatus.LOST])).all()
+    ):
+        for item in items or []:
+            oid = item.get("offer_id")
+            if oid:
+                quoted_offer_ids.add(oid)
+    return quoted_offer_ids
+
+
+def _load_buyplan_offer_ids(db: Session) -> tuple[set[int], set[int]]:
+    """(bp_offer_ids, po_confirmed_offer_ids) from all buy plan lines."""
+    bp_offer_ids: set[int] = set()
+    po_confirmed_offer_ids: set[int] = set()
+    for bp_status, offer_id in (
+        db.query(BuyPlan.status, BuyPlanLine.offer_id)
+        .join(BuyPlanLine, BuyPlanLine.buy_plan_id == BuyPlan.id)
+        .filter(BuyPlanLine.offer_id.isnot(None))
+        .all()
+    ):
+        bp_offer_ids.add(offer_id)
+        if bp_status in (BuyPlanStatus.COMPLETED.value,):
+            po_confirmed_offer_ids.add(offer_id)
+    return bp_offer_ids, po_confirmed_offer_ids
+
+
+def _won_lost_counts(db: Session, user_id: int, start_dt, end_dt) -> tuple[int, int]:
+    """(won, lost) quote counts for a user's quotes resolved in [start_dt, end_dt).
+
+    One definition for both leaderboards: buyer O3 and sales O1 must never diverge on a
+    metric that drives real bonus payouts.
+    """
+    won = (
+        db.query(sqlfunc.count(Quote.id))
+        .filter(
+            Quote.created_by_id == user_id,
+            Quote.result == QuoteStatus.WON,
+            Quote.result_at >= start_dt,
+            Quote.result_at < end_dt,
+        )
+        .scalar()
+    ) or 0
+    lost = (
+        db.query(sqlfunc.count(Quote.id))
+        .filter(
+            Quote.created_by_id == user_id,
+            Quote.result == QuoteStatus.LOST,
+            Quote.result_at >= start_dt,
+            Quote.result_at < end_dt,
+        )
+        .scalar()
+    ) or 0
+    return won, lost
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -85,10 +144,23 @@ def _as_utc(dt):
 # ══════════════════════════════════════════════════════════════════════
 
 
-def compute_buyer_avail_score(db: Session, user_id: int, month: date) -> dict:
+def compute_buyer_avail_score(
+    db: Session,
+    user_id: int,
+    month: date,
+    *,
+    quoted_offer_ids: set[int] | None = None,
+    bp_offer_ids: set[int] | None = None,
+    po_confirmed_offer_ids: set[int] | None = None,
+) -> dict:
     """Compute all 10 buyer metrics for a given month.
 
     Returns dict with b1–b5, o1–o5 scores, labels, raw values, and totals.
+
+    The three offer-id lookup sets are user-independent whole-table scans; a batch
+    caller (compute_all_avail_scores) preloads them once and passes them in — mirrors
+    the vendor_scorecard / multiplier_score_service precedent. When omitted they are
+    loaded here (single-user on-demand path, unchanged behavior).
     """
     start_dt, end_dt = month_range(month)
 
@@ -131,28 +203,11 @@ def compute_buyer_avail_score(db: Session, user_id: int, month: date) -> dict:
     total_reqs = len(req_ids)
 
     # Pre-load offer IDs in quotes and buy plans (same pattern as existing leaderboard)
-    quoted_offer_ids = set()
-    # No arbitrary row cap: a global .limit() silently dropped offers past the cap and
-    # undercounted O2/O4 (which drive real payouts). Scan all sent/won/lost quotes.
-    for (items,) in (
-        db.query(Quote.line_items).filter(Quote.status.in_([QuoteStatus.SENT, QuoteStatus.WON, QuoteStatus.LOST])).all()
-    ):
-        for item in items or []:
-            oid = item.get("offer_id")
-            if oid:
-                quoted_offer_ids.add(oid)
-
-    po_confirmed_offer_ids = set()
-    bp_offer_ids = set()
-    for bp_status, offer_id in (
-        db.query(BuyPlan.status, BuyPlanLine.offer_id)
-        .join(BuyPlanLine, BuyPlanLine.buy_plan_id == BuyPlan.id)
-        .filter(BuyPlanLine.offer_id.isnot(None))
-        .all()
-    ):
-        bp_offer_ids.add(offer_id)
-        if bp_status in (BuyPlanStatus.COMPLETED.value,):
-            po_confirmed_offer_ids.add(offer_id)
+    # unless the batch caller already supplied them.
+    if quoted_offer_ids is None:
+        quoted_offer_ids = _load_quoted_offer_ids(db)
+    if bp_offer_ids is None or po_confirmed_offer_ids is None:
+        bp_offer_ids, po_confirmed_offer_ids = _load_buyplan_offer_ids(db)
 
     # User's offers this month
     user_offers = (
@@ -218,26 +273,7 @@ def compute_buyer_avail_score(db: Session, user_id: int, month: date) -> dict:
     o2_raw = f"{oq_pct}% ({offers_in_quotes}/{total_user_offers})"
 
     # ── O3: Win Rate ──
-    won = (
-        db.query(sqlfunc.count(Quote.id))
-        .filter(
-            Quote.created_by_id == user_id,
-            Quote.result == QuoteStatus.WON,
-            Quote.result_at >= start_dt,
-            Quote.result_at < end_dt,
-        )
-        .scalar()
-    ) or 0
-    lost = (
-        db.query(sqlfunc.count(Quote.id))
-        .filter(
-            Quote.created_by_id == user_id,
-            Quote.result == QuoteStatus.LOST,
-            Quote.result_at >= start_dt,
-            Quote.result_at < end_dt,
-        )
-        .scalar()
-    ) or 0
+    won, lost = _won_lost_counts(db, user_id, start_dt, end_dt)
     win_pct = round(won / (won + lost) * 100) if (won + lost) else 0
     o3_score = _tier(win_pct, [(60, 10), (50, 8), (40, 6), (30, 4), (1, 2)])
     o3_raw = f"{win_pct}% ({won}W/{lost}L)"
@@ -329,7 +365,7 @@ def _buyer_b1_speed_to_source(db, req_ids, user_reqs):
     for req in user_reqs:
         first_at = fc_map.get(req.id)
         if first_at and req.created_at:
-            hours = (_as_utc(first_at) - _as_utc(req.created_at)).total_seconds() / 3600
+            hours = (as_utc(first_at) - as_utc(req.created_at)).total_seconds() / 3600
             if hours >= 0:
                 total_hours += hours
                 counted += 1
@@ -433,7 +469,7 @@ def _buyer_b4_pipeline_hygiene(db, req_ids, user_reqs):
     for req in user_reqs:
         if not req.created_at:
             continue
-        deadline = _as_utc(req.created_at) + timedelta(days=5)
+        deadline = as_utc(req.created_at) + timedelta(days=5)
 
         has_offer = (
             db.query(Offer.id)
@@ -582,26 +618,7 @@ def compute_sales_avail_score(db: Session, user_id: int, month: date) -> dict:
     behavior_total = b1_score + b2_score + b3_score + b4_score + b5_score
 
     # ── O1: Win Rate ──
-    won = (
-        db.query(sqlfunc.count(Quote.id))
-        .filter(
-            Quote.created_by_id == user_id,
-            Quote.result == QuoteStatus.WON,
-            Quote.result_at >= start_dt,
-            Quote.result_at < end_dt,
-        )
-        .scalar()
-    ) or 0
-    lost = (
-        db.query(sqlfunc.count(Quote.id))
-        .filter(
-            Quote.created_by_id == user_id,
-            Quote.result == QuoteStatus.LOST,
-            Quote.result_at >= start_dt,
-            Quote.result_at < end_dt,
-        )
-        .scalar()
-    ) or 0
+    won, lost = _won_lost_counts(db, user_id, start_dt, end_dt)
     win_pct = round(won / (won + lost) * 100) if (won + lost) else 0
     o1_score = _tier(win_pct, [(60, 10), (50, 8), (40, 6), (30, 4), (1, 2)])
     o1_raw = f"{win_pct}% ({won}W/{lost}L)"
@@ -748,7 +765,7 @@ def _sales_b3_quote_followup(db, user_id, start_dt, end_dt):
     for q in sent_quotes:
         if not q.sent_at:  # pragma: no cover
             continue
-        sent_at = _as_utc(q.sent_at)
+        sent_at = as_utc(q.sent_at)
         followup_deadline = sent_at + timedelta(days=5)
 
         # Look for outbound activity on the same company after quote was sent
@@ -805,9 +822,21 @@ def compute_all_avail_scores(db: Session, month: date | None = None) -> dict:
     multi_role = db.query(User).filter(User.role == UserRole.TRADER, *_human).all()
 
     buyer_results = []
+    if buyers:
+        # Load the user-independent offer-id sets ONCE for the whole batch instead of
+        # re-scanning every quote's line_items and every buy-plan line per buyer.
+        quoted_offer_ids = _load_quoted_offer_ids(db)
+        bp_offer_ids, po_confirmed_offer_ids = _load_buyplan_offer_ids(db)
     for user in buyers:
         try:
-            result = compute_buyer_avail_score(db, user.id, month)
+            result = compute_buyer_avail_score(
+                db,
+                user.id,
+                month,
+                quoted_offer_ids=quoted_offer_ids,
+                bp_offer_ids=bp_offer_ids,
+                po_confirmed_offer_ids=po_confirmed_offer_ids,
+            )
             result["user_id"] = user.id
             result["user_name"] = user.name
             buyer_results.append(result)

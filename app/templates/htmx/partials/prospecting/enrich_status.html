@@ -4,16 +4,14 @@
   Rendered into #enrich-status-zone by the Enrich button, and self-polls
   /enrich-status every 2s until the job lands (HTTP 286 stops the poll).
 #}
+{% from "htmx/partials/shared/_macros.html" import spinner -%}
 {% if enrich_state == "running" %}
 <div hx-get="/v2/partials/prospecting/{{ prospect.id }}/enrich-status"
      hx-trigger="every 2s"
      hx-target="this"
      hx-swap="outerHTML"
      class="inline-flex items-center gap-2 text-sm text-gray-600">
-  <svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
-    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-  </svg>
+  {{ spinner('h-4 w-4 animate-spin') }}
   Enriching… contacts + firmographics
 </div>
 {% elif enrich_state == "error" %}

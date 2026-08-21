@@ -55,7 +55,14 @@ from ...utils.csv_export import stream_csv
 from ...utils.search_builder import SearchBuilder
 from ...utils.sql_helpers import escape_like
 from .._lookup_helpers import get_requisition_or_404
-from ._shared import _base_ctx, _parse_date_safe, _parse_task_due_date, set_canonical_url
+from ._shared import (
+    _base_ctx,
+    _coerce_task_priority,
+    _parse_date_safe,
+    _parse_task_due_date,
+    _safe_int,
+    set_canonical_url,
+)
 from ._shared_tabs import requisition_tab as _requisition_tab_impl
 
 router = APIRouter(tags=["htmx-views"])
@@ -1317,24 +1324,6 @@ requisition_tab = router.get("/v2/partials/requisitions/{req_id}/tab/{tab}", res
 # (create swap) / _task_row.html (complete swap).
 
 
-def _coerce_task_priority(raw: str | None) -> int:
-    """Map a submitted priority ('1'|'2'|'3') to a valid int, defaulting to 2
-    (medium)."""
-    try:
-        p = int(raw) if raw not in (None, "") else 2
-    except (TypeError, ValueError):
-        return 2
-    return p if p in (1, 2, 3) else 2
-
-
-def _parse_int_or_none(raw: str | None) -> int | None:
-    """Parse an optional integer form field ('' / None → None)."""
-    try:
-        return int(raw) if raw not in (None, "") else None
-    except (TypeError, ValueError):
-        return None
-
-
 @router.post("/api/requisitions/{req_id}/tasks", response_class=HTMLResponse)
 async def create_requisition_task_endpoint(
     req_id: int,
@@ -1355,7 +1344,7 @@ async def create_requisition_task_endpoint(
     title = (form.get("title") or "").strip()
     if not title:
         raise HTTPException(422, "Title is required")
-    assigned_to_id = _parse_int_or_none(form.get("assigned_to_id"))
+    assigned_to_id = _safe_int(form.get("assigned_to_id"))
     if assigned_to_id is None:
         raise HTTPException(422, "Assignee is required")
 
@@ -1398,13 +1387,7 @@ async def complete_requisition_task_endpoint(
     another requisition can't be completed via a crafted URL, then held to the shared
     mutation gate (creator | assignee | admin).
     """
-    req = get_requisition_or_404(db, req_id)
-    require_requisition_access(db, req_id, user)
-    task = db.get(RequisitionTask, task_id)
-    if not task or task.requisition_id != req_id:
-        raise HTTPException(404, "Task not found")
-    if not is_task_mutation_authorized(db, task, user.id, is_admin=(user.role == UserRole.ADMIN)):
-        raise HTTPException(403, "Only the task's creator, assignee, or an admin can modify it")
+    req, _task = _get_board_task_or_403(db, req_id, task_id, user)
 
     task = update_task(db, task_id, status=TaskStatus.DONE)
     logger.info("Requisition task {} completed on req {} by {}", task_id, req_id, user.email)
@@ -1428,13 +1411,7 @@ async def delete_requisition_task_endpoint(
     empty 200. Gated by require_requisition_access, IDOR-checked to the requisition,
     then held to the shared mutation gate (creator | assignee | admin).
     """
-    get_requisition_or_404(db, req_id)
-    require_requisition_access(db, req_id, user)
-    task = db.get(RequisitionTask, task_id)
-    if not task or task.requisition_id != req_id:
-        raise HTTPException(404, "Task not found")
-    if not is_task_mutation_authorized(db, task, user.id, is_admin=(user.role == UserRole.ADMIN)):
-        raise HTTPException(403, "Only the task's creator, assignee, or an admin can modify it")
+    _get_board_task_or_403(db, req_id, task_id, user)
 
     delete_task(db, task_id)
     logger.info("Requisition task {} deleted from req {} by {}", task_id, req_id, user.email)

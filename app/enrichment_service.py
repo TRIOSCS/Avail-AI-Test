@@ -440,38 +440,11 @@ async def _hunter_find_contacts(domain: str) -> list[dict]:
     return results
 
 
-_RELEVANT_KEYWORDS = {
-    "procurement",
-    "purchasing",
-    "buyer",
-    "sourcing",
-    "supply chain",
-    "component",
-    "commodity",
-    "materials",
-    "vendor",
-    "supplier",
-    "sales",
-    "account",
-    "business development",
-    "director",
-    "president",
-    "vp",
-    "manager",
-    "engineer",
-    "operations",
-    "logistics",
-    "inventory",
-    "planning",
-    "quality",
-}
-
-
 def _is_relevant(contact: dict) -> bool:
     title = (contact.get("title") or "").lower()
     if not title:
         return bool(contact.get("email"))  # Keep if has email but no title
-    return any(kw in title for kw in _RELEVANT_KEYWORDS)
+    return any(kw in title for kw in _RELEVANT_CONTACT_KEYWORDS)
 
 
 async def find_suggested_contacts(domain: str, name: str = "", title_filter: str = "", limit: int = 10) -> list[dict]:

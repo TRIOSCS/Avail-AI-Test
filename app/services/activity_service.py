@@ -26,7 +26,7 @@ from app.constants import (
 )
 from app.models import ActivityLog, Company, CustomerSite, SiteContact, VendorCard, VendorContact
 from app.utils.phone import normalize_e164
-from app.utils.token_manager import _utc
+from app.utils.timezones import as_utc
 from app.vendor_utils import GENERIC_EMAIL_DOMAINS as _GENERIC_DOMAINS
 
 # Minimum connected-call duration to be considered a real conversation.
@@ -630,6 +630,8 @@ def log_meeting_activity(
     attendee_emails: list[str],
     location: str | None,
     db: Session,
+    *,
+    create_unlinked_fallback: bool = False,
 ) -> list["ActivityLog"]:
     """Log a calendar meeting, linking each matched external attendee.
 
@@ -640,6 +642,13 @@ def log_meeting_activity(
     Returns the list of ActivityLog rows created (one per matched external entity).
     Returns [] if only internal attendees or the event was already logged.
     Dedup key: ``external_id = "calendar-{graph_event_id}"``.
+
+    With ``create_unlinked_fallback=True`` (the calendar-scan path), a meeting where NO
+    attendee resolves to a CRM entity still writes exactly ONE unlinked MEETING row so
+    the event appears on the rep's timeline — this function is the single owner of the
+    meeting-row shape (direction rule, details dict, subject clamp) for both the linked
+    and fallback rows. The dedup return stays [] either way, so a non-empty return
+    always means rows were created this call.
     """
     external_id = f"calendar-{graph_event_id}"
 
@@ -710,6 +719,42 @@ def log_meeting_activity(
             graph_event_id,
             match["type"],
             match["name"],
+            user_id,
+        )
+        rows.append(record)
+
+    if not rows and create_unlinked_fallback:
+        # No attendee matched (NOT a dedup — that returned [] above): write one
+        # unlinked row so the meeting still lands on the rep's activity feed.
+        record = ActivityLog(
+            user_id=user_id,
+            activity_type=ActivityType.MEETING,
+            channel=Channel.CALENDAR,
+            company_id=None,
+            vendor_card_id=None,
+            site_contact_id=None,
+            subject=(subject or "")[:500] or None,
+            external_id=external_id,
+            direction=direction,
+            event_type=EventType.MEETING,
+            is_meaningful=True,
+            duration_seconds=duration_seconds,
+            occurred_at=start_dt,
+            details={
+                "attendees": attendee_emails[:20],
+                "organizer": organizer_email,
+                "location": location,
+                "subject": subject,
+                "graph_event_id": graph_event_id,
+            },
+            summary=f"Meeting: {subject or '(no subject)'}",
+        )
+        db.add(record)
+        db.flush()
+        bump_clocks_from_activity(db, record)
+        logger.info(
+            "Meeting activity logged (unlinked fallback): {} by user {}",
+            graph_event_id,
             user_id,
         )
         rows.append(record)
@@ -965,34 +1010,6 @@ def get_vendor_timeline(
 def get_user_timeline(db: Session, user_id: int, limit: int = 50, offset: int = 0) -> tuple[list[ActivityLog], int]:
     """Paginated, eager-loaded activity timeline for a user."""
     return _paginate_timeline(db, ActivityLog.user_id == user_id, limit=limit, offset=offset)
-
-
-def get_contact_timeline(
-    db: Session,
-    site_contact_id: int,
-    channel: list[str] | None = None,
-    direction: str | None = None,
-    event_type: str | None = None,
-    date_from: datetime | None = None,
-    date_to: datetime | None = None,
-    limit: int = 50,
-    offset: int = 0,
-) -> tuple[list[ActivityLog], int]:
-    """Get filtered, paginated activity timeline for a site contact."""
-    q = db.query(ActivityLog).filter(ActivityLog.site_contact_id == site_contact_id)
-    if channel:
-        q = q.filter(ActivityLog.channel.in_(channel))
-    if direction:
-        q = q.filter(ActivityLog.direction == direction)
-    if event_type:
-        q = q.filter(ActivityLog.event_type == event_type)
-    if date_from:
-        q = q.filter(ActivityLog.created_at >= date_from)
-    if date_to:
-        q = q.filter(ActivityLog.created_at <= date_to)
-    total = q.count()
-    items = q.order_by(ActivityLog.created_at.desc()).offset(offset).limit(limit).all()
-    return items, total
 
 
 def get_last_outbound_activity(db: Session, company_id: int) -> ActivityLog | None:
@@ -1685,14 +1702,14 @@ def get_inbox_sync_status(db: Session, user) -> dict:
 
     token_ok = bool(getattr(user, "access_token", None))
     exp = getattr(user, "token_expires_at", None)
-    if exp is not None and _utc(exp) <= now:
+    if exp is not None and as_utc(exp) <= now:
         token_ok = False
 
     interval = get_effective_int(db, "inbox_scan_interval_min", settings.inbox_scan_interval_min)
     if last_scan is None:
         is_stale = True
     else:
-        is_stale = (now - _utc(last_scan)) > timedelta(minutes=2 * interval)
+        is_stale = (now - as_utc(last_scan)) > timedelta(minutes=2 * interval)
 
     if not connected or not token_ok:
         health = InboxSyncHealth.ERROR
@@ -1709,7 +1726,7 @@ def get_inbox_sync_status(db: Session, user) -> dict:
 
     return {
         "connected": connected,
-        "last_scan_at": _utc(last_scan) if last_scan else None,
+        "last_scan_at": as_utc(last_scan) if last_scan else None,
         "is_stale": is_stale,
         "token_ok": token_ok,
         "error_reason": error_reason,

@@ -283,7 +283,7 @@ async def _send_warning_alert(company: Company, days_inactive: int, inactivity_l
     # suppress every retry for the rest of the day (QC 2026-08-08).
     try:
         from app.scheduler import get_valid_token
-        from app.utils.graph_client import GraphClient
+        from app.utils.graph_client import GraphClient, build_sendmail_payload
 
         token = await get_valid_token(owner, db)
         if not token:
@@ -308,14 +308,13 @@ async def _send_warning_alert(company: Company, days_inactive: int, inactivity_l
         </div>
         """
 
-        payload = {
-            "message": {
-                "subject": f"[AVAIL] ⚠️ {days_remaining} days left on {company.name}",
-                "body": {"contentType": "HTML", "content": html_body},
-                "toRecipients": [{"emailAddress": {"address": owner.email}}],
-            },
-            "saveToSentItems": "false",  # Don't clutter sent items with system alerts
-        }
+        # saveToSentItems "false" — don't clutter sent items with system alerts.
+        payload = build_sendmail_payload(
+            f"[AVAIL] ⚠️ {days_remaining} days left on {company.name}",
+            html_body,
+            owner.email,
+            save_to_sent="false",
+        )
         await gc.post_json("/me/sendMail", payload)
         logger.info(f"Warning email sent to {owner.email} for {company.name} ({days_remaining} days remaining)")
 

@@ -320,7 +320,7 @@ async def send_digest(db: Session, digest_id: int, actor: User, token: str) -> N
     Raises ValueError on wrong status / missing recipient. Marks the digest SENT and
     stamps each line's sent_at (the tracking clock). Caller commits.
     """
-    from ..utils.graph_client import GraphClient
+    from ..utils.graph_client import GraphClient, build_sendmail_payload
 
     digest = db.get(ProactiveDigest, digest_id)
     if not digest or digest.status != ProactiveDigestStatus.DRAFT:
@@ -349,14 +349,7 @@ async def send_digest(db: Session, digest_id: int, actor: User, token: str) -> N
     try:
         await gc.post_json(
             "/me/sendMail",
-            {
-                "message": {
-                    "subject": digest.subject,
-                    "body": {"contentType": "HTML", "content": digest.body_html},
-                    "toRecipients": [{"emailAddress": {"address": salesperson.email}}],
-                },
-                "saveToSentItems": "true",
-            },
+            build_sendmail_payload(digest.subject, digest.body_html, salesperson.email, save_to_sent="true"),
         )
     except Exception:
         # Revert the claim so the digest can be retried with one click.
@@ -384,16 +377,36 @@ def get_digests_for_view(db: Session, *, viewer: User, can_see_all: bool) -> lis
         q = q.where(ProactiveDigest.salesperson_id == viewer.id)
     digests = db.scalars(q).all()
 
-    user_names = dict(db.execute(select(User.id, User.name)).all())
-    company_names = dict(db.execute(select(Company.id, Company.name)).all())
+    # One query for every listed digest's lines (grouped in Python), then name lookups
+    # scoped to just the user/company ids those digests+lines actually reference —
+    # never a whole-table read of users or companies.
+    lines_by_digest: dict[int, list[ProactiveOutreachLine]] = {d.id: [] for d in digests}
+    if digests:
+        for line in db.scalars(
+            select(ProactiveOutreachLine)
+            .where(ProactiveOutreachLine.digest_id.in_(list(lines_by_digest)))
+            .order_by(
+                ProactiveOutreachLine.digest_id,
+                ProactiveOutreachLine.company_id.nullslast(),
+                ProactiveOutreachLine.mpn,
+            )
+        ):
+            lines_by_digest[line.digest_id].append(line)
+
+    user_ids = {d.salesperson_id for d in digests} | {d.sent_by_id for d in digests}
+    user_ids.discard(None)
+    user_names = dict(db.execute(select(User.id, User.name).where(User.id.in_(user_ids))).all()) if user_ids else {}
+    company_ids = {line.company_id for lines in lines_by_digest.values() for line in lines}
+    company_ids.discard(None)
+    company_names = (
+        dict(db.execute(select(Company.id, Company.name).where(Company.id.in_(company_ids))).all())
+        if company_ids
+        else {}
+    )
 
     out = []
     for d in digests:
-        lines = db.scalars(
-            select(ProactiveOutreachLine)
-            .where(ProactiveOutreachLine.digest_id == d.id)
-            .order_by(ProactiveOutreachLine.company_id.nullslast(), ProactiveOutreachLine.mpn)
-        ).all()
+        lines = lines_by_digest[d.id]
         out.append(
             {
                 "id": d.id,

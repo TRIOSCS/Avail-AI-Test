@@ -12,7 +12,7 @@ Depends on: models, schemas, search_service, file_utils, normalization utils
 
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
@@ -56,33 +56,30 @@ from ...utils.normalization import (
     normalize_packaging,
     normalize_price,
     normalize_quantity,
+    parse_substitute_mpns,
 )
 from ...vendor_utils import normalize_vendor_name
+from ..crm._helpers import record_changes
 
 router = APIRouter(tags=["requisitions"])
 
 
-def _dedupe_substitutes(subs: list[str], primary_mpn: str) -> list[dict]:
-    """Deduplicate and normalize substitutes, store as dicts with mpn + manufacturer.
+def _propagate_requirement_tags(db: Session, req: Requisition, requirements: list[Requirement]) -> None:
+    """Propagate material tags from new requirements to their customer site + company.
 
-    Args:
-        subs: List of raw substitute MPN strings
-        primary_mpn: Primary MPN to exclude from duplicates
-
-    Returns:
-        List of dicts with {"mpn": normalized_mpn, "manufacturer": ""}
+    Commits when any requirements were passed. Callers wrap this in try/except — tag
+    propagation must never fail requirement creation.
     """
-    seen_keys = {normalize_mpn_key(primary_mpn)}
-    deduped = []
+    from ...services.tagging import propagate_tags_to_entity
 
-    for s in subs:
-        ns = normalize_mpn(s) or s.strip()
-        key = normalize_mpn_key(ns)
-        if key and key not in seen_keys:
-            seen_keys.add(key)
-            deduped.append({"mpn": ns, "manufacturer": ""})
-
-    return deduped
+    for r in requirements:
+        if r.material_card_id and req.customer_site_id:
+            propagate_tags_to_entity("customer_site", req.customer_site_id, r.material_card_id, 1.0, db)
+            site = db.get(CustomerSite, req.customer_site_id)
+            if site and site.company_id:
+                propagate_tags_to_entity("company", site.company_id, r.material_card_id, 1.0, db)
+    if requirements:
+        db.commit()
 
 
 def _substitute_keys(requirement: Requirement) -> list[str]:
@@ -379,7 +376,6 @@ async def list_requirements(req_id: int, user: User = Depends(require_user), db:
 async def add_requirements(
     req_id: int,
     request: Request,
-    background_tasks: BackgroundTasks,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -399,7 +395,7 @@ async def add_requirements(
                 raise HTTPException(422, str(exc)) from exc
             skipped.append({"index": idx, "error": str(exc)})
             continue
-        deduped_subs = _dedupe_substitutes(parsed.substitutes, parsed.primary_mpn)
+        deduped_subs = parse_substitute_mpns(parsed.substitutes, parsed.primary_mpn)
         mat_card = None
         try:
             nested = db.begin_nested()
@@ -417,7 +413,7 @@ async def add_requirements(
             material_card_id=mat_card.id if mat_card else None,
             target_qty=parsed.target_qty,
             target_price=parsed.target_price,
-            substitutes=deduped_subs[:20],
+            substitutes=deduped_subs,  # parse_substitute_mpns caps at 20
             condition=normalize_condition(parsed.condition) if parsed.condition else None,
             date_codes=parsed.date_codes or "",
             firmware=parsed.firmware or "",
@@ -432,16 +428,7 @@ async def add_requirements(
 
     # Tag propagation
     try:
-        from ...services.tagging import propagate_tags_to_entity
-
-        for r in created:
-            if r.material_card_id and req.customer_site_id:
-                propagate_tags_to_entity("customer_site", req.customer_site_id, r.material_card_id, 1.0, db)
-                site = db.get(CustomerSite, req.customer_site_id)
-                if site and site.company_id:
-                    propagate_tags_to_entity("company", site.company_id, r.material_card_id, 1.0, db)
-        if created:
-            db.commit()
+        _propagate_requirement_tags(db, req, created)
     except Exception:  # pragma: no cover
         logger.warning("Tag propagation failed for requirements", exc_info=True)
 
@@ -503,7 +490,6 @@ async def add_requirements(
 @router.post("/api/requisitions/{req_id}/upload")
 async def upload_requirements(
     req_id: int,
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
@@ -522,7 +508,7 @@ async def upload_requirements(
     except (ParseError, ValueError, KeyError, TypeError) as e:
         raise HTTPException(400, f"Could not parse file: {str(e)[:200]}") from e
 
-    created = 0
+    created_rows: list[Requirement] = []
     for row in rows:
         raw_mpn = (
             row.get("primary_mpn")
@@ -584,32 +570,16 @@ async def upload_requirements(
             notes=notes,
         )
         db.add(r)
-        created += 1
+        created_rows.append(r)
     db.commit()
 
     # Tag propagation for uploaded requirements
     try:
-        from ...services.tagging import propagate_tags_to_entity
-
-        uploaded_reqs = (
-            db.query(Requirement)
-            .filter(Requirement.requisition_id == req_id)
-            .order_by(Requirement.id.desc())
-            .limit(created)
-            .all()
-        )
-        for r_item in uploaded_reqs:  # pragma: no cover
-            if r_item.material_card_id and req.customer_site_id:
-                propagate_tags_to_entity("customer_site", req.customer_site_id, r_item.material_card_id, 1.0, db)
-                site = db.get(CustomerSite, req.customer_site_id)
-                if site and site.company_id:
-                    propagate_tags_to_entity("company", site.company_id, r_item.material_card_id, 1.0, db)
-        if uploaded_reqs:
-            db.commit()
+        _propagate_requirement_tags(db, req, created_rows)
     except Exception:  # pragma: no cover
         logger.warning("Tag propagation failed for uploaded requirements", exc_info=True)
 
-    return {"created": created, "total_rows": len(rows)}
+    return {"created": len(created_rows), "total_rows": len(rows)}
 
 
 @router.delete("/api/requirements/{item_id}")
@@ -669,8 +639,7 @@ async def update_requirement(
     if data.target_qty is not None:
         r.target_qty = data.target_qty
     if data.substitutes is not None:
-        deduped = _dedupe_substitutes(data.substitutes, r.primary_mpn)
-        r.substitutes = deduped[:20]
+        r.substitutes = parse_substitute_mpns(data.substitutes, r.primary_mpn)  # caps at 20
     if data.target_price is not None:
         r.target_price = data.target_price
     if data.firmware is not None:
@@ -700,20 +669,7 @@ async def update_requirement(
     if data.need_by_date is not None:
         r.need_by_date = data.need_by_date
     new_vals = {f: getattr(r, f) for f in _req_track_fields}
-    for f in _req_track_fields:
-        old_v = str(old_vals.get(f) or "")
-        new_v = str(new_vals.get(f) or "")
-        if old_v != new_v:
-            db.add(
-                ChangeLog(
-                    entity_type="requirement",
-                    entity_id=item_id,
-                    user_id=user.id,
-                    field_name=f,
-                    old_value=old_v,
-                    new_value=new_v,
-                )
-            )
+    record_changes(db, "requirement", item_id, user.id, old_vals, new_vals, _req_track_fields)
     if str(new_vals.get("sale_notes") or "") != str(old_vals.get("sale_notes") or ""):
         log_activity(
             db,

@@ -26,7 +26,7 @@ from app.services.in_app_notifications import write_in_app  # noqa: F401
 
 # Make them patchable at this module level (mirrors buyplan_notifications pattern).
 try:
-    from app.utils.graph_client import GraphClient
+    from app.utils.graph_client import GraphClient, build_sendmail_payload
     from app.utils.token_manager import get_valid_token
 except Exception:  # pragma: no cover
     logger.warning(
@@ -35,6 +35,7 @@ except Exception:  # pragma: no cover
     )
     GraphClient = None
     get_valid_token = None
+    build_sendmail_payload = None
 
 
 async def send_email(user, subject: str, html_body: str, db: Session) -> None:
@@ -52,14 +53,7 @@ async def send_email(user, subject: str, html_body: str, db: Session) -> None:
     gc = GraphClient(token)
     await gc.post_json(
         "/me/sendMail",
-        {
-            "message": {
-                "subject": subject,
-                "body": {"contentType": "HTML", "content": html_body},
-                "toRecipients": [{"emailAddress": {"address": user.email}}],
-            },
-            "saveToSentItems": "false",
-        },
+        build_sendmail_payload(subject, html_body, user.email, save_to_sent="false"),
     )
     logger.info("approval email sent to {}", user.email)
 

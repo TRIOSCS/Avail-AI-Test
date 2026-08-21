@@ -50,6 +50,46 @@ def _company_domain(website: str | None) -> str | None:
     return parse_website_domain(website) or None
 
 
+def _company_match_context(db: Session, user: User) -> tuple[dict[str, Company], dict[str, Company], bool, set[int]]:
+    """Company-matching maps + authz precompute shared by contact preview AND confirm.
+
+    Returns ``(norm_to_company, domain_to_company, is_mgr, manageable_ids)`` built from
+    the same active-company query, so the preview can never flag rows differently than
+    the confirm path will treat them. The manageable set is batched once (no per-row
+    round-trips); it is empty for managers/admins (``is_mgr`` short-circuits authz).
+    """
+    all_companies = db.query(Company).filter(Company.is_active.is_(True)).all()
+    norm_to_company: dict[str, Company] = {}
+    domain_to_company: dict[str, Company] = {}
+    for co in all_companies:
+        if co.normalized_name:
+            norm_to_company[co.normalized_name] = co
+        domain = _company_domain(co.website)
+        if domain:
+            domain_to_company[domain] = co
+    is_mgr = is_manager_or_admin(user)
+    manageable_ids = set() if is_mgr else manageable_company_ids(user, all_companies, db)
+    return norm_to_company, domain_to_company, is_mgr, manageable_ids
+
+
+def _match_row_company(
+    company_name: str,
+    email: str | None,
+    norm_to_company: dict[str, Company],
+    domain_to_company: dict[str, Company],
+) -> Company | None:
+    """Row→company resolution rule: normalized-name match, then email-domain fallback.
+
+    The ONE matching rule shared by contact preview and confirm — a change here changes
+    both, so the preview stays honest about what confirm will do.
+    """
+    norm = normalize_vendor_name(company_name) if company_name else None
+    co = norm_to_company.get(norm) if norm else None
+    if co is None and email and "@" in email:
+        co = domain_to_company.get(email.split("@", 1)[1])
+    return co
+
+
 def parse_csv_rows(content_bytes: bytes) -> list[dict] | None:
     """Decode + parse an uploaded CSV into a list of raw row dicts.
 
@@ -194,19 +234,7 @@ def preview_contact_import(db: Session, raw_rows: list[dict], user: User) -> dic
         for row in db.query(SiteContact.email).filter(SiteContact.email.isnot(None), SiteContact.email != "").all()
     }
 
-    all_companies = db.query(Company).filter(Company.is_active.is_(True)).all()
-    norm_to_company: dict[str, Company] = {}
-    domain_to_company: dict[str, Company] = {}
-    for co in all_companies:
-        if co.normalized_name:
-            norm_to_company[co.normalized_name] = co
-        domain = _company_domain(co.website)
-        if domain:
-            domain_to_company[domain] = co
-
-    # Precompute the manageable-company set once (batched) instead of per-row round-trips.
-    is_mgr = is_manager_or_admin(user)
-    manageable_ids = set() if is_mgr else manageable_company_ids(user, all_companies, db)
+    norm_to_company, domain_to_company, is_mgr, manageable_ids = _company_match_context(db, user)
 
     rows = []
     for raw in raw_rows:
@@ -221,10 +249,7 @@ def preview_contact_import(db: Session, raw_rows: list[dict], user: User) -> dic
         elif email and email in existing_emails:
             status, status_label = "duplicate", "Email already exists"
         else:
-            norm = normalize_vendor_name(company_name)
-            matched_co = norm_to_company.get(norm) if norm else None
-            if matched_co is None and email and "@" in email:
-                matched_co = domain_to_company.get(email.split("@", 1)[1])
+            matched_co = _match_row_company(company_name, email, norm_to_company, domain_to_company)
             if matched_co is not None and not (is_mgr or matched_co.id in manageable_ids):
                 status, status_label = "unauthorized", "Company not yours"
             else:
@@ -273,19 +298,7 @@ def confirm_contact_import(db: Session, rows: list[dict], user: User) -> dict:
     if len(rows) > IMPORT_MAX_ROWS:
         raise ValueError(f"rows_json exceeds {IMPORT_MAX_ROWS} row limit")
 
-    all_companies = db.query(Company).filter(Company.is_active.is_(True)).all()
-    norm_to_company: dict[str, Company] = {}
-    domain_to_company: dict[str, Company] = {}
-    for co in all_companies:
-        if co.normalized_name:
-            norm_to_company[co.normalized_name] = co
-        domain = _company_domain(co.website)
-        if domain:
-            domain_to_company[domain] = co
-
-    # Precompute the manageable-company set once (batched) instead of per-row round-trips.
-    is_mgr = is_manager_or_admin(user)
-    manageable_ids = set() if is_mgr else manageable_company_ids(user, all_companies, db)
+    norm_to_company, domain_to_company, is_mgr, manageable_ids = _company_match_context(db, user)
 
     now = datetime.now(UTC)
     created = 0
@@ -300,11 +313,7 @@ def confirm_contact_import(db: Session, rows: list[dict], user: User) -> dict:
     for row in rows:
         company_name = str(row.get("company_name", "")).strip()
         email = str(row.get("email", "")).strip().lower() or None
-        norm = normalize_vendor_name(company_name) if company_name else None
-        co = norm_to_company.get(norm) if norm else None
-        if co is None and email and "@" in email:
-            co = domain_to_company.get(email.split("@", 1)[1])
-        row_companies.append(co)
+        row_companies.append(_match_row_company(company_name, email, norm_to_company, domain_to_company))
 
     matched_company_ids = {co.id for co in row_companies if co is not None}
 

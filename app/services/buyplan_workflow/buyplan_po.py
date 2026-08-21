@@ -22,6 +22,22 @@ from ...models.buy_plan import BuyPlan, BuyPlanLine, BuyPlanLineStatus, BuyPlanS
 # ── Workflow: PO Execution ───────────────────────────────────────────
 
 
+def _reset_po_stage_fields(line: BuyPlanLine) -> None:
+    """Clear the PO-stage fields a confirmed PO stamped on *line*.
+
+    THE shared reset for every exit that pulls a cut PO back out of play:
+    ``verify_po``'s reject branch, ``buyplan_lines.resolve_line_issue``, and
+    ``buyplan_lines.resource_line`` (each adds its own per-path clears/stamps on
+    top). Clearing ``last_nudge_at`` resets the nudge clock so the buyer is
+    re-nudged as soon as the line is actionable again, instead of waiting out a
+    stale nudge window.
+    """
+    line.po_number = None
+    line.estimated_ship_date = None
+    line.po_confirmed_at = None
+    line.last_nudge_at = None
+
+
 def confirm_po(
     plan_id: int,
     line_id: int,
@@ -242,12 +258,7 @@ def verify_po(
         _log_po_line_activity(plan, line, action, user, rejection_note, db)
         line.status = BuyPlanLineStatus.AWAITING_PO.value
         line.po_rejection_note = rejection_note
-        line.po_number = None
-        line.estimated_ship_date = None
-        line.po_confirmed_at = None
-        # Reset the nudge clock: the line is actionable again, so the buyer is re-nudged
-        # to re-issue the PO without waiting out a stale (ops-stamped) nudge window.
-        line.last_nudge_at = None
+        _reset_po_stage_fields(line)
         logger.info("PO rejected for line {}: {}", line_id, rejection_note)
         # QC 2026-08-10 P1-1: sending a PO back invalidates any wire authorised
         # against it. Void THIS line's live prepayment (the money-safety sweep —

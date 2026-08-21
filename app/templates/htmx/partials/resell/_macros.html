@@ -1,0 +1,58 @@
+{#
+  resell/_macros.html — Resell-cluster-local Jinja2 macros.
+  Called by: resell/_offers.html, resell/offer_compare.html (import).
+  Depends on: HTMX, Tailwind CSS brand palette.
+
+  broker_label — the broker-anonymization display rule (real name for the list
+  owner, "Broker #id" otherwise; Phase-3 anonymization). ONE source so the
+  privacy rule can never diverge between the Offers tab and the compare modal.
+
+  offer_action — the per-line 3-way award cell (spec §RS-3): the offer that won
+  this line shows Awarded ✓ + Unaward (the explicit inverse); a line awarded to
+  a DIFFERENT offer shows "Not selected" (a pure render decision — award never
+  auto-marks losers ``lost``); an open/late offer on an un-awarded line shows
+  Award + Withdraw. Every button targets #tab-offers-<id> (outside any modal) so
+  the OOB response never resets the Alpine tab state. close_modal=true adds the
+  compare-modal behavior: each button ALSO closes the modal on success — the
+  underlying tabs and header chips are refreshed out-of-band by the response,
+  so once the pick lands the modal has served its purpose.
+#}
+
+{% macro broker_label(offer, is_owner=True) %}
+  {%- if offer.offerer_company and is_owner -%}{{ offer.offerer_company.name }}
+  {%- elif offer.offerer_vendor_card and is_owner -%}{{ offer.offerer_vendor_card.display_name }}
+  {%- else -%}Broker #{{ offer.id }}{%- endif -%}
+{% endmacro %}
+
+{% macro offer_action(el, item, offer, is_owner=True, close_modal=False) %}
+  {%- if offer.status == 'won' -%}
+  <div class="inline-flex items-center gap-1.5 whitespace-nowrap">
+    <span class="text-xs font-semibold text-emerald-700">Awarded ✓</span>
+    <button hx-post="/api/resell/{{ el.id }}/offers/{{ offer.id }}/unaward"
+            hx-target="#tab-offers-{{ el.id }}" hx-swap="innerHTML"
+            hx-confirm="Reverse this award? The line returns to the pool for offers."
+            {% if close_modal %}@htmx:after-request.camel="if(event.detail.successful) $dispatch('close-modal')"
+            {% endif %}data-loading-disable
+            class="btn-ghost btn-sm text-rose-600 hover:text-rose-700">Unaward</button>
+  </div>
+  {%- elif item.status == 'awarded' -%}
+  <span class="text-secondary whitespace-nowrap">Not selected</span>
+  {%- elif offer.status in ['open', 'late'] -%}
+  <div class="inline-flex items-center gap-1.5 whitespace-nowrap">
+    <button hx-post="/api/resell/{{ el.id }}/offers/{{ offer.id }}/award"
+            hx-target="#tab-offers-{{ el.id }}" hx-swap="innerHTML"
+            hx-confirm="Award {{ broker_label(offer, is_owner) }} for {{ item.part_number }}? This marks the line sold."
+            {% if close_modal %}@htmx:after-request.camel="if(event.detail.successful) $dispatch('close-modal')"
+            {% endif %}data-loading-disable
+            class="btn-primary btn-sm">Award</button>
+    <button hx-post="/api/resell/{{ el.id }}/offers/{{ offer.id }}/withdraw"
+            hx-target="#tab-offers-{{ el.id }}" hx-swap="innerHTML"
+            hx-confirm="Withdraw this offer? It drops out of the running."
+            {% if close_modal %}@htmx:after-request.camel="if(event.detail.successful) $dispatch('close-modal')"
+            {% endif %}data-loading-disable
+            class="btn-ghost btn-sm text-gray-500 hover:text-gray-700">Withdraw</button>
+  </div>
+  {%- else -%}
+  <span class="text-xs text-gray-400">—</span>
+  {%- endif -%}
+{% endmacro %}

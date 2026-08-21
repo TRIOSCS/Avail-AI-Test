@@ -9,18 +9,11 @@
 {% from "htmx/partials/shared/_alert_macros.html" import alert_row_attrs %}
 {% from "htmx/partials/shared/_macros.html" import cadence_dot %}
 
-{# Bulk select + action Alpine component (scoped to the list panel).
-   selectedIds: Object used as a Set — keys are company id strings.
+{# Bulk select + action scope — shared bulkSelect Alpine component (htmx_app.js),
+   seeded with this page's company ids. Single-quoted x-data: |tojson output stays
+   safe even if id types ever change (attribute-truncation rule).
    clearSelection event: dispatched by HX-Trigger after a bulk apply completes. #}
-<div x-data="{
-  selectedIds: {},
-  get count() { return Object.keys(this.selectedIds).length },
-  get allSelected() { return {{ companies|length }} > 0 && Object.keys(this.selectedIds).length === {{ companies|length }} },
-  toggle(id) { if (this.selectedIds[id]) { delete this.selectedIds[id] } else { this.selectedIds[id] = true } },
-  toggleAll(checked) { if (checked) { {% for c in companies %}this.selectedIds['{{ c.id }}'] = true;{% endfor %} } else { this.selectedIds = {} } },
-  idsStr() { return Object.keys(this.selectedIds).join(',') },
-  clear() { this.selectedIds = {} }
-}" @clear-selection.window="clear()">
+<div x-data='bulkSelect({{ companies|map(attribute="id")|list|tojson }})' @clear-selection.window="clear()">
 
 {# ── Sticky header: count + bulk bar ───────────────────────────── #}
 {# data-offset/data-limit: read by the outreach logger's system-initiated list

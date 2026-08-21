@@ -59,7 +59,7 @@ class TestClassifyPartsBatch:
             ]
         }
         with patch(
-            "app.utils.llm_router.routed_structured",
+            "app.utils.claude_client.claude_structured",
             new=AsyncMock(return_value=fake_result),
         ):
             result = await classify_parts_batch([{"mpn": "LM317T", "manufacturer": "TI", "description": "LDO"}])
@@ -73,7 +73,7 @@ class TestClassifyPartsBatch:
         from app.services.tbf_worker.ai_gate import classify_parts_batch
 
         with patch(
-            "app.utils.llm_router.routed_structured",
+            "app.utils.claude_client.claude_structured",
             new=AsyncMock(side_effect=RuntimeError("API down")),
         ):
             result = await classify_parts_batch([{"mpn": "X1", "manufacturer": "", "description": ""}])
@@ -85,7 +85,7 @@ class TestClassifyPartsBatch:
         from app.services.tbf_worker.ai_gate import classify_parts_batch
 
         with patch(
-            "app.utils.llm_router.routed_structured",
+            "app.utils.claude_client.claude_structured",
             new=AsyncMock(return_value={"unexpected": "format"}),
         ):
             result = await classify_parts_batch([{"mpn": "X1", "manufacturer": "", "description": ""}])
@@ -97,7 +97,7 @@ class TestClassifyPartsBatch:
         from app.services.tbf_worker.ai_gate import classify_parts_batch
 
         with patch(
-            "app.utils.llm_router.routed_structured",
+            "app.utils.claude_client.claude_structured",
             new=AsyncMock(return_value=None),
         ):
             result = await classify_parts_batch([{"mpn": "X1", "manufacturer": "", "description": ""}])

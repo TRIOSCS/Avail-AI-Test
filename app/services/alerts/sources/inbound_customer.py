@@ -59,7 +59,6 @@ class InboundCustomerSource(AlertSource):
         recency floor and the oldest-unseen-first ordering.
         """
         floor = self.recency_floor()
-        seen = self.seen_ref_ids(db, user)
         new_ts = func.coalesce(ActivityLog.occurred_at, ActivityLog.created_at)
 
         query = (
@@ -72,6 +71,9 @@ class InboundCustomerSource(AlertSource):
                 ActivityLog.dismissed_at.is_(None),
                 Company.account_type == _CUSTOMER_ACCOUNT_TYPE,
                 new_ts >= floor,
+                # Anti-join against alert_seen in SQL — the seen history is permanent,
+                # so it must never be materialized into a Python IN-list.
+                ActivityLog.id.notin_(self.seen_subquery(user)),
             )
         )
 
@@ -86,8 +88,6 @@ class InboundCustomerSource(AlertSource):
                 )
             )
 
-        if seen:
-            query = query.filter(ActivityLog.id.notin_(seen))
         return query.order_by(new_ts.asc())
 
     def count_for_user(self, db: Session, user: User) -> int:

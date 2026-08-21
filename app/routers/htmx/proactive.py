@@ -199,9 +199,12 @@ async def proactive_prepare_page(
         .all()
     )
 
+    from ...services.proactive_service import DEFAULT_PROACTIVE_MARKUP
+
     match_data = []
     for m in matches:
         offer = m.offer
+        unit_price = float(offer.unit_price) if offer and offer.unit_price else None
         match_data.append(
             {
                 "id": m.id,
@@ -209,7 +212,10 @@ async def proactive_prepare_page(
                 "vendor_name": offer.vendor_name if offer else "",
                 "manufacturer": offer.manufacturer if offer else "",
                 "qty_available": offer.qty_available if offer else 0,
-                "unit_price": float(offer.unit_price) if offer and offer.unit_price else None,
+                "unit_price": unit_price,
+                # Seeded sell price shown in the table — the service's markup rule,
+                # computed here so the template never carries pricing logic.
+                "suggested_sell": f"{(unit_price * DEFAULT_PROACTIVE_MARKUP) if unit_price else 0:.4f}",
                 "margin_pct": m.margin_pct,
                 "match_score": m.match_score or 0,
             }
@@ -404,11 +410,13 @@ async def proactive_draft_for_prepare(
                     pass
 
     # Build parts list for AI
+    from ...services.proactive_service import DEFAULT_PROACTIVE_MARKUP
+
     parts = []
     for m in matches:
         offer = m.offer
         cost = float(offer.unit_price) if offer and offer.unit_price else 0
-        sell = draft_sell_prices.get(str(m.id), cost * 1.3)
+        sell = draft_sell_prices.get(str(m.id), cost * DEFAULT_PROACTIVE_MARKUP)
         parts.append(
             {
                 "mpn": m.mpn,
@@ -424,7 +432,7 @@ async def proactive_draft_for_prepare(
             }
         )
 
-    salesperson_name = user.name or user.email.split("@")[0]
+    salesperson_name = user.display_name
 
     try:
         from ...services.proactive_email import draft_proactive_email

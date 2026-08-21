@@ -1,6 +1,6 @@
 """test_scheduler.py — Tests for APScheduler configuration and utilities.
 
-Covers: _utc helper, configure_scheduler job registration, _traced_job wrapper,
+Covers: as_utc helper, configure_scheduler job registration, _traced_job wrapper,
 and scheduler configuration tests (conditional flags, job intervals).
 
 Individual job function tests have been split into domain-specific files:
@@ -20,7 +20,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.scheduler import _utc, configure_scheduler, scheduler
+from app.scheduler import configure_scheduler, scheduler
+from app.utils.timezones import as_utc
 
 # ── Fixtures ───────────────────────────────────────────────────────────
 
@@ -65,12 +66,12 @@ def _mock_settings(**overrides):
     return mock
 
 
-# ── _utc() ─────────────────────────────────────────────────────────────
+# ── as_utc() ─────────────────────────────────────────────────────────────
 
 
 def test_utc_naive_becomes_utc():
     naive = datetime(2026, 1, 15, 12, 0, 0)
-    result = _utc(naive)
+    result = as_utc(naive)
     assert result.tzinfo == UTC
     assert result.year == 2026
 
@@ -78,12 +79,12 @@ def test_utc_naive_becomes_utc():
 def test_utc_aware_passthrough():
     tz5 = timezone(timedelta(hours=5))
     aware = datetime(2026, 1, 15, 12, 0, 0, tzinfo=tz5)
-    result = _utc(aware)
+    result = as_utc(aware)
     assert result.tzinfo == tz5  # unchanged
 
 
 def test_utc_none_returns_none():
-    assert _utc(None) is None
+    assert as_utc(None) is None
 
 
 # ── configure_scheduler() ──────────────────────────────────────────────

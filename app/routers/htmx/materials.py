@@ -439,7 +439,8 @@ async def materials_ai_interpret_partial(
     db: Session = Depends(get_db),
 ):
     """Interpret a natural language query using AI and return pre-selection chip."""
-    from ...services.materials_ai_search import get_parent_for_commodity, interpret_search_query
+    from ...services.commodity_registry import CANONICAL_COMMODITY_KEYS, get_parent_group
+    from ...services.materials_ai_search import interpret_search_query
 
     result = None
     if q and len(q.strip().split()) >= 3:
@@ -447,8 +448,10 @@ async def materials_ai_interpret_partial(
 
     ctx = _base_ctx(request, user, "materials")
     ctx["ai_result"] = result
-    if result and result.get("commodity"):
-        ctx["ai_parent"] = get_parent_for_commodity(result["commodity"])
+    if result and result.get("commodity") in CANONICAL_COMMODITY_KEYS:
+        # interpret_search_query validates commodity to the canonical vocabulary; the
+        # guard preserves "" (never get_parent_group's "Misc" default) for anything else.
+        ctx["ai_parent"] = get_parent_group(result["commodity"])
     else:
         ctx["ai_parent"] = ""
     return template_response("htmx/partials/materials/ai_interpret.html", ctx)

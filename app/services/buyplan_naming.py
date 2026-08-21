@@ -75,8 +75,3 @@ def build_card_title(
     customer = (customer_name or "").strip() or _MISSING
     owner = (owner_name or "").strip() or _MISSING
     return f"{so} - {customer} - {owner} - {kind}"
-
-
-#: AI-flag severities worst → least, so the flagged-issue indicator leads with the most
-#: urgent reason. Unknown/absent severities sort last (treated as least urgent).
-_SEVERITY_RANK: dict[str, int] = {"critical": 0, "warning": 1, "info": 2}

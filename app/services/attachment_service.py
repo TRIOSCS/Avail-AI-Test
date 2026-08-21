@@ -109,6 +109,68 @@ def _validate(file: UploadFile, content: bytes) -> None:
         )
 
 
+async def _graph_put(
+    url: str,
+    token: str,
+    content: bytes,
+    *,
+    content_type: str,
+    timeout: int,
+    err_msg: str,
+    label: str,
+    map_status=None,
+) -> tuple[str, str | None]:
+    """Shared Graph file-upload PUT for both storage backends.
+
+    Performs the request, checks the status, parses the JSON body, and extracts the item
+    id — every failure raises HTTPException(502, *err_msg*) after an error log prefixed
+    with *label*. An optional *map_status* hook is called with the response BEFORE the
+    generic status check so a backend can map specific codes to its own HTTP errors (the
+    OneDrive 401/403 mapping stays at its call site).
+
+    Returns (item_id, web_url).
+    """
+    from ..http_client import http
+
+    try:
+        r = await http.put(
+            url,
+            content=content,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": content_type or "application/octet-stream",
+            },
+            timeout=timeout,
+        )
+    except Exception as e:
+        logger.error("{} attachment PUT errored url={}", label, url, exc_info=True)
+        raise HTTPException(502, err_msg) from e
+    if map_status is not None:
+        map_status(r)
+    if r.status_code not in (200, 201):
+        logger.error("{} attachment PUT failed {} {} url={}", label, r.status_code, r.text[:300], url)
+        raise HTTPException(502, err_msg)
+    try:
+        body = r.json()
+    except Exception as e:
+        logger.error("attachment PUT returned non-JSON body url={}", url, exc_info=True)
+        raise HTTPException(502, err_msg) from e
+    item_id = body.get("id")
+    if not item_id:
+        logger.error("attachment PUT response missing 'id' url={}", url)
+        raise HTTPException(502, err_msg)
+    return item_id, body.get("webUrl")
+
+
+def _map_onedrive_status(r) -> None:
+    """OneDrive-only PUT status mapping: auth failures get their own HTTP errors
+    instead of the generic 502."""
+    if r.status_code == 401:
+        raise HTTPException(401, "Microsoft token expired — please re-authenticate")
+    if r.status_code == 403:
+        raise HTTPException(403, "Access denied to OneDrive")
+
+
 async def _store(
     content: bytes,
     *,
@@ -125,6 +187,7 @@ async def _store(
     backend was used.
     """
     drive_id = settings.datasheet_library_drive_id
+    safe = _safe_name(file_name)
 
     if drive_id:
         # --- Company SharePoint library (app token) ---
@@ -134,41 +197,17 @@ async def _store(
         if not token:
             raise HTTPException(502, "Couldn't obtain app Graph token for company library")
 
-        safe = _safe_name(file_name)
         url = f"{_GRAPH}/drives/{drive_id}/root:/Attachments/{entity_label}/{entity_id}/{safe}:/content"
-        from ..http_client import http
-
-        try:
-            r = await http.put(
-                url,
-                content=content,
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Content-Type": content_type or "application/octet-stream",
-                },
-                timeout=60,
-            )
-        except Exception as e:
-            logger.error("company-library attachment PUT errored url={}", url, exc_info=True)
-            raise HTTPException(502, "Couldn't save to the company library") from e
-        if r.status_code not in (200, 201):
-            logger.error(
-                "company-library attachment PUT failed {} {} url={}",
-                r.status_code,
-                r.text[:300],
-                url,
-            )
-            raise HTTPException(502, "Couldn't save to the company library")
-        try:
-            body = r.json()
-        except Exception as e:
-            logger.error("attachment PUT returned non-JSON body url={}", url, exc_info=True)
-            raise HTTPException(502, "Couldn't save to the company library") from e
-        item_id = body.get("id")
-        if not item_id:
-            logger.error("attachment PUT response missing 'id' url={}", url)
-            raise HTTPException(502, "Couldn't save to the company library")
-        return item_id, drive_id, body.get("webUrl")
+        item_id, web_url = await _graph_put(
+            url,
+            token,
+            content,
+            content_type=content_type,
+            timeout=60,
+            err_msg="Couldn't save to the company library",
+            label="company-library",
+        )
+        return item_id, drive_id, web_url
 
     # --- User OneDrive fallback ---
     from ..scheduler import get_valid_token
@@ -177,40 +216,18 @@ async def _store(
     if not token:
         raise HTTPException(401, "Connect your Microsoft account to attach files")
 
-    safe = _safe_name(file_name)
     url = f"{_GRAPH}/me/drive/root:/AvailAI/{entity_label}/{entity_id}/{safe}:/content"
-    from ..http_client import http
-
-    try:
-        r = await http.put(
-            url,
-            content=content,
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": content_type or "application/octet-stream",
-            },
-            timeout=30,
-        )
-    except Exception as e:
-        logger.error("OneDrive attachment PUT errored url={}", url, exc_info=True)
-        raise HTTPException(502, "Failed to upload to OneDrive") from e
-    if r.status_code == 401:
-        raise HTTPException(401, "Microsoft token expired — please re-authenticate")
-    if r.status_code == 403:
-        raise HTTPException(403, "Access denied to OneDrive")
-    if r.status_code not in (200, 201):
-        logger.error("OneDrive attachment PUT failed {} {}", r.status_code, r.text[:300])
-        raise HTTPException(502, "Failed to upload to OneDrive")
-    try:
-        body = r.json()
-    except Exception as e:
-        logger.error("attachment PUT returned non-JSON body url={}", url, exc_info=True)
-        raise HTTPException(502, "Failed to upload to OneDrive") from e
-    item_id = body.get("id")
-    if not item_id:
-        logger.error("attachment PUT response missing 'id' url={}", url)
-        raise HTTPException(502, "Failed to upload to OneDrive")
-    return item_id, None, body.get("webUrl")
+    item_id, web_url = await _graph_put(
+        url,
+        token,
+        content,
+        content_type=content_type,
+        timeout=30,
+        err_msg="Failed to upload to OneDrive",
+        label="OneDrive",
+        map_status=_map_onedrive_status,
+    )
+    return item_id, None, web_url
 
 
 # ---------------------------------------------------------------------------
@@ -372,6 +389,26 @@ async def open_attachment(att, user) -> StreamingResponse | RedirectResponse:
     return RedirectResponse(att.library_web_url)
 
 
+# The single warning string for every best-effort cloud-delete failure path.
+_CLOUD_DELETE_WARNING = "DB record deleted but cloud file may need manual cleanup"
+
+
+async def _graph_delete(url: str, token: str, item_id, label: str) -> bool:
+    """Shared Graph item DELETE for both storage backends.
+
+    Returns True on 200/204; logs a *label*-prefixed warning and returns False on any
+    other status. Exceptions propagate — each call site owns its try/except (the whole
+    delete, token fetch included, is best-effort there).
+    """
+    from ..http_client import http
+
+    r = await http.delete(url, headers={"Authorization": f"Bearer {token}"}, timeout=15)
+    if r.status_code not in (200, 204):
+        logger.warning("{} delete returned {} for item={}", label, r.status_code, item_id)
+        return False
+    return True
+
+
 async def remove_attachment(db: Session, att, user) -> dict:
     """Best-effort cloud delete then DB delete.
 
@@ -388,23 +425,15 @@ async def remove_attachment(db: Session, att, user) -> dict:
 
             token = await get_app_graph_token()
             if token:
-                from ..http_client import http
-
                 url = f"{_GRAPH}/drives/{att.library_drive_id}/items/{att.library_item_id}"
-                r = await http.delete(url, headers={"Authorization": f"Bearer {token}"}, timeout=15)
-                if r.status_code not in (200, 204):
-                    logger.warning(
-                        "company-library delete returned {} for item={}",
-                        r.status_code,
-                        att.library_item_id,
-                    )
-                    warning = "DB record deleted but cloud file may need manual cleanup"
+                if not await _graph_delete(url, token, att.library_item_id, "company-library"):
+                    warning = _CLOUD_DELETE_WARNING
             else:
                 logger.warning("no app token — skipping cloud delete for item={}", att.library_item_id)
-                warning = "DB record deleted but cloud file may need manual cleanup"
+                warning = _CLOUD_DELETE_WARNING
         except Exception:
             logger.warning("cloud delete errored item={}", att.library_item_id, exc_info=True)
-            warning = "DB record deleted but cloud file may need manual cleanup"
+            warning = _CLOUD_DELETE_WARNING
 
     elif att.library_item_id:
         # OneDrive fallback — user token DELETE
@@ -413,23 +442,15 @@ async def remove_attachment(db: Session, att, user) -> dict:
 
             token = await get_valid_token(user, db)
             if token:
-                from ..http_client import http
-
                 url = f"{_GRAPH}/me/drive/items/{att.library_item_id}"
-                r = await http.delete(url, headers={"Authorization": f"Bearer {token}"}, timeout=15)
-                if r.status_code not in (200, 204):
-                    logger.warning(
-                        "OneDrive delete returned {} for item={}",
-                        r.status_code,
-                        att.library_item_id,
-                    )
-                    warning = "DB record deleted but cloud file may need manual cleanup"
+                if not await _graph_delete(url, token, att.library_item_id, "OneDrive"):
+                    warning = _CLOUD_DELETE_WARNING
             else:
                 logger.warning("no user token — skipping OneDrive delete item={}", att.library_item_id)
-                warning = "DB record deleted but cloud file may need manual cleanup"
+                warning = _CLOUD_DELETE_WARNING
         except Exception:
             logger.warning("OneDrive delete errored item={}", att.library_item_id, exc_info=True)
-            warning = "DB record deleted but cloud file may need manual cleanup"
+            warning = _CLOUD_DELETE_WARNING
 
     db.delete(att)
     db.commit()

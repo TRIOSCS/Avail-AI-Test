@@ -16,7 +16,8 @@ Routes (both PUBLIC):
 Called by: app.main (router registration); the "Confirm wire sent" link that
            notify_prepayment_approved embeds in the approval email + Teams card.
 Depends on: app.database (get_db), app.models.quality_plan (Prepayment),
-            app.services.prepayment_service (mark_prepayment_paid), app.constants
+            app.services.prepayment_service (mark_prepayment_paid),
+            app.services.prepayment_notifications (beneficiary_name), app.constants
             (PrepaymentStatus), app.rate_limit (limiter), app.template_env
             (template_response).
 """
@@ -31,23 +32,13 @@ from ..constants import PrepaymentStatus
 from ..database import get_db
 from ..models.quality_plan import Prepayment
 from ..rate_limit import limiter
+from ..services.prepayment_notifications import beneficiary_name
 from ..services.prepayment_service import mark_prepayment_paid
 from ..template_env import template_response
 
 router = APIRouter(tags=["prepayment-confirm"])
 
 _TEMPLATE = "htmx/partials/prepayments/confirm_page.html"
-
-
-def _beneficiary(prepayment: Prepayment) -> str:
-    """Human payee name — the notifications module's legal-name helper if importable,
-    else the snapshot vendor_name."""
-    try:
-        from ..services.prepayment_notifications import _beneficiary as _bn
-
-        return _bn(prepayment)
-    except Exception:
-        return prepayment.vendor_name or "—"
 
 
 def _amount_display(prepayment: Prepayment) -> str:
@@ -84,7 +75,7 @@ def _render(request: Request, prepayment: Prepayment | None, mode: str, *, statu
         "request": request,
         "pp": prepayment,
         "mode": mode,
-        "beneficiary": _beneficiary(prepayment) if prepayment is not None else None,
+        "beneficiary": beneficiary_name(prepayment) if prepayment is not None else None,
         "amount_display": _amount_display(prepayment) if prepayment is not None else None,
         "po_number": _po_number(prepayment) if prepayment is not None else None,
         "so_number": _so_number(prepayment) if prepayment is not None else None,

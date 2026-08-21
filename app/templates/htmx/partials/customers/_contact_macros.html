@@ -59,6 +59,25 @@
 {% endmacro %}
 
 
+{# Text-style outreach anchor (tel:/Outlook-compose deeplinks in the contact rows
+   and drawer). Carries the full data-outreach-log attribute contract read by the
+   htmx_app.js outreach logger — one source instead of seven hand-rolled copies. #}
+{% macro outreach_link(href, channel, value, company_id, site_id, contact_id, contact_name, text, cls, new_tab=False, title=none) %}
+<a href="{{ href }}"
+   {% if new_tab %}target="_blank" rel="noopener noreferrer"{% endif %}
+   class="{{ cls }}"
+   data-outreach-log
+   data-channel="{{ channel }}"
+   data-value="{{ value }}"
+   data-company-id="{{ company_id }}"
+   data-site-id="{{ site_id or '' }}"
+   data-contact-id="{{ contact_id or '' }}"
+   data-contact-name="{{ contact_name or '' }}"
+   {% if title %}title="{{ title }}"{% endif %}
+   @click.stop="">{{ text }}</a>
+{% endmacro %}
+
+
 {% macro site_cadence_dot(site, now_utc) %}
 {# Per-site cadence dot for the Contacts section header. A macro (not template body)
    so cadence_state resolves to the Jinja GLOBAL callable — the detail.html ctx
@@ -135,35 +154,19 @@
     <td class='text-gray-600'>{{ _ltitle }}</td>
     <td>
       {% if _lphone %}
-      <a href='tel:{{ _lphone }}'
-         class='text-brand-600 hover:underline font-mono text-xs'
-         data-outreach-log
-         data-channel='phone'
-         data-value='{{ _lphone }}'
-         data-company-id='{{ company.id }}'
-         data-site-id='{{ site.id or "" }}'
-         data-contact-id=''
-         data-contact-name='{{ _lname }}'
-         title='Call {{ _lname }}'
-         @click.stop=''>{{ _lphone }}</a>
+      {{ outreach_link('tel:' ~ _lphone, 'phone', _lphone, company.id, site.id, none, _lname,
+                       _lphone, 'text-brand-600 hover:underline font-mono text-xs',
+                       title='Call ' ~ _lname) }}
       {% else %}
       <span class='text-gray-300'>—</span>
       {% endif %}
     </td>
     <td>
       {% if _lemail %}
-      <a href='https://outlook.office.com/mail/deeplink/compose?to={{ _lemail|urlencode }}'
-         target='_blank' rel='noopener noreferrer'
-         class='text-brand-600 hover:underline text-xs truncate block max-w-[14rem]'
-         data-outreach-log
-         data-channel='email'
-         data-value='{{ _lemail }}'
-         data-company-id='{{ company.id }}'
-         data-site-id='{{ site.id or "" }}'
-         data-contact-id=''
-         data-contact-name='{{ _lname }}'
-         title='Email {{ _lname }}'
-         @click.stop=''>{{ _lemail }}</a>
+      {{ outreach_link('https://outlook.office.com/mail/deeplink/compose?to=' ~ _lemail|urlencode,
+                       'email', _lemail, company.id, site.id, none, _lname,
+                       _lemail, 'text-brand-600 hover:underline text-xs truncate block max-w-[14rem]',
+                       new_tab=True, title='Email ' ~ _lname) }}
       {% else %}
       <span class='text-gray-300'>—</span>
       {% endif %}
@@ -250,17 +253,10 @@
     {# Phone cell — tel: link + outreach log #}
     <td>
       {% if contact.phone and not contact.do_not_contact %}
-      <a href="tel:{{ contact.phone }}"
-         class="text-brand-600 hover:underline font-mono text-xs whitespace-nowrap"
-         data-outreach-log
-         data-channel="phone"
-         data-value="{{ contact.phone }}"
-         data-company-id="{{ company.id }}"
-         data-site-id="{{ contact.customer_site_id or '' }}"
-         data-contact-id="{{ contact.id }}"
-         data-contact-name="{{ _cname }}"
-         title="Call {{ _cname }}"
-         @click.stop="">{{ contact.phone }}</a>
+      {{ outreach_link('tel:' ~ contact.phone, 'phone', contact.phone, company.id,
+                       contact.customer_site_id, contact.id, _cname,
+                       contact.phone, 'text-brand-600 hover:underline font-mono text-xs whitespace-nowrap',
+                       title='Call ' ~ _cname) }}
       {% elif contact.phone %}
       <span class="text-gray-400 font-mono text-xs line-through" title="DNC">{{ contact.phone }}</span>
       {% else %}
@@ -270,18 +266,11 @@
     {# Email cell — Outlook compose deeplink + outreach log #}
     <td>
       {% if contact.email and not contact.do_not_contact %}
-      <a href="https://outlook.office.com/mail/deeplink/compose?to={{ contact.email|urlencode }}"
-         target="_blank" rel="noopener noreferrer"
-         class="text-brand-600 hover:underline text-xs truncate block max-w-[14rem]"
-         data-outreach-log
-         data-channel="email"
-         data-value="{{ contact.email }}"
-         data-company-id="{{ company.id }}"
-         data-site-id="{{ contact.customer_site_id or '' }}"
-         data-contact-id="{{ contact.id }}"
-         data-contact-name="{{ _cname }}"
-         title="Email {{ _cname }}"
-         @click.stop="">{{ contact.email }}</a>
+      {{ outreach_link('https://outlook.office.com/mail/deeplink/compose?to=' ~ contact.email|urlencode,
+                       'email', contact.email, company.id,
+                       contact.customer_site_id, contact.id, _cname,
+                       contact.email, 'text-brand-600 hover:underline text-xs truncate block max-w-[14rem]',
+                       new_tab=True, title='Email ' ~ _cname) }}
       {% elif contact.email %}
       <span class="text-gray-400 text-xs truncate block max-w-[14rem] line-through" title="DNC">{{ contact.email }}</span>
       {% else %}
@@ -464,35 +453,21 @@
         {% if contact.phone and not contact.do_not_contact %}
         <div class='flex items-center gap-1'>
           <span class='text-gray-400 font-medium'>Phone</span>
-          <a href='tel:{{ contact.phone }}'
-             class='text-brand-600 hover:underline font-mono'
-             data-outreach-log
-             data-channel='phone'
-             data-value='{{ contact.phone }}'
-             data-company-id='{{ company.id }}'
-             data-site-id='{{ contact.customer_site_id or "" }}'
-             data-contact-id='{{ contact.id }}'
-             data-contact-name='{{ _cname }}'
-             title='Call {{ _cname }}'
-             @click.stop=''>{{ contact.phone }}</a>
+          {{ outreach_link('tel:' ~ contact.phone, 'phone', contact.phone, company.id,
+                           contact.customer_site_id, contact.id, _cname,
+                           contact.phone, 'text-brand-600 hover:underline font-mono',
+                           title='Call ' ~ _cname) }}
         </div>
         {% endif %}
         {# Email — click-to-compose (Outlook deeplink); suppressed when DNC #}
         {% if contact.email and not contact.do_not_contact %}
         <div class='flex items-center gap-1 min-w-0'>
           <span class='text-gray-400 font-medium flex-shrink-0'>Email</span>
-          <a href='https://outlook.office.com/mail/deeplink/compose?to={{ contact.email|urlencode }}'
-             target='_blank' rel='noopener noreferrer'
-             class='text-brand-600 hover:underline truncate max-w-[16rem]'
-             data-outreach-log
-             data-channel='email'
-             data-value='{{ contact.email }}'
-             data-company-id='{{ company.id }}'
-             data-site-id='{{ contact.customer_site_id or "" }}'
-             data-contact-id='{{ contact.id }}'
-             data-contact-name='{{ _cname }}'
-             title='Email {{ _cname }}'
-             @click.stop=''>{{ contact.email }}</a>
+          {{ outreach_link('https://outlook.office.com/mail/deeplink/compose?to=' ~ contact.email|urlencode,
+                           'email', contact.email, company.id,
+                           contact.customer_site_id, contact.id, _cname,
+                           contact.email, 'text-brand-600 hover:underline truncate max-w-[16rem]',
+                           new_tab=True, title='Email ' ~ _cname) }}
         </div>
         {% endif %}
         {# Teams deeplink — always shown when email is set #}
@@ -531,16 +506,9 @@
         {% if contact.secondary_phone %}
         <div class='flex items-center gap-1'>
           <span class='text-gray-400 font-medium'>2nd Phone</span>
-          <a href='tel:{{ contact.secondary_phone }}'
-             class='text-brand-600 hover:underline font-mono'
-             data-outreach-log
-             data-channel='phone'
-             data-value='{{ contact.secondary_phone }}'
-             data-company-id='{{ company.id }}'
-             data-site-id='{{ contact.customer_site_id or "" }}'
-             data-contact-id='{{ contact.id }}'
-             data-contact-name='{{ _cname }}'
-             @click.stop=''>{{ contact.secondary_phone }}</a>
+          {{ outreach_link('tel:' ~ contact.secondary_phone, 'phone', contact.secondary_phone,
+                           company.id, contact.customer_site_id, contact.id, _cname,
+                           contact.secondary_phone, 'text-brand-600 hover:underline font-mono') }}
         </div>
         {% endif %}
         {# LinkedIn — safe_url filter blocks javascript:/vbscript:/data: hrefs #}

@@ -17,7 +17,7 @@ by the global htmx:responseError handler). Successful toggles fire a showToast t
 
 Called by: app/routers/admin/__init__.py (included via router)
 Depends on: models.buy_plan.VerificationGroupMember, dependencies.require_admin,
-            template_env.template_response, htmx_views.settings_toast
+            template_env.template_response, htmx._shared.set_toast
 """
 
 from datetime import UTC, datetime
@@ -31,7 +31,7 @@ from ...database import get_db
 from ...dependencies import require_admin
 from ...models import User
 from ...models.buy_plan import VerificationGroupMember
-from ...routers.htmx.settings import settings_toast
+from ...routers.htmx._shared import set_toast
 from ...template_env import template_response
 
 router = APIRouter(tags=["admin"])
@@ -66,7 +66,7 @@ async def toggle_ops_member(
     completion (which needs >=1 active verifier): the last active member cannot be
     deactivated, and an admin cannot deactivate themselves. Guard violations return a
     400 JSON error (auto-toasted by the global htmx:responseError handler); the success
-    path attaches a showToast HX-Trigger via settings_toast.
+    path attaches a showToast HX-Trigger via set_toast.
     """
     target = db.get(User, user_id)
     if not target:
@@ -112,7 +112,7 @@ async def toggle_ops_member(
     response = template_response("htmx/partials/settings/ops_group.html", ctx)
     target_name = target.name or target.email
     if action == "deactivated":
-        settings_toast(response, f"Removed {target_name}.")
+        set_toast(response, f"Removed {target_name}.")
     else:
-        settings_toast(response, f"Added {target_name} to the verification group.")
+        set_toast(response, f"Added {target_name} to the verification group.")
     return response

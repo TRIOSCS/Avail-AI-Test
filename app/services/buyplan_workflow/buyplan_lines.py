@@ -10,7 +10,8 @@ the Sales Order number editor (epic J).
 Called by: routers/htmx/buy_plans.py, services/buyplan_hub.py
 Depends on: buyplan_scoring (assign_buyer, score_offer), buyplan_approval
     (_recalculate_financials, _cancel_open_prepayment_requests_for_plan, _can_halt,
-    check_completion), po_cancellation_service, constants.OfferStatus
+    _is_manager_or_admin, check_completion), buyplan_po (_reset_po_stage_fields),
+    po_cancellation_service, constants.OfferStatus
 """
 
 from datetime import UTC, datetime
@@ -20,7 +21,7 @@ from loguru import logger
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session, joinedload
 
-from ...constants import PG_INT4_MAX, OfferStatus, UserRole
+from ...constants import PG_INT4_MAX, OfferStatus
 from ...models import Offer, Requirement, User
 from ...models.buy_plan import BuyPlan, BuyPlanLine, BuyPlanLineStatus, BuyPlanStatus
 from ..buyplan_scoring import assign_buyer, score_offer
@@ -28,9 +29,11 @@ from ..field_audit import FieldEdit, diff_fields, log_field_edits
 from .buyplan_approval import (
     _can_halt,
     _cancel_open_prepayment_requests_for_plan,
+    _is_manager_or_admin,
     _recalculate_financials,
     check_completion,
 )
+from .buyplan_po import _reset_po_stage_fields
 from .money import pct, to_money
 
 # ── Workflow: Re-source (PO cancelled → open claim pool) ─────────────
@@ -155,15 +158,12 @@ def resource_line(
         line.unit_cost = None
         line.margin_pct = None
         line.ai_score = None
-        line.po_number = None
-        line.estimated_ship_date = None
-        line.po_confirmed_at = None
+        _reset_po_stage_fields(line)
         line.po_verified_by_id = None
         line.po_verified_at = None
         line.po_rejection_note = None
         line.issue_type = None
         line.issue_note = None
-        line.last_nudge_at = None
         line.status = BuyPlanLineStatus.RESOURCING.value
 
     # A re-sourced line means its PO/vendor changed underneath, so that line's pending
@@ -316,10 +316,7 @@ def resolve_line_issue(plan_id: int, line_id: int, user: User, db: Session) -> B
     line.status = BuyPlanLineStatus.AWAITING_PO.value
     line.issue_type = None
     line.issue_note = None
-    line.po_number = None
-    line.estimated_ship_date = None
-    line.po_confirmed_at = None
-    line.last_nudge_at = None
+    _reset_po_stage_fields(line)
     logger.info("Issue resolved on line {} (plan {}) by {}", line_id, plan_id, user.email)
 
     db.flush()
@@ -341,12 +338,6 @@ _MANAGER_ONLY_EDIT_STATUSES = frozenset(
     {BuyPlanStatus.ACTIVE.value, BuyPlanStatus.INBOUND.value, BuyPlanStatus.HALTED.value}
 )
 _LOCKED_EDIT_STATUSES = frozenset({BuyPlanStatus.COMPLETED.value, BuyPlanStatus.CANCELLED.value})
-
-
-def _is_manager_or_admin(user: User) -> bool:
-    """True for MANAGER/ADMIN (mirrors dependencies.is_manager_or_admin; inlined to
-    avoid a service→dependencies import cycle)."""
-    return user.role in (UserRole.MANAGER, UserRole.ADMIN)
 
 
 def _owns_plan(user: User, plan: BuyPlan) -> bool:

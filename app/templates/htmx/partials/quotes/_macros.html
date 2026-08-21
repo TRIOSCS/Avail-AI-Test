@@ -2,16 +2,18 @@
 
    What it does: factors out markup that repeats verbatim across the quote
    detail/line partials so each call site stays a single source of truth.
-   What calls it: quotes/detail.html, quotes/line_row.html.
+   What calls it: quotes/detail.html, quotes/line_row.html, parts/tabs/quotes.html,
+   requisitions/tabs/quotes.html, customers/tabs/quotes_tab.html.
    What it depends on: Tailwind CSS brand palette + the global `spinner` /
    `data-loading` loading-state convention (htmx_app.js).
 
    Usage:
-     {% from "htmx/partials/quotes/_macros.html" import loading_spinner, margin_text_color, margin_badge %}
+     {% from "htmx/partials/quotes/_macros.html" import loading_spinner, margin_text_color, quote_margin_badge %}
      {{ loading_spinner("h-4 w-4 spinner") }}
      <p class="text-lg font-semibold {{ margin_text_color(margin) }}">...</p>
-     {{ margin_badge(mp) }}
+     {{ quote_margin_badge(mp) }}
 #}
+{% from "htmx/partials/shared/_macros.html" import badge %}
 
 
 {# ── Loading Spinner ──────────────────────────────────────────────────
@@ -29,4 +31,14 @@
    >=30% emerald, >=15% amber, else rose. #}
 {% macro margin_text_color(pct) -%}
 {%- if pct >= 30 -%}text-emerald-700{%- elif pct >= 15 -%}text-amber-700{%- else -%}text-rose-700{%- endif -%}
+{%- endmacro %}
+
+
+{# ── Margin % → tiered badge ──────────────────────────────────────────
+   The SAME >=30 success / >=15 warning / else danger tiers as
+   margin_text_color, rendered as the shared badge pill. Used by the
+   parts / requisitions / customers quote tables — change the tiers here
+   (and in margin_text_color) only. #}
+{% macro quote_margin_badge(pct) -%}
+{{ badge("%.1f%%"|format(pct), tone='success' if pct >= 30 else 'warning' if pct >= 15 else 'danger') }}
 {%- endmacro %}

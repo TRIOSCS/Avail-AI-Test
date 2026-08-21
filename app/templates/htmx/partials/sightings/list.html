@@ -80,27 +80,9 @@
 <div class="flex flex-col h-[calc(100vh-90px)]">
 <div class="flex-1 min-h-0 flex flex-col lg:flex-row"
      x-data="{
-       splitRatio: parseFloat(localStorage.getItem('sightings-split') || '0.50'),
-       dragging: false,
+       ...window.ratioSplitMixin('sightings-split', 0.50, 0.25, 0.75),
        selectedReqId: null,
        mobileDetailOpen: false,
-       startDrag(e) {
-         this.dragging = true;
-         e.preventDefault();
-       },
-       onDrag(e) {
-         if (!this.dragging) return;
-         const container = this.$refs.container;
-         const rect = container.getBoundingClientRect();
-         const ratio = (e.clientX - rect.left) / rect.width;
-         this.splitRatio = Math.max(0.25, Math.min(0.75, ratio));
-       },
-       stopDrag() {
-         if (this.dragging) {
-           this.dragging = false;
-           localStorage.setItem('sightings-split', this.splitRatio.toFixed(3));
-         }
-       },
        selectReq(id) {
          const store = Alpine.store('sightingSelection');
          this.selectedReqId = id;

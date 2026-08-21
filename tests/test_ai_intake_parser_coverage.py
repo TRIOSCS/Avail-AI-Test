@@ -18,9 +18,9 @@ from app.services.ai_intake_parser import _coerce_mode, _heuristic_parse, parse_
 
 
 async def test_llm_exception_triggers_heuristic_fallback():
-    # routed_structured raises → heuristic parser handles TSV text
+    # claude_structured raises → heuristic parser handles TSV text
     tsv_text = "LM317T\t1000\t0.45\tTexasInstruments"
-    with patch("app.services.ai_intake_parser.routed_structured", side_effect=RuntimeError("timeout")):
+    with patch("app.services.ai_intake_parser.claude_structured", side_effect=RuntimeError("timeout")):
         result = await parse_freeform_intake(tsv_text)
 
     assert result is not None
@@ -30,8 +30,8 @@ async def test_llm_exception_triggers_heuristic_fallback():
 
 
 async def test_llm_exception_with_unparseable_text_returns_none():
-    # routed_structured raises and heuristic also finds nothing → None
-    with patch("app.services.ai_intake_parser.routed_structured", side_effect=ValueError("bad")):
+    # claude_structured raises and heuristic also finds nothing → None
+    with patch("app.services.ai_intake_parser.claude_structured", side_effect=ValueError("bad")):
         result = await parse_freeform_intake("no parts here at all")
 
     assert result is None
@@ -69,7 +69,7 @@ async def test_offer_rows_without_real_mpn_are_skipped(offers):
         "requirements": [],
         "offers": offers,
     }
-    with patch("app.services.ai_intake_parser.routed_structured", AsyncMock(return_value=mock_result)):
+    with patch("app.services.ai_intake_parser.claude_structured", AsyncMock(return_value=mock_result)):
         result = await parse_freeform_intake("offer text")
 
     assert result is not None

@@ -11,6 +11,7 @@ Usage:
 
 import asyncio
 import os
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import cast
 
@@ -44,6 +45,52 @@ class GraphAPIError(Exception):
         self.status = status
         self.detail = detail
         super().__init__(f"Graph API error {status}: {detail}")
+
+
+def build_sendmail_payload(
+    subject: str,
+    body: str,
+    to: str | Sequence[str | dict],
+    *,
+    save_to_sent: str,
+    content_type: str = "HTML",
+    attachments: list[dict] | None = None,
+    extra_message_fields: dict | None = None,
+) -> dict:
+    """Build the Graph ``/me/sendMail`` request body.
+
+    One home for the ``{"message": {...}, "saveToSentItems": ...}`` envelope
+    that every send path used to hand-roll. Callers keep their own
+    ``gc.post_json("/me/sendMail", ...)`` call and error handling.
+
+    Args:
+        subject: Message subject, used verbatim.
+        body: Message body content (HTML or plain text per *content_type*).
+        to: One address string, or a sequence whose items are address strings
+            and/or pre-built ``emailAddress`` dicts
+            (e.g. ``{"address": ..., "name": ...}``).
+        save_to_sent: Exact value for ``saveToSentItems`` — callers pass the
+            string ``"true"`` or ``"false"`` (the values every existing site
+            sends; kept verbatim, never normalized to a bool).
+        content_type: Graph body ``contentType`` (``"HTML"`` or ``"Text"``).
+        attachments: Pre-built Graph attachment dicts
+            (``#microsoft.graph.fileAttachment`` shape). The key is omitted
+            entirely when falsy — matching the pre-helper conditional-key
+            payloads.
+        extra_message_fields: Extra top-level message fields merged after
+            ``toRecipients`` (e.g. ``isReadReceiptRequested``).
+    """
+    recipients = [to] if isinstance(to, str) else list(to)
+    message: dict = {
+        "subject": subject,
+        "body": {"contentType": content_type, "content": body},
+        "toRecipients": [{"emailAddress": {"address": r} if isinstance(r, str) else r} for r in recipients],
+    }
+    if extra_message_fields:
+        message.update(extra_message_fields)
+    if attachments:
+        message["attachments"] = attachments
+    return {"message": message, "saveToSentItems": save_to_sent}
 
 
 # H1: Immutable IDs — prevents ID changes when messages are moved between folders

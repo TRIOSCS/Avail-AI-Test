@@ -8,7 +8,7 @@
   Called by: crm.views.crm_scorecard (GET /v2/partials/crm/scorecard).
   Depends on: HTMX, Tailwind, the user_avatar macro, _scorecard_table.html fragment.
 #}
-{% from "htmx/partials/shared/_macros.html" import user_avatar %}
+{% from "htmx/partials/shared/_macros.html" import user_avatar, spinner %}
 
 <div class="space-y-5" id="scorecard-root">
 
@@ -35,10 +35,7 @@
         <option value="{{ key }}" {% if key == time_range %}selected{% endif %}>{{ time_range_labels[key] }}</option>
         {% endfor %}
       </select>
-      <svg id="scorecard-spinner" class="htmx-indicator h-4 w-4 text-accent-400 animate-spin" viewBox="0 0 24 24" fill="none">
-        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-      </svg>
+      {{ spinner('htmx-indicator h-4 w-4 text-accent-400 animate-spin', attrs='id="scorecard-spinner"') }}
     </label>
   </div>
 

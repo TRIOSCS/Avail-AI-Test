@@ -1,0 +1,56 @@
+{#
+  resell/_line_fields.html — Shared excess-line form fields (part number /
+  manufacturer / quantity / condition / date code / asking price).
+  Included by: resell/add_line_modal.html (no `line` in context → placeholders),
+               resell/edit_line_modal.html (`line` = ExcessLineItem → prefilled).
+  New line fields go here ONCE and appear in both modals.
+#}
+    <div>
+      <label class="form-label">Part number <span class="text-rose-500">*</span></label>
+      {% if line %}
+      <input type="text" name="part_number" required class="input" value="{{ line.part_number }}">
+      {% else %}
+      <input type="text" name="part_number" required class="input" placeholder="e.g. LM358N">
+      {% endif %}
+    </div>
+    <div class="grid grid-cols-2 gap-3">
+      <div>
+        <label class="form-label">Manufacturer</label>
+        {% if line %}
+        <input type="text" name="manufacturer" class="input" value="{{ line.manufacturer or '' }}">
+        {% else %}
+        <input type="text" name="manufacturer" class="input" placeholder="e.g. Texas Instruments">
+        {% endif %}
+      </div>
+      <div>
+        <label class="form-label">Quantity <span class="text-rose-500">*</span></label>
+        <input type="number" name="quantity" required min="1" value="{{ line.quantity if line else 1 }}" class="input">
+      </div>
+    </div>
+    <div class="grid grid-cols-3 gap-3">
+      <div>
+        <label class="form-label">Condition</label>
+        <select name="condition" class="input">
+          {% for opt in ['New', 'Used', 'Refurbished'] %}
+          <option value="{{ opt }}" {{ 'selected' if ((line.condition if line else none) or 'New') == opt }}>{{ opt }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="form-label">Date code</label>
+        {% if line %}
+        <input type="text" name="date_code" class="input" value="{{ line.date_code or '' }}">
+        {% else %}
+        <input type="text" name="date_code" class="input" placeholder="e.g. 2024+">
+        {% endif %}
+      </div>
+      <div>
+        <label class="form-label">Asking price</label>
+        {% if line %}
+        <input type="number" name="asking_price" step="0.01" min="0" class="input"
+               value="{{ '%.2f'|format(line.asking_price|float) if line.asking_price is not none else '' }}">
+        {% else %}
+        <input type="number" name="asking_price" step="0.01" min="0" class="input" placeholder="0.00">
+        {% endif %}
+      </div>
+    </div>

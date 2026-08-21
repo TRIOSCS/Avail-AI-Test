@@ -6,7 +6,7 @@ for foreground request auth. Extracted from scheduler.py for cleaner imports.
 Called by: dependencies.py, routers (admin, enrichment, proactive, sources),
           services (buyplan, buyplan_notifications, deep_enrichment,
           ownership, teams, webhook)
-Depends on: config.py, http_client.py
+Depends on: config.py, http_client.py, utils/timezones.py (as_utc)
 """
 
 from datetime import UTC, datetime, timedelta
@@ -14,13 +14,7 @@ from datetime import UTC, datetime, timedelta
 from loguru import logger
 
 from ..http_client import http
-
-
-def _utc(dt):
-    """Make a naive datetime UTC-aware (no-op if already aware)."""
-    if dt is None:
-        return None
-    return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt
+from .timezones import as_utc
 
 
 async def get_valid_token(user, db) -> str | None:
@@ -31,7 +25,7 @@ async def get_valid_token(user, db) -> str | None:
     """
     # Check if current token is still valid (with 5-min buffer)
     if user.access_token and user.token_expires_at:
-        if datetime.now(UTC) < _utc(user.token_expires_at) - timedelta(minutes=5):
+        if datetime.now(UTC) < as_utc(user.token_expires_at) - timedelta(minutes=5):
             current_token: str = user.access_token  # EncryptedText column decrypts to str
             return current_token
 

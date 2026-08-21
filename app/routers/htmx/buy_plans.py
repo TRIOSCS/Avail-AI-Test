@@ -1185,9 +1185,6 @@ async def buy_plan_cancel_partial(
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
 
-    if form.get("origin") == "approvals_workspace":
-        return _workspace_pane_response(request, user, db, plan_id, form)
-
     return _workspace_pane_response(request, user, db, plan_id, form)
 
 
@@ -1218,9 +1215,6 @@ async def buy_plan_resume_partial(
         raise HTTPException(400, str(e)) from e
 
     form = await request.form()
-    if form.get("origin") == "approvals_workspace":
-        return _workspace_pane_response(request, user, db, plan_id, form)
-
     return _workspace_pane_response(request, user, db, plan_id, form)
 
 
@@ -1411,7 +1405,4 @@ async def buy_plan_reset_partial(
         raise HTTPException(400, str(e)) from e
 
     form = await request.form()
-    if form.get("origin") == "approvals_workspace":
-        return _workspace_pane_response(request, user, db, plan_id, form)
-
     return _workspace_pane_response(request, user, db, plan_id, form)

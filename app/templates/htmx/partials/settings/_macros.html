@@ -1,5 +1,5 @@
 {# _macros.html — shared markup for the Settings cluster templates.
-   Called by: index.html, data_ops.html (settings/* partials).
+   Called by: index.html, data_ops.html, profile.html (settings/* partials).
    Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 
    These macros collapse copy-paste-with-variation that previously lived inline.
@@ -17,8 +17,8 @@
    constant — its default is '' and the sole call site (settings/index.html) passes a
    hardcoded literal HTMX-attribute string. It NEVER carries user/DB data, so the |safe
    cannot inject attacker-controlled markup. If a future caller needs dynamic attributes,
-   switch to a dict + `{% for k, v in attrs.items() %}{{ k }}="{{ v }}"` loop (as _btn in
-   shared/_macros.html does) so values are auto-escaped — do not pass dynamic data here. #}
+   switch to a dict + `{% for k, v in attrs.items() %}{{ k }}="{{ v }}"` loop so values
+   are auto-escaped — do not pass dynamic data here. #}
 {% macro tab_button(tab, url, label, icon_paths, extra_attrs='', target='#settings-content') -%}
 <button @click="tab = '{{ tab }}'"
             :class="tab === '{{ tab }}'
@@ -34,6 +34,28 @@
         {{ label }}
       </span>
     </button>
+{%- endmacro %}
+
+{# On/off toggle switch (sr-only checkbox + peer-checked track). The checkbox
+   x-models the CALLER's `enabled` Alpine boolean (define it in the surrounding
+   x-data) and POSTs its new state to `post_url` with hx-swap="none" — the
+   endpoint answers empty 200 + HX-Trigger:showToast. As with merge_button below,
+   the opening <label> takes its indentation from the call site and `pad` is that
+   same leading whitespace, used to re-indent the inner lines so call sites
+   render byte-for-byte identical to the inline markup this replaced. #}
+{% macro toggle_switch(pad, post_url) -%}
+<label class="relative inline-flex items-center cursor-pointer ml-4">
+{{ pad }}  <input type="checkbox" x-model="enabled"
+{{ pad }}         class="sr-only peer"
+{{ pad }}         hx-post="{{ post_url }}"
+{{ pad }}         hx-swap="none"
+{{ pad }}         data-loading-disable>
+{{ pad }}  <div class="w-11 h-6 bg-gray-200 peer-focus:ring-2 peer-focus:ring-accent-300 rounded-full
+{{ pad }}              peer peer-checked:after:translate-x-full peer-checked:after:border-white
+{{ pad }}              after:content-[''] after:absolute after:top-[2px] after:left-[2px]
+{{ pad }}              after:bg-white after:border-gray-300 after:border after:rounded-full
+{{ pad }}              after:h-5 after:w-5 after:transition-all peer-checked:bg-accent-500"></div>
+{{ pad }}</label>
 {%- endmacro %}
 
 {# One "Keep <name>" dedup merge button. The vendor and company dedup rows render an

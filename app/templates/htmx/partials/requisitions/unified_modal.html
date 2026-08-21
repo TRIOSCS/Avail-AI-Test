@@ -3,6 +3,7 @@
    Called by: "+ Req" button in parts workspace filter bar.
    Depends on: Alpine.js (unifiedReqModal, customerPicker), HTMX, brand palette.
 #}
+{% from "htmx/partials/shared/_macros.html" import spinner -%}
 {# Optional prefill (H1) — set when launched from a claimed prospect's "Create
    Requisition" button; empty defaults keep the plain create/import modal unchanged. #}
 {% set p_prospect_id = prefill_prospect_id|default('') %}
@@ -87,10 +88,7 @@
         <button type="button" :disabled="!newName.trim() || lookingUp"
                 @click="lookupCompany()"
                 class="btn-primary btn-sm">
-          <svg x-show="lookingUp" x-cloak class="h-3 w-3 animate-spin" fill="none" viewBox="0 0 24 24">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"></circle>
-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-          </svg>
+          {{ spinner('h-3 w-3 animate-spin', stroke_width=3, attrs='x-show="lookingUp" x-cloak') }}
           <span x-text="lookingUp ? 'Looking up...' : 'Look Up'"></span>
         </button>
       </div>
@@ -174,10 +172,7 @@
       <div class="mt-2 flex items-center gap-2">
         <button type="button" @click="parseWithAI()" :disabled="parsing"
                 class="btn-primary btn-sm">
-          <svg x-show="parsing" x-cloak class="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-          </svg>
+          {{ spinner('h-3.5 w-3.5 animate-spin', attrs='x-show="parsing" x-cloak') }}
           <span x-text="parsing ? 'Processing...' : 'Process with AI'"></span>
         </button>
         <span class="text-xs text-gray-400">AI extracts parts from any format and adds them to the table</span>

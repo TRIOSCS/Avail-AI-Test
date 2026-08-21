@@ -2,27 +2,20 @@
 
 Audit trail for every NC search attempt. Records timing, result counts,
 and HTML structure hashes to detect layout changes.
+Shared measurement columns come from SearchLogMixin (marketplace_search.py).
 
 Called by: nc_worker worker loop, sighting_writer
 Depends on: nc_search_queue table
 """
 
-from datetime import UTC, datetime
+from sqlalchemy import Column, ForeignKey, Integer
 
-from sqlalchemy import Column, ForeignKey, Integer, String, Text
-
-from ..database import UTCDateTime
 from .base import Base
+from .marketplace_search import SearchLogMixin
 
 
-class NcSearchLog(Base):
+class NcSearchLog(SearchLogMixin, Base):
     __tablename__ = "nc_search_log"
 
     id = Column(Integer, primary_key=True)
     queue_id = Column(Integer, ForeignKey("nc_search_queue.id", ondelete="CASCADE"), nullable=False, index=True)
-    searched_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
-    duration_ms = Column(Integer)
-    results_found = Column(Integer)
-    sightings_created = Column(Integer)
-    page_html_hash = Column(String(64))
-    error = Column(Text)

@@ -8,6 +8,8 @@ Contains common modules extracted from ics_worker and nc_worker:
 - human_behavior: browser interaction simulation
 - config: environment-based configuration factory
 - scheduler: search timing and break management
+- parsing: shared result-parser text helpers (parse_quantity)
+- sighting_writer: shared parsed-rows -> Sighting save skeleton
 """
 
 from .ai_gate import AIGate

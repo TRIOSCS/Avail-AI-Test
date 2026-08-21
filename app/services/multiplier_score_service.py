@@ -11,7 +11,7 @@ Bonus winners require minimum Avail Score thresholds:
   1st: $500 — Avail Score >=60, >=10 offers (buyer) or >=20 activities (sales)
   2nd: $250 — Avail Score >=50, same minimums
 
-Called by: scheduler.py (daily), routers/performance.py (on-demand)
+Called by: app/jobs/offers_jobs.py (nightly compute_all_multiplier_scores)
 Depends on: models (Offer, Quote, BuyPlan, Contact, StockListHash, etc.)
 """
 
@@ -21,10 +21,8 @@ from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
 
-from ..constants import BuyPlanStatus, UserRole
+from ..constants import UserRole
 from ..models import (
-    BuyPlan,
-    BuyPlanLine,
     Company,
     Contact,
     Offer,
@@ -34,18 +32,28 @@ from ..models import (
     User,
 )
 from ..models.performance import AvailScoreSnapshot, MultiplierScoreSnapshot
-from .scoring_helpers import month_range
+from .scoring_helpers import (
+    GRACE_DAYS,
+    # Buyer offer pipeline (non-stacking — highest tier only) + stock-list bonus:
+    # shared with buyer_leaderboard via scoring_helpers so the two leaderboards
+    # can never silently diverge on point values.
+    PTS_OFFER_BASE,
+    PTS_OFFER_BUYPLAN,
+    PTS_OFFER_PO,
+    PTS_OFFER_QUOTED,
+    PTS_STOCK_LIST,
+    month_range,
+)
+from .scoring_helpers import (
+    load_buyplan_offer_ids as _load_buyplan_offer_ids,
+)
+from .scoring_helpers import (
+    load_quoted_offer_ids as _load_quoted_offer_ids,
+)
 
 # ── Point values ─────────────────────────────────────────────────────
-# Buyer offer pipeline (non-stacking — highest tier only)
-PTS_OFFER_BASE = 1
-PTS_OFFER_QUOTED = 3
-PTS_OFFER_BUYPLAN = 5
-PTS_OFFER_PO = 8
-
 # Buyer bonus (additive, not from offers)
 PTS_RFQ_SENT = 0.25
-PTS_STOCK_LIST = 2
 
 # Sales scoring
 PTS_QUOTE_SENT = 2
@@ -63,39 +71,6 @@ QUALIFY_SCORE_2ND = 50
 QUALIFY_SCORE_3RD = 40
 MIN_OFFERS_BUYER = 10
 MIN_ACTIVITIES_SALES = 20
-
-
-# ══════════════════════════════════════════════════════════════════════
-#  HELPERS
-# ══════════════════════════════════════════════════════════════════════
-
-
-def _load_quoted_offer_ids(db: Session) -> set[int]:
-    """Return set of offer IDs that appear in any sent/won/lost quote line_items."""
-    ids = set()
-    for (items,) in db.query(Quote.line_items).filter(Quote.status.in_(["sent", "won", "lost"])).limit(10000).all():
-        for item in items or []:
-            oid = item.get("offer_id")
-            if oid:
-                ids.add(oid)
-    return ids
-
-
-def _load_buyplan_offer_ids(db: Session) -> tuple[set[int], set[int]]:
-    """Return (bp_offer_ids, po_confirmed_offer_ids) from buy plan lines."""
-    bp_ids = set()
-    po_ids = set()
-    for bp_status, offer_id in (
-        db.query(BuyPlan.status, BuyPlanLine.offer_id)
-        .join(BuyPlanLine, BuyPlanLine.buy_plan_id == BuyPlan.id)
-        .filter(BuyPlanLine.offer_id.isnot(None))
-        .limit(10000)
-        .all()
-    ):
-        bp_ids.add(offer_id)
-        if bp_status in (BuyPlanStatus.COMPLETED.value,):
-            po_ids.add(offer_id)
-    return bp_ids, po_ids
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -139,7 +114,7 @@ def compute_buyer_multiplier(
     )
 
     # Grace period: offers from last 7 days of previous month that advanced
-    grace_start = start_dt - timedelta(days=7)
+    grace_start = start_dt - timedelta(days=GRACE_DAYS)
     grace_offers = (
         db.query(Offer)
         .filter(
@@ -510,122 +485,3 @@ def _upsert_multiplier(db: Session, result: dict, month: date) -> int:
     snap.bonus_amount = result.get("bonus_amount", 0)
 
     return 1
-
-
-# ══════════════════════════════════════════════════════════════════════
-#  BONUS WINNER DETERMINATION
-# ══════════════════════════════════════════════════════════════════════
-
-
-def determine_bonus_winners(db: Session, role_type: str, month: date) -> list[dict]:
-    """Return bonus winners for a role+month from persisted multiplier scores.
-
-    Returns list of 0-2 winners. Winners must meet Avail Score thresholds.
-    """
-    month_start = month.replace(day=1)
-    rows = (
-        db.query(MultiplierScoreSnapshot, User.name)
-        .join(User, User.id == MultiplierScoreSnapshot.user_id)
-        .filter(
-            MultiplierScoreSnapshot.month == month_start,
-            MultiplierScoreSnapshot.role_type == role_type,
-            MultiplierScoreSnapshot.qualified.is_(True),
-        )
-        .order_by(MultiplierScoreSnapshot.total_points.desc())
-        .all()
-    )
-
-    # Ranked tiers: each slot requires the next-ranked row to clear its qualify
-    # threshold. A row that fails the current slot's threshold is skipped, not
-    # promoted, so the positional check must use len(winners) as the slot index.
-    tiers = [(QUALIFY_SCORE_1ST, BONUS_1ST), (QUALIFY_SCORE_2ND, BONUS_2ND)]
-
-    winners = []
-    for snap, user_name in rows:
-        if len(winners) >= len(tiers):
-            break
-
-        min_score, bonus_amount = tiers[len(winners)]
-        if snap.avail_score >= min_score:
-            winners.append(
-                {
-                    "user_id": snap.user_id,
-                    "user_name": user_name,
-                    "rank": len(winners) + 1,
-                    "total_points": snap.total_points,
-                    "avail_score": snap.avail_score,
-                    "bonus_amount": bonus_amount,
-                }
-            )
-
-    return winners
-
-
-# ══════════════════════════════════════════════════════════════════════
-#  API QUERIES
-# ══════════════════════════════════════════════════════════════════════
-
-
-def get_multiplier_scores(db: Session, role_type: str, month: date) -> list[dict]:
-    """Return ranked multiplier scores for a role type and month."""
-    month_start = month.replace(day=1)
-    rows = (
-        db.query(MultiplierScoreSnapshot, User.name)
-        .join(User, User.id == MultiplierScoreSnapshot.user_id)
-        .filter(
-            MultiplierScoreSnapshot.month == month_start,
-            MultiplierScoreSnapshot.role_type == role_type,
-        )
-        .order_by(MultiplierScoreSnapshot.rank)
-        .all()
-    )
-
-    results = []
-    for snap, user_name in rows:
-        entry = {
-            "user_id": snap.user_id,
-            "user_name": user_name,
-            "rank": snap.rank,
-            "total_points": snap.total_points,
-            "offer_points": snap.offer_points,
-            "bonus_points": snap.bonus_points,
-            "avail_score": snap.avail_score,
-            "qualified": snap.qualified,
-            "bonus_amount": snap.bonus_amount,
-            "updated_at": snap.updated_at.isoformat() if snap.updated_at else None,
-        }
-
-        # Include role-specific breakdown
-        if role_type == "buyer":
-            entry["breakdown"] = {
-                "offers_total": snap.offers_total,
-                "offers_base": snap.offers_base_count,
-                "offers_quoted": snap.offers_quoted_count,
-                "offers_bp": snap.offers_bp_count,
-                "offers_po": snap.offers_po_count,
-                "pts_base": snap.offers_base_pts,
-                "pts_quoted": snap.offers_quoted_pts,
-                "pts_bp": snap.offers_bp_pts,
-                "pts_po": snap.offers_po_pts,
-                "rfqs_sent": snap.rfqs_sent_count,
-                "pts_rfqs": snap.rfqs_sent_pts,
-                "stock_lists": snap.stock_lists_count,
-                "pts_stock": snap.stock_lists_pts,
-            }
-        else:
-            entry["breakdown"] = {
-                "quotes_sent": snap.quotes_sent_count,
-                "quotes_won": snap.quotes_won_count,
-                "pts_quote_sent": snap.quotes_sent_pts,
-                "pts_quote_won": snap.quotes_won_pts,
-                "proactive_sent": snap.proactive_sent_count,
-                "proactive_converted": snap.proactive_converted_count,
-                "pts_proactive_sent": snap.proactive_sent_pts,
-                "pts_proactive_converted": snap.proactive_converted_pts,
-                "new_accounts": snap.new_accounts_count,
-                "pts_accounts": snap.new_accounts_pts,
-            }
-
-        results.append(entry)
-
-    return results

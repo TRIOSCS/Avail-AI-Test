@@ -1,18 +1,40 @@
 """async_helpers.py — Safe async utilities for background task execution.
 
 Wraps asyncio tasks with error isolation so background work (notifications,
-enrichment, analytics) never crashes the request handler.
+enrichment, analytics) never crashes the request handler. Also owns
+run_coro_blocking — the ONE "run a coroutine from sync code, worker thread if a
+loop is already running" dispatcher shared by the sync services that call Claude.
 
 Called by: routers, services, jobs
 Depends on: loguru
 """
 
 import asyncio
+import concurrent.futures
 import os
 from collections.abc import Coroutine
 from typing import Any
 
 from loguru import logger
+
+
+def run_coro_blocking[T](coro: Coroutine[Any, Any, T], *, timeout: float | None = None) -> T:
+    """Run an async coroutine to completion from sync code, blocking for the result.
+
+    When a loop is already running (scheduler/async context), ``asyncio.run`` would
+    raise, so the coroutine is executed in a worker thread instead; *timeout* (seconds)
+    bounds the wait on that thread (``None`` waits indefinitely). With no running loop
+    the coroutine runs directly via ``asyncio.run``.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(asyncio.run, coro)
+        return future.result(timeout=timeout)
+
 
 # Strong references to in-flight fire-and-forget tasks. asyncio only keeps a
 # weak reference to scheduled tasks, so a discarded create_task() result can be

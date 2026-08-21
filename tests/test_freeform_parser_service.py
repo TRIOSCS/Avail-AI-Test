@@ -19,9 +19,9 @@ from app.services.freeform_parser_service import parse_freeform_offer, parse_fre
 
 
 def _patch_ai(return_value):
-    """Patch routed_structured at its source module with the given return value."""
+    """Patch claude_structured at its source module with the given return value."""
     return patch(
-        "app.services.freeform_parser_service.routed_structured",
+        "app.services.freeform_parser_service.claude_structured",
         new_callable=AsyncMock,
         return_value=return_value,
     )

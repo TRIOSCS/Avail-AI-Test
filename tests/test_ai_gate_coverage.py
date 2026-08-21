@@ -102,7 +102,7 @@ class TestClassifyPartsBatch:
         async def _mock_structured(*a, **kw):
             return mock_result
 
-        with patch("app.utils.llm_router.routed_structured", new=_mock_structured):
+        with patch("app.utils.claude_client.claude_structured", new=_mock_structured):
             result = await gate.classify_parts_batch([{"mpn": "LM317T", "manufacturer": "TI", "description": ""}])
 
         assert result is not None
@@ -122,7 +122,7 @@ class TestClassifyPartsBatch:
     async def test_bad_response_returns_none(self, structured_mock):
         gate = AIGate(MagicMock(), "ICsource", "search_ics")
 
-        with patch("app.utils.llm_router.routed_structured", new=structured_mock):
+        with patch("app.utils.claude_client.claude_structured", new=structured_mock):
             result = await gate.classify_parts_batch([{"mpn": "LM317T", "manufacturer": "TI", "description": ""}])
 
         assert result is None

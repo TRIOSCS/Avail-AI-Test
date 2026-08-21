@@ -6,6 +6,7 @@ Depends on: app.database, app.models, app.services.proactive_matching, app.servi
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+from typing import cast
 
 import sqlalchemy.exc
 from apscheduler.triggers.cron import CronTrigger
@@ -14,6 +15,7 @@ from loguru import logger
 
 from ..constants import ActivityType, OfferStatus, ProactiveMatchStatus, ProactiveOfferStatus
 from ..scheduler import _traced_job
+from ..utils.timezones import as_utc
 
 
 def register_offers_jobs(scheduler, settings, db=None):
@@ -356,9 +358,7 @@ async def _job_warn_strategic_expiring():
         expiring = get_expiring_soon(db, days=7)
         for sv in expiring:
             now = datetime.now(UTC)
-            expires = sv.expires_at
-            if expires and expires.tzinfo is None:
-                expires = expires.replace(tzinfo=UTC)
+            expires = as_utc(cast("datetime", sv.expires_at))
             days_left = max(0, (expires - now).days)
             vendor_name = sv.vendor_card.display_name if sv.vendor_card else "Unknown"
 

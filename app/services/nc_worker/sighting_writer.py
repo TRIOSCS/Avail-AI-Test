@@ -1,24 +1,45 @@
 """NetComponents sighting writer.
 
-Converts parsed NcSighting objects into AVAIL Sighting records,
-matching the same patterns used by DigiKey/Mouser/OEMSecrets integrations.
-Now includes price break data and supplier product URLs.
+Converts parsed NcSighting objects into AVAIL Sighting records via the
+shared save skeleton in search_worker_base.sighting_writer; this module
+supplies only the NetComponents-specific Sighting field mapping (price
+breaks, supplier product URLs, authorization flag, raw_data).
 
 Called by: worker loop
-Depends on: result_parser.NcSighting, sighting model, vendor_utils
+Depends on: result_parser.NcSighting, search_worker_base.sighting_writer
 """
 
-from datetime import UTC, datetime
-
-from loguru import logger
 from sqlalchemy.orm import Session
 
-from app.models import Requirement, Sighting
-from app.services.vendor_unavailability import apply_to_fresh_sightings
-from app.vendor_utils import normalize_vendor_name
-
-from .mpn_normalizer import strip_packaging_suffixes
+from ..search_worker_base.sighting_writer import save_sightings
 from .result_parser import NcSighting
+
+
+def _sighting_fields(nc: NcSighting) -> dict:
+    """NetComponents-specific Sighting kwargs for one parsed row."""
+    # Extract best unit price from price breaks (lowest qty tier = unit price)
+    unit_price = nc.price_breaks[0].price if nc.price_breaks else None
+
+    # Build raw_data with all NC-specific fields
+    raw_data = {
+        "region": nc.region,
+        "country": nc.country,
+        "inventory_type": nc.inventory_type,
+        "uploaded_date": nc.uploaded_date,
+        "is_sponsor": nc.is_sponsor,
+        "description": nc.description,
+        "supplier_product_url": nc.supplier_product_url,
+    }
+    if nc.price_breaks:
+        raw_data["price_breaks"] = [{"price": pb.price, "min_qty": pb.min_qty} for pb in nc.price_breaks]
+
+    return {
+        "unit_price": unit_price,
+        "currency": nc.currency,
+        "is_authorized": nc.is_authorized,
+        "confidence": 0.6 if nc.inventory_type == "in_stock" else 0.3,
+        "raw_data": raw_data,
+    }
 
 
 def save_nc_sightings(
@@ -31,92 +52,11 @@ def save_nc_sightings(
     Deduplicates by vendor_name + mpn + quantity combo to avoid duplicate records.
     Returns count of sightings created.
     """
-    req = db.get(Requirement, queue_item.requirement_id)
-    if not req:
-        logger.error("NC sighting writer: requirement {} not found", queue_item.requirement_id)
-        return 0
-
-    material_card_id = req.material_card_id
-    now = datetime.now(UTC)
-
-    # Build dedup set from existing NC sightings for this requirement
-    existing = (
-        db.query(Sighting.vendor_name_normalized, Sighting.mpn_matched, Sighting.qty_available)
-        .filter(
-            Sighting.requirement_id == req.id,
-            Sighting.source_type == "netcomponents",
-        )
-        .all()
+    return save_sightings(
+        db,
+        queue_item,
+        nc_sightings,
+        source_type="netcomponents",
+        log_prefix="NC",
+        build_sighting_fields=_sighting_fields,
     )
-    existing_keys = {((v or "").lower(), (m or "").lower(), q) for v, m, q in existing}
-
-    created = 0
-    created_rows: list[Sighting] = []
-    for nc in nc_sightings:
-        if not nc.vendor_name:
-            continue
-
-        vendor_norm = normalize_vendor_name(nc.vendor_name)
-        mpn_norm = strip_packaging_suffixes(nc.part_number)
-
-        # Dedup check
-        dedup_key = (vendor_norm.lower(), mpn_norm.lower(), nc.quantity)
-        if dedup_key in existing_keys:
-            continue
-        existing_keys.add(dedup_key)
-
-        # Extract best unit price from price breaks (lowest qty tier = unit price)
-        unit_price = nc.price_breaks[0].price if nc.price_breaks else None
-
-        # Build raw_data with all NC-specific fields
-        raw_data = {
-            "region": nc.region,
-            "country": nc.country,
-            "inventory_type": nc.inventory_type,
-            "uploaded_date": nc.uploaded_date,
-            "is_sponsor": nc.is_sponsor,
-            "description": nc.description,
-            "supplier_product_url": nc.supplier_product_url,
-        }
-        if nc.price_breaks:
-            raw_data["price_breaks"] = [{"price": pb.price, "min_qty": pb.min_qty} for pb in nc.price_breaks]
-
-        sighting = Sighting(
-            requirement_id=req.id,
-            material_card_id=material_card_id,
-            vendor_name=nc.vendor_name,
-            vendor_name_normalized=vendor_norm,
-            mpn_matched=nc.part_number,
-            normalized_mpn=mpn_norm,
-            manufacturer=nc.manufacturer,
-            qty_available=nc.quantity,
-            unit_price=unit_price,
-            currency=nc.currency,
-            source_type="netcomponents",
-            source_searched_at=now,
-            is_authorized=nc.is_authorized,
-            confidence=0.6 if nc.inventory_type == "in_stock" else 0.3,
-            date_code=nc.date_code or None,
-            raw_data=raw_data,
-            created_at=now,
-        )
-        db.add(sighting)
-        created_rows.append(sighting)
-        created += 1
-
-    if created:
-        # Re-apply durable vendor+part unavailability knowledge before the
-        # commit — async NC results must not resurrect a dead vendor.
-        apply_to_fresh_sightings(db, req, created_rows)
-        db.commit()
-        # Rebuild vendor-level summaries
-        from app.services.sighting_aggregation import rebuild_vendor_summaries_from_sightings
-
-        rebuild_vendor_summaries_from_sightings(db, req.id, nc_sightings)
-    logger.info(
-        "NC sighting writer: created {} sightings for requirement {} (from {} parsed)",
-        created,
-        req.id,
-        len(nc_sightings),
-    )
-    return created

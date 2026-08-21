@@ -5,6 +5,7 @@
    Depends on: brand palette, HTMX, Alpine.js.
 #}
 {% from 'htmx/partials/offers/_field_macros.html' import qual_badge %}
+{% from "htmx/partials/shared/empty_state.html" import empty_state %}
 <div x-data="{ selectedOffers: [] }">
 
   {# ── Add Offer dropdown ────────────────────────────────── #}
@@ -257,17 +258,20 @@
     </form>
   </div>
   {% else %}
-  <div class="py-6 sm:py-8 text-center">
-    <svg class="mx-auto h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
-            d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-    </svg>
-    {% if qual %}
-    <p class="text-sm font-medium text-gray-600 mt-3">No offers match this filter.</p>
-    <p class="text-secondary mt-1">Try selecting a different filter above or clear the filter to see all offers.</p>
-    {% else %}
-    <p class="text-sm font-medium text-gray-600 mt-3">No offers received yet.</p>
-    <p class="text-secondary mt-1">Offers appear when vendors respond to RFQs, when leads are promoted, or from searching all supplier sources.</p>
+  {% if qual %}
+  {{ empty_state('M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z',
+                 'No offers match this filter.',
+                 'Try selecting a different filter above or clear the filter to see all offers.',
+                 wrapper_class='py-6 sm:py-8 text-center',
+                 message_class='text-sm font-medium text-gray-600 mt-3',
+                 description_class='text-secondary mt-1') }}
+  {% else %}
+  {% call empty_state('M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z',
+                      'No offers received yet.',
+                      'Offers appear when vendors respond to RFQs, when leads are promoted, or from searching all supplier sources.',
+                      wrapper_class='py-6 sm:py-8 text-center',
+                      message_class='text-sm font-medium text-gray-600 mt-3',
+                      description_class='text-secondary mt-1') %}
     {# Next step: the sourcing engine (Search All Sources) lives on the Parts tab. #}
     <button @click="activeTab = 'parts'"
             hx-get="/v2/partials/requisitions/{{ req.id }}/tab/parts"
@@ -275,7 +279,7 @@
             class="btn btn-primary btn-sm mt-3">
       Search all sources &rarr;
     </button>
-    {% endif %}
-  </div>
+  {% endcall %}
+  {% endif %}
   {% endif %}
 </div>

@@ -74,7 +74,7 @@ class TestSearchScheduler:
         fake_dt.weekday.return_value = 5
         fake_dt.hour = 12
         monkeypatch.delenv("FORCE_BUSINESS_HOURS", raising=False)
-        with patch("app.services.tbf_worker.scheduler.datetime") as mock_dt:
+        with patch("app.services.search_worker_base.scheduler.datetime") as mock_dt:
             mock_dt.now.return_value = fake_dt
             result = s.is_business_hours()
         assert result is False
@@ -88,7 +88,7 @@ class TestSearchScheduler:
         # Remove ONLY the override var (auto-restored) — never clear the whole env, which
         # would also wipe the TESTING / DATABASE_URL / REDIS_URL sandbox guards.
         monkeypatch.delenv("FORCE_BUSINESS_HOURS", raising=False)
-        with patch("app.services.tbf_worker.scheduler.datetime") as mock_dt:
+        with patch("app.services.search_worker_base.scheduler.datetime") as mock_dt:
             mock_dt.now.return_value = fake_dt
             result = s.is_business_hours()
         assert result is False
@@ -100,7 +100,7 @@ class TestSearchScheduler:
         fake_dt.weekday.return_value = 6
         fake_dt.hour = 18
         monkeypatch.delenv("FORCE_BUSINESS_HOURS", raising=False)
-        with patch("app.services.tbf_worker.scheduler.datetime") as mock_dt:
+        with patch("app.services.search_worker_base.scheduler.datetime") as mock_dt:
             mock_dt.now.return_value = fake_dt
             result = s.is_business_hours()
         assert result is True
@@ -114,7 +114,7 @@ class TestSearchScheduler:
         env = {k: v for k, v in os.environ.items() if k != "FORCE_BUSINESS_HOURS"}
         with (
             patch.dict(os.environ, env, clear=True),
-            patch("app.services.tbf_worker.scheduler.datetime") as mock_dt,
+            patch("app.services.search_worker_base.scheduler.datetime") as mock_dt,
         ):
             mock_dt.now.return_value = fake_dt
             result = s.is_business_hours()
@@ -129,7 +129,7 @@ class TestSearchScheduler:
         env = {k: v for k, v in os.environ.items() if k != "FORCE_BUSINESS_HOURS"}
         with (
             patch.dict(os.environ, env, clear=True),
-            patch("app.services.tbf_worker.scheduler.datetime") as mock_dt,
+            patch("app.services.search_worker_base.scheduler.datetime") as mock_dt,
         ):
             mock_dt.now.return_value = fake_dt
             result = s.is_business_hours()
@@ -145,7 +145,7 @@ class TestSearchScheduler:
             env = {k: v for k, v in os.environ.items() if k != "FORCE_BUSINESS_HOURS"}
             with (
                 patch.dict(os.environ, env, clear=True),
-                patch("app.services.tbf_worker.scheduler.datetime") as mock_dt,
+                patch("app.services.search_worker_base.scheduler.datetime") as mock_dt,
             ):
                 mock_dt.now.return_value = fake_dt
                 assert s.is_business_hours() is True

@@ -30,7 +30,7 @@ async def test_parse_freeform_intake_normalizes_rfq_requirements():
         "offers": [],
     }
 
-    with patch("app.services.ai_intake_parser.routed_structured", AsyncMock(return_value=mock_result)):
+    with patch("app.services.ai_intake_parser.claude_structured", AsyncMock(return_value=mock_result)):
         result = await parse_freeform_intake("Need LM317T qty 1,000 at $0.45")
 
     assert result is not None
@@ -63,7 +63,7 @@ async def test_parse_freeform_intake_normalizes_offer_rows():
         ],
     }
 
-    with patch("app.services.ai_intake_parser.routed_structured", AsyncMock(return_value=mock_result)):
+    with patch("app.services.ai_intake_parser.claude_structured", AsyncMock(return_value=mock_result)):
         result = await parse_freeform_intake("We can offer LM7805 qty 2,500 at $0.12")
 
     assert result is not None
@@ -81,7 +81,7 @@ async def test_parse_freeform_intake_normalizes_offer_rows():
 
 @pytest.mark.asyncio
 async def test_parse_freeform_intake_returns_none_on_empty_llm_result():
-    with patch("app.services.ai_intake_parser.routed_structured", AsyncMock(return_value=None)):
+    with patch("app.services.ai_intake_parser.claude_structured", AsyncMock(return_value=None)):
         result = await parse_freeform_intake("Need LM317T")
 
     assert result is None

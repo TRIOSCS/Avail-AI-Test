@@ -782,40 +782,51 @@ def _verify_encryption_canary() -> None:
         db.close()
 
 
+def _chunked_backfill(conn, table: str, src_col: str, dst_col: str, normalize) -> None:
+    """Chunked id-cursor backfill: SET dst_col = normalize(src_col) WHERE dst_col IS NULL.
+
+    Advances the cursor past every row examined, not just updated ones: rows whose
+    source value normalizes to '' (e.g. "LLC", "Inc.") never get an UPDATE, so
+    filtering only on "IS NULL" would re-select them forever and hang startup; the
+    id cursor skips them instead of looping on them. Identifiers are code literals,
+    never user input.
+    """
+    total = 0
+    last_id = 0
+    while True:
+        try:
+            rows = conn.execute(
+                sqltext(
+                    f"SELECT id, {src_col} FROM {table} "  # nosec B608 — identifiers are code literals
+                    f"WHERE {dst_col} IS NULL AND {src_col} IS NOT NULL "
+                    "AND id > :last_id ORDER BY id LIMIT :lim"
+                ),
+                {"last_id": last_id, "lim": _BACKFILL_BATCH_SIZE},
+            ).fetchall()
+            if not rows:
+                break
+            last_id = rows[-1][0]
+            batch = [{"nv": nv, "id": r[0]} for r in rows if (nv := normalize(r[1]))]
+            if batch:
+                conn.execute(
+                    sqltext(f"UPDATE {table} SET {dst_col} = :nv WHERE id = :id"),  # nosec B608 — identifiers are code literals
+                    batch,
+                )
+                conn.commit()
+            total += len(batch)
+        except Exception as e:
+            logger.warning("Backfill {}.{} failed: {}", table, dst_col, e)
+            conn.rollback()
+            break
+    if total:
+        logger.info("Backfilled {} on {} {}", dst_col, total, table)
+
+
 def _backfill_normalized_mpn() -> None:
     """One-time backfill: populate requirements.normalized_mpn and re-normalize material_cards."""
     with engine.connect() as conn:
         # 1. Backfill requirements.normalized_mpn where NULL — chunked batch writes
-        try:
-            offset = 0
-            total_reqs = 0
-            while True:
-                rows = conn.execute(
-                    sqltext(
-                        "SELECT id, primary_mpn FROM requirements"
-                        " WHERE normalized_mpn IS NULL AND primary_mpn IS NOT NULL"
-                        " LIMIT :lim OFFSET :off"
-                    ),
-                    {"lim": _BACKFILL_BATCH_SIZE, "off": offset},
-                ).fetchall()
-                if not rows:
-                    break
-                batch = [{"nk": nk, "id": r[0]} for r in rows if (nk := _norm_key(r[1]))]
-                if batch:
-                    conn.execute(
-                        sqltext("UPDATE requirements SET normalized_mpn = :nk WHERE id = :id"),
-                        batch,
-                    )
-                    conn.commit()
-                    total_reqs += len(batch)
-                offset += len(rows)
-                if len(rows) < _BACKFILL_BATCH_SIZE:
-                    break
-            if total_reqs:
-                logger.info("Backfilled normalized_mpn on {} requirements", total_reqs)
-        except (SQLAlchemyError, DBAPIError) as e:
-            logger.warning("Backfill requirements.normalized_mpn failed: {}", e)
-            conn.rollback()
+        _chunked_backfill(conn, "requirements", "primary_mpn", "normalized_mpn", _norm_key)
 
         # 2. Backfill material_cards.normalized_mpn where NULL only (skip full re-scan)
         # Compute all candidates in Python, find collisions via one GROUP BY query, then batch update.
@@ -875,69 +886,9 @@ def _backfill_normalized_mpn() -> None:
 def _backfill_sighting_offer_normalized_mpn() -> None:
     """One-time backfill: populate sightings.normalized_mpn and offers.normalized_mpn."""
     with engine.connect() as conn:
-        # Sightings: compute from mpn_matched — chunked batch writes
-        try:
-            offset = 0
-            total_sightings = 0
-            while True:
-                rows = conn.execute(
-                    sqltext(
-                        "SELECT id, mpn_matched FROM sightings"
-                        " WHERE normalized_mpn IS NULL AND mpn_matched IS NOT NULL"
-                        " LIMIT :lim OFFSET :off"
-                    ),
-                    {"lim": _BACKFILL_BATCH_SIZE, "off": offset},
-                ).fetchall()
-                if not rows:
-                    break
-                batch = [{"nk": nk, "id": r[0]} for r in rows if (nk := _norm_key(r[1]))]
-                if batch:
-                    conn.execute(
-                        sqltext("UPDATE sightings SET normalized_mpn = :nk WHERE id = :id"),
-                        batch,
-                    )
-                    conn.commit()
-                    total_sightings += len(batch)
-                offset += len(rows)
-                if len(rows) < _BACKFILL_BATCH_SIZE:
-                    break
-            if total_sightings:
-                logger.info("Backfilled normalized_mpn on {} sightings", total_sightings)
-        except (SQLAlchemyError, DBAPIError) as e:
-            logger.warning("Backfill sightings.normalized_mpn failed: {}", e)
-            conn.rollback()
-
-        # Offers: compute from mpn — chunked batch writes
-        try:
-            offset = 0
-            total_offers = 0
-            while True:
-                rows = conn.execute(
-                    sqltext(
-                        "SELECT id, mpn FROM offers"
-                        " WHERE normalized_mpn IS NULL AND mpn IS NOT NULL"
-                        " LIMIT :lim OFFSET :off"
-                    ),
-                    {"lim": _BACKFILL_BATCH_SIZE, "off": offset},
-                ).fetchall()
-                if not rows:
-                    break
-                batch = [{"nk": nk, "id": r[0]} for r in rows if (nk := _norm_key(r[1]))]
-                if batch:
-                    conn.execute(
-                        sqltext("UPDATE offers SET normalized_mpn = :nk WHERE id = :id"),
-                        batch,
-                    )
-                    conn.commit()
-                    total_offers += len(batch)
-                offset += len(rows)
-                if len(rows) < _BACKFILL_BATCH_SIZE:
-                    break
-            if total_offers:
-                logger.info("Backfilled normalized_mpn on {} offers", total_offers)
-        except (SQLAlchemyError, DBAPIError) as e:
-            logger.warning("Backfill offers.normalized_mpn failed: {}", e)
-            conn.rollback()
+        # Sightings: compute from mpn_matched; offers: compute from mpn.
+        _chunked_backfill(conn, "sightings", "mpn_matched", "normalized_mpn", _norm_key)
+        _chunked_backfill(conn, "offers", "mpn", "normalized_mpn", _norm_key)
 
 
 def _backfill_sighting_vendor_normalized() -> None:
@@ -952,43 +903,7 @@ def _backfill_sighting_vendor_normalized() -> None:
             conn.rollback()
             return  # Column not yet created
 
-        total = 0
-        last_id = 0
-        while True:
-            try:
-                rows = conn.execute(
-                    sqltext(
-                        "SELECT id, vendor_name FROM sightings "
-                        "WHERE vendor_name_normalized IS NULL AND vendor_name IS NOT NULL "
-                        "AND id > :last_id ORDER BY id LIMIT :lim"
-                    ),
-                    {"last_id": last_id, "lim": _BACKFILL_BATCH_SIZE},
-                ).fetchall()
-                if not rows:
-                    break
-                # Advance the cursor past every row we examined. Rows whose vendor_name
-                # normalizes to '' (e.g. "LLC", "Inc.") never get an UPDATE, so filtering
-                # only on "IS NULL" would re-select them forever and hang startup; the
-                # id cursor skips them instead of looping on them.
-                last_id = rows[-1][0]
-                batch = []
-                for r in rows:
-                    nv = normalize_vendor_name(r[1])
-                    if nv:
-                        batch.append({"nv": nv, "id": r[0]})
-                if batch:
-                    conn.execute(
-                        sqltext("UPDATE sightings SET vendor_name_normalized = :nv WHERE id = :id"),
-                        batch,
-                    )
-                    conn.commit()
-                total += len(batch)
-            except Exception as e:
-                logger.warning("Backfill sightings.vendor_name_normalized failed: {}", e)
-                conn.rollback()
-                break
-        if total:
-            logger.info("Backfilled vendor_name_normalized on {} sightings", total)
+        _chunked_backfill(conn, "sightings", "vendor_name", "vendor_name_normalized", normalize_vendor_name)
 
 
 def _backfill_offer_vendor_normalized() -> None:
@@ -1009,43 +924,7 @@ def _backfill_offer_vendor_normalized() -> None:
             conn.rollback()
             return  # Column not yet created
 
-        total = 0
-        last_id = 0
-        while True:
-            try:
-                rows = conn.execute(
-                    sqltext(
-                        "SELECT id, vendor_name FROM offers "
-                        "WHERE vendor_name_normalized IS NULL AND vendor_name IS NOT NULL "
-                        "AND id > :last_id ORDER BY id LIMIT :lim"
-                    ),
-                    {"last_id": last_id, "lim": _BACKFILL_BATCH_SIZE},
-                ).fetchall()
-                if not rows:
-                    break
-                # Advance the cursor past every row we examined. Rows whose vendor_name
-                # normalizes to '' (e.g. "LLC", "Inc.") never get an UPDATE, so filtering
-                # only on "IS NULL" would re-select them forever and hang startup; the
-                # id cursor skips them instead of looping on them.
-                last_id = rows[-1][0]
-                batch = []
-                for r in rows:
-                    nv = normalize_vendor_name(r[1])
-                    if nv:
-                        batch.append({"nv": nv, "id": r[0]})
-                if batch:
-                    conn.execute(
-                        sqltext("UPDATE offers SET vendor_name_normalized = :nv WHERE id = :id"),
-                        batch,
-                    )
-                    conn.commit()
-                total += len(batch)
-            except Exception as e:
-                logger.warning("Backfill offers.vendor_name_normalized failed: {}", e)
-                conn.rollback()
-                break
-        if total:
-            logger.info("Backfilled vendor_name_normalized on {} offers", total)
+        _chunked_backfill(conn, "offers", "vendor_name", "vendor_name_normalized", normalize_vendor_name)
 
 
 # ── Denormalized company count triggers ──────────────────────────────
@@ -1750,58 +1629,44 @@ def seed_browser_worker_sources(db) -> None:
         row.is_active = True
 
 
-def seed_ics_worker_status_singleton(db) -> None:
-    """Insert ics_worker_status id=1 row if absent.
+def _seed_worker_status_singleton(db, model) -> None:
+    """Insert the given worker-status model's id=1 row if absent.
 
-    The worker's update_worker_status() is a no-op when the row is missing,
-    so heartbeats and daily stats silently never persist. Seeding makes the
-    worker's writes effective from first startup. Idempotent.
+    Each browser worker's update_worker_status() is a no-op when the row is
+    missing, so heartbeats and daily stats silently never persist. Seeding makes
+    the worker's writes effective from first startup. Idempotent.
 
-    Called by: seed_browser_workers (lifespan)
-    Depends on: IcsWorkerStatus model
+    Called by: the seed_*_worker_status_singleton wrappers (seed_browser_workers, lifespan)
     """
+    if db.query(model).filter_by(id=1).one_or_none() is None:
+        db.add(model(id=1, is_running=False))
+
+
+def seed_ics_worker_status_singleton(db) -> None:
+    """Insert ics_worker_status id=1 row if absent (see
+    _seed_worker_status_singleton)."""
     from .models import IcsWorkerStatus
 
-    existing = db.query(IcsWorkerStatus).filter_by(id=1).one_or_none()
-    if existing is not None:
-        return
-    db.add(IcsWorkerStatus(id=1, is_running=False))
+    _seed_worker_status_singleton(db, IcsWorkerStatus)
 
 
 def seed_nc_worker_status_singleton(db) -> None:
-    """Insert nc_worker_status id=1 row if absent.
-
-    Same pattern as the ICS singleton — the NC worker's update_worker_status()
-    silently no-ops when the row is missing, dropping every heartbeat. Idempotent.
-
-    Called by: seed_browser_workers (lifespan)
-    Depends on: NcWorkerStatus model
-    """
+    """Insert nc_worker_status id=1 row if absent (see
+    _seed_worker_status_singleton)."""
     from .models import NcWorkerStatus
 
-    existing = db.query(NcWorkerStatus).filter_by(id=1).one_or_none()
-    if existing is not None:
-        return
-    db.add(NcWorkerStatus(id=1, is_running=False))
+    _seed_worker_status_singleton(db, NcWorkerStatus)
 
 
 def seed_tbf_worker_status_singleton(db) -> None:
-    """Insert tbf_worker_status id=1 row if absent.
+    """Insert tbf_worker_status id=1 row if absent (see _seed_worker_status_singleton).
 
-    Same pattern as the ICS/NC singletons — the TBF worker's
-    update_worker_status() silently no-ops when the row is missing, dropping
-    every heartbeat. Migration 130 seeds the row at deploy; this is the
-    idempotent backup for fresh DBs/tests. Idempotent.
-
-    Called by: seed_browser_workers (lifespan)
-    Depends on: TbfWorkerStatus model
+    Migration 130 seeds the row at deploy; this is the idempotent backup for fresh
+    DBs/tests.
     """
     from .models import TbfWorkerStatus
 
-    existing = db.query(TbfWorkerStatus).filter_by(id=1).one_or_none()
-    if existing is not None:
-        return
-    db.add(TbfWorkerStatus(id=1, is_running=False))
+    _seed_worker_status_singleton(db, TbfWorkerStatus)
 
 
 def seed_browser_workers() -> None:

@@ -22,7 +22,7 @@ from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
 
 from ....config import settings
-from ....constants import RESTRICTED_ROLES, ContactStatus, UserRole
+from ....constants import RESTRICTED_ROLES, ContactStatus
 from ....database import get_db
 from ....dependencies import require_requisition_access, require_user
 from ....models import Requisition, SiteContact, User
@@ -32,29 +32,39 @@ from .._shared import _base_ctx
 router = APIRouter(tags=["htmx-views"])
 
 
+def _stale_follow_up_query(db: Session, user: User):
+    """The stale-RFQ-contact predicate, filtered but unordered.
+
+    THE single source of the "needs follow-up" rule for the queue
+    (_build_follow_ups_ctx), the batch action (send_batch_follow_up), and the nav badge
+    (follow_up_count) — so the badge can never count actions the batch will not
+    perform. "Needs follow-up" = an email contact still in sent/opened whose LAST
+    outbound contact was more than follow_up_days ago: status_updated_at is stamped on
+    the original RFQ send AND on every follow-up, so a just-sent follow-up drops off
+    the queue (no re-spam) until the window elapses again; created_at is the fallback
+    for legacy rows with no status_updated_at. Restricted roles (sales/trader) act
+    only on contacts under their own requisitions; buyer/manager/admin stay global.
+    """
+    threshold = datetime.now(UTC) - timedelta(days=settings.follow_up_days)
+    q = db.query(RfqContact).filter(
+        RfqContact.contact_type == "email",
+        RfqContact.status.in_(["sent", "opened"]),
+        sqlfunc.coalesce(RfqContact.status_updated_at, RfqContact.created_at) < threshold,
+    )
+    if getattr(user, "role", None) in RESTRICTED_ROLES:
+        q = q.join(Requisition, RfqContact.requisition_id == Requisition.id).filter(Requisition.created_by == user.id)
+    return q
+
+
 def _build_follow_ups_ctx(request: Request, user: User, db: Session) -> dict:
     """Build the cross-requisition follow-up queue template context.
 
     Shared by the list partial and the batch-send re-render so both surfaces render the
-    SAME queue (same threshold, same per-owner scope). Extracted so send-batch can
-    return the refreshed list instead of a bare success div that replaced the whole
-    page.
+    SAME queue (same threshold, same per-owner scope — see _stale_follow_up_query).
+    Extracted so send-batch can return the refreshed list instead of a bare success div
+    that replaced the whole page.
     """
-    threshold = datetime.now(UTC) - timedelta(days=settings.follow_up_days)
-
-    stale_q = db.query(RfqContact).filter(
-        RfqContact.contact_type == "email",
-        RfqContact.status.in_(["sent", "opened"]),
-        # "Needs follow-up" = LAST outbound contact was more than follow_up_days ago.
-        # status_updated_at is stamped on the original RFQ send AND on every follow-up, so a
-        # just-sent follow-up drops off the queue (no re-spam) until the window elapses again;
-        # created_at is the fallback for legacy rows with no status_updated_at.
-        sqlfunc.coalesce(RfqContact.status_updated_at, RfqContact.created_at) < threshold,
-    )
-    if getattr(user, "role", None) in (UserRole.SALES, UserRole.TRADER):
-        stale_q = stale_q.join(Requisition).filter(Requisition.created_by == user.id)
-
-    stale = stale_q.order_by(RfqContact.created_at.asc()).limit(500).all()
+    stale = _stale_follow_up_query(db, user).order_by(RfqContact.created_at.asc()).limit(500).all()
 
     req_ids = {c.requisition_id for c in stale}
     req_names: dict[int, str] = {}
@@ -140,21 +150,20 @@ async def _deliver_follow_up(
         from ....dependencies import require_fresh_token
 
         token = await require_fresh_token(request, db)
-    from ....utils.graph_client import GraphClient
+    from ....utils.graph_client import GraphClient, build_sendmail_payload
 
     gc = GraphClient(token)
     follow_up_body = (
         body
         or f"Dear {contact.vendor_name},\n\nI'm following up on our previous inquiry. Please let us know if you have availability.\n\nThank you."
     )
-    payload = {
-        "message": {
-            "subject": f"Follow-up: {contact.subject or 'RFQ'}",
-            "body": {"contentType": "Text", "content": follow_up_body},
-            "toRecipients": [{"emailAddress": {"address": contact.vendor_contact}}],
-        },
-        "saveToSentItems": "true",
-    }
+    payload = build_sendmail_payload(
+        f"Follow-up: {contact.subject or 'RFQ'}",
+        follow_up_body,
+        contact.vendor_contact,
+        save_to_sent="true",
+        content_type="Text",
+    )
     try:
         result = await gc.post_json("/me/sendMail", payload, raise_on_error=False)
     except Exception as exc:
@@ -262,23 +271,9 @@ async def send_batch_follow_up(
     db: Session = Depends(get_db),
 ):
     """Send follow-ups to all stale contacts at once."""
-    # Was request.app.state.follow_up_days — a value nothing ever set, so this
-    # silently used the getattr default (2) and diverged from the queue/badge.
-    threshold = datetime.now(UTC) - timedelta(days=settings.follow_up_days)
-
-    q = db.query(RfqContact).filter(
-        RfqContact.contact_type == "email",
-        RfqContact.status.in_(["sent", "opened"]),
-        # Last outbound contact older than the window — in lockstep with the queue + badge
-        # (see _build_follow_ups_ctx); keeps a just-sent contact from being re-sent.
-        sqlfunc.coalesce(RfqContact.status_updated_at, RfqContact.created_at) < threshold,
-    )
-    # Restricted roles act only on contacts under their own requisitions; buyer/manager/admin
-    # stay global. Keep this in lockstep with follow_up_badge so the badge counts what the
-    # batch acts on.
-    if user.role in RESTRICTED_ROLES:
-        q = q.join(Requisition, RfqContact.requisition_id == Requisition.id).filter(Requisition.created_by == user.id)
-    stale = q.limit(50).all()
+    # Same predicate + per-owner scope as the queue and the badge (single source in
+    # _stale_follow_up_query); keeps a just-sent contact from being re-sent.
+    stale = _stale_follow_up_query(db, user).limit(50).all()
 
     # Actually SEND each stale contact's follow-up (via the shared _deliver_follow_up path,
     # same DNC block + Graph send + SENT-marking as the single send), instead of the old
@@ -340,18 +335,10 @@ def follow_up_count(db: Session, user: User) -> int:
 
     The single source of truth for the follow-up count: the nav badge AND any other
     surface that wants the number (e.g. the Sightings workspace quick-link) call this so
-    they never drift from the queue/batch predicate (see ``_build_follow_ups_ctx``).
+    they never drift from the queue/batch predicate (single source in
+    ``_stale_follow_up_query``).
     """
-    threshold = datetime.now(UTC) - timedelta(days=settings.follow_up_days)
-    q = db.query(sqlfunc.count(RfqContact.id)).filter(
-        RfqContact.contact_type == "email",
-        RfqContact.status.in_(["sent", "opened"]),
-        # Last outbound contact older than the window — in lockstep with the queue + batch.
-        sqlfunc.coalesce(RfqContact.status_updated_at, RfqContact.created_at) < threshold,
-    )
-    # Same per-owner scope as send_batch_follow_up so the badge matches the batch.
-    if user.role in RESTRICTED_ROLES:
-        q = q.join(Requisition, RfqContact.requisition_id == Requisition.id).filter(Requisition.created_by == user.id)
+    q = _stale_follow_up_query(db, user).with_entities(sqlfunc.count(RfqContact.id))
     return q.scalar() or 0
 
 
