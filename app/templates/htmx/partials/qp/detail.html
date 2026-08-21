@@ -215,7 +215,7 @@
   {% endcall %}
 
   {# ── Section: Serial Numbers ── #}
-  {% set serial_chip %}<span class="text-xs text-gray-400 font-normal">{{ qp.serial_entries|length }} entr{{ 'ies' if qp.serial_entries|length != 1 else 'y' }}</span>{% endset %}
+  {% set serial_chip %}<span id="qp-serial-chip" class="text-xs text-gray-400 font-normal">{{ qp.serial_entries|length }} entr{{ 'ies' if qp.serial_entries|length != 1 else 'y' }}</span>{% endset %}
   {% call qp_section('showSerial', 'Serial Numbers', serial_chip) %}
       {% include "htmx/partials/qp/_section_serial.html" %}
   {% endcall %}
