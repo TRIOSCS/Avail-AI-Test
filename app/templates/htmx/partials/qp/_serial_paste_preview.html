@@ -1,0 +1,65 @@
+{#
+  qp/_serial_paste_preview.html — Preview of AI-parsed packing-list serial rows.
+  Rendered by POST /v2/qp/{id}/serial/parse into #qp-serial-paste-preview (inside the
+  Serial section). Nothing is written until the confirm form POSTs the checked rows to
+  /v2/qp/{id}/serial/bulk, which swaps the whole #qp-section-serial back (preview
+  included, so it disappears on success). rows is None on AI failure.
+
+  Receives: qp (QualityPlan ORM), rows (list[dict] | None), rows_json (str | None),
+            empty_paste (bool), user (User).
+  Called by: routers/quality_plans.py (qp_parse_serial_paste).
+  Depends on: HTMX, Tailwind CSS.
+#}
+{% if empty_paste %}
+<p class="text-xs text-gray-400">Nothing to parse — paste the packing list text first.</p>
+{% elif rows is none %}
+<div class="rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">
+  AI could not parse that text. Try again, or trim it to just the serial table.
+</div>
+{% elif not rows %}
+<p class="text-xs text-gray-400">No serial rows found in that text.</p>
+{% else %}
+<form hx-post="/v2/qp/{{ qp.id }}/serial/bulk"
+      hx-target="#qp-section-serial"
+      hx-swap="outerHTML"
+      data-loading-disable
+      class="space-y-2">
+  <input type="hidden" name="rows_json" value="{{ rows_json }}">
+  <div class="overflow-x-auto rounded-lg border border-amber-200">
+    <table class="compact-table w-full">
+      <thead>
+        <tr>
+          <th></th>
+          <th class="text-left">PO</th>
+          <th class="text-left">Part #</th>
+          <th class="text-left">Serial #</th>
+          <th class="text-left">Seagate SN</th>
+          <th class="text-left">TSO</th>
+          <th class="text-left">Customer PO</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td><input type="checkbox" name="include" value="{{ loop.index0 }}" checked
+                     class="rounded border-gray-300"></td>
+          <td class="text-xs">{{ row.purchase_order or '—' }}</td>
+          <td class="font-mono text-xs">{{ row.part_number or '—' }}</td>
+          <td class="font-mono text-xs">{{ row.serial_number or '—' }}</td>
+          <td class="font-mono text-xs">{{ row.seagate_sn or '—' }}</td>
+          <td class="text-xs">{{ row.tso or '—' }}</td>
+          <td class="text-xs">{{ row.customer_po or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="text-xs text-amber-700">AI-extracted — verify against the document, untick anything wrong.</p>
+  <div class="flex gap-2">
+    <button type="submit" class="btn btn-primary btn-sm">Add selected entries</button>
+    <button type="button"
+            @click="document.getElementById('qp-serial-paste-preview').innerHTML = ''"
+            class="btn btn-secondary btn-sm">Discard</button>
+  </div>
+</form>
+{% endif %}

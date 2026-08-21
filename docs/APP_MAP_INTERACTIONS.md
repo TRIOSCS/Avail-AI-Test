@@ -7360,6 +7360,16 @@ section partials — `qp/_section_sales.html`, `_section_purchasing.html`, `_sec
   `sales_section_approved_at`/`purchasing_section_approved_at` on approve (cleared on reject).
 - *Serial CRUD:* `POST /v2/qp/{id}/serial` adds a `QpSerialEntry` (submitted_by = acting user),
   `DELETE …/serial/{entry_id}` removes it (404 if it belongs to another QP). Cascade with the QP.
+- *Serial paste import (AI):* the Serial section carries a collapsed "Paste packing list…" panel.
+  `POST /v2/qp/{id}/serial/parse` runs `qp_serial_paste_service.parse_serial_paste` (one
+  `claude_structured` fast-tier call, interactive `max_attempts=1`; verbatim-only prompt; rows
+  sanitized to the six `String(255)` fields, capped at 300) and renders
+  `qp/_serial_paste_preview.html` into `#qp-serial-paste-preview` — per-row checked checkboxes +
+  a hidden `rows_json`, NO db write. Confirm `POST`s `/v2/qp/{id}/serial/bulk`, which re-validates
+  `rows_json` server-side (400 on malformed/oversized), inserts only the checked indices via the
+  same `_coerce` as the single add (submitted_by = acting user), and swaps the refreshed
+  `#qp-section-serial` back (the preview disappears with it). AI failure renders an inline error
+  state with no confirm form; an empty paste never calls the AI.
 - *FRU pin/unpin:* `POST /v2/qp/{id}/fru` resolves `fru_norm` via `normalize_mpn_key`, checks the
   `(qp_id, fru_norm)` unique constraint (re-pin = no-op), and the section live-joins `FruLink` by
   `fru_norm` (`_fru_rows`) to show the related model/carrier/series edges; `DELETE …/fru/{lookup_id}`
