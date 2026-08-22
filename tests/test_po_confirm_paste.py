@@ -396,6 +396,11 @@ class TestParseConfirmationRoute:
                 f"/v2/partials/approvals/po/{line.id}/parse-confirmation", data={"pasted_text": "x"}, headers=_HX
             )
         assert resp.status_code == 200
+        # The re-rendered pane shows the line's CURRENT state — the manager/pending
+        # branch, not the buyer confirm form or the paste affordance.
+        assert "parse-confirmation" not in resp.text
+        assert "Confirm the PO you cut" not in resp.text
+        assert 'value="PO-9"' in resp.text or "PO-9" in resp.text  # the confirmed PO renders
         mock_parse.assert_not_called()
 
     def test_parse_rate_limited_returns_note_without_ai(self, client, db_session, test_user):
