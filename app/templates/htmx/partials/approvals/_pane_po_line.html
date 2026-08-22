@@ -16,7 +16,7 @@
   Depends on: HTMX, Alpine.js, Tailwind; shared copy_chip + age_chip macros;
               buy_plans/_macros.html resource_form.
 #}
-{% from "htmx/partials/shared/_macros.html" import copy_chip, age_chip, lazy_body %}
+{% from "htmx/partials/shared/_macros.html" import copy_chip, age_chip, lazy_body, spinner %}
 {% from "htmx/partials/buy_plans/_macros.html" import prepay_state_badge, request_prepayment_button, resource_form %}
 
 {% macro qp_text_input(name, label, value) %}
@@ -123,6 +123,45 @@
   {% endmacro %}
 
   {% if line.status == 'awaiting_po' %}
+  {# ── Paste PO confirmation (inbound twin of Copy-for-ERP): AI pre-fills the
+       confirm form below for REVIEW — its own form (forms can't nest), no DB write,
+       the buyer still submits Confirm PO. ── #}
+  <div x-data="{ poPasteOpen: false, parsing: false }">
+    <button type="button" @click="poPasteOpen = !poPasteOpen"
+            class="text-xs font-medium text-gray-500 hover:text-gray-700"
+            x-text="poPasteOpen ? 'Hide paste import' : 'Paste PO confirmation…'">Paste PO confirmation…</button>
+    {# Failure notes swap into #po-paste-result only — the pasted text, this open
+       fold, and typed-but-unsubmitted confirm values survive a failed parse.
+       Success retargets the whole #aw-pane server-side (HX-Retarget). #}
+    <form x-show="poPasteOpen" x-cloak x-collapse
+          hx-post="/v2/partials/approvals/po/{{ line.id }}/parse-confirmation"
+          hx-target="#po-paste-result" hx-swap="innerHTML"
+          @htmx:before-request="parsing = true"
+          @htmx:after-request="parsing = false"
+          class="mt-1.5 space-y-1.5">
+      <textarea name="pasted_text" rows="5" required
+                placeholder="Paste the PO confirmation text copied from the ERP screen or email — PO #, ship date, terms, serials"
+                class="input input-sm w-full font-mono"></textarea>
+      <button type="submit" data-loading-disable :disabled="parsing" class="btn-secondary btn-sm">
+        {{ spinner('h-4 w-4 animate-spin', attrs='x-show="parsing" x-cloak') }}
+        <span x-text="parsing ? 'Parsing…' : 'Parse with AI'">Parse with AI</span>
+      </button>
+      <div id="po-paste-result"></div>
+    </form>
+  </div>
+  {% if po_prefill %}
+  <div class="rounded-lg border border-amber-200 bg-amber-50 p-2.5 space-y-1">
+    <div class="text-xs font-semibold text-amber-800">AI-filled from your paste — verify every field before confirming.</div>
+    {% for w in po_prefill.warnings %}
+    <div class="text-xs text-amber-800">⚠ {{ w }}</div>
+    {% endfor %}
+    {% if po_prefill.serial_numbers and qp and qp.purchasing_serial_numbers %}
+    <div class="text-xs text-amber-800">⚠ Serials parsed from the paste were not applied — this vendor's QP already
+      records serial numbers. Reconcile manually: {{ po_prefill.serial_numbers }}</div>
+    {% endif %}
+  </div>
+  {% endif %}
+
   {# ── Buyer view: confirm-PO form + QP-purchasing ─────────────────── #}
   <form hx-post="/v2/partials/buy-plans/{{ plan.id }}/lines/{{ line.id }}/confirm-po"
         hx-target="#aw-pane" hx-swap="innerHTML" class="space-y-3">
@@ -138,18 +177,23 @@
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
         <label class="block">
           <span class="text-[11px] uppercase tracking-wide text-gray-500">PO number</span>
-          <input type="text" name="po_number" required placeholder="PO-…" class="input input-sm w-full font-mono">
+          <input type="text" name="po_number" required placeholder="PO-…"
+                 value="{{ po_prefill.po_number or '' if po_prefill else '' }}"
+                 class="input input-sm w-full font-mono">
         </label>
         <label class="block">
           <span class="text-[11px] uppercase tracking-wide text-gray-500">Est. ship date</span>
-          <input type="date" name="estimated_ship_date" class="input input-sm w-full">
+          <input type="date" name="estimated_ship_date"
+                 value="{{ po_prefill.estimated_ship_date or '' if po_prefill else '' }}"
+                 class="input input-sm w-full">
         </label>
         <label class="block">
           <span class="text-[11px] uppercase tracking-wide text-gray-500">Payment method</span>
+          {% set pm_selected = (po_prefill.payment_method if po_prefill and po_prefill.payment_method else line.payment_method) %}
           <select name="payment_method" required class="input input-sm w-full">
             <option value="">Select…</option>
             {% for val, label in payment_methods %}
-            <option value="{{ val }}" {% if line.payment_method == val %}selected{% endif %}>{{ label }}</option>
+            <option value="{{ val }}" {% if pm_selected == val %}selected{% endif %}>{{ label }}</option>
             {% endfor %}
           </select>
         </label>
@@ -161,6 +205,11 @@
       <div class="grid grid-cols-2 md:grid-cols-3 gap-2">
         {% for name, kind, label, _summary_label in qp_purchasing_fields %}
         {% if kind == 'yn' %}{{ qp_yn_select(name, label, qp|attr(name) if qp else none) }}
+        {% elif name == 'purchasing_serial_numbers' and po_prefill and po_prefill.serial_numbers
+              and not (qp and qp.purchasing_serial_numbers) %}
+        {# Serials parsed off the pasted confirmation FILL-EMPTY-ONLY: a saved QP
+           value always wins (the banner carries the not-applied advisory). #}
+        {{ qp_text_input(name, label, po_prefill.serial_numbers) }}
         {% else %}{{ qp_text_input(name, label, qp|attr(name) if qp else none) }}{% endif %}
         {% endfor %}
       </div>

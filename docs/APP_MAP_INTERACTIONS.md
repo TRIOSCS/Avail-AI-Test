@@ -2138,6 +2138,19 @@ to the token's buyer). Cut-PO task rows (`source_ref buyline:{id}`) deep-link th
 same PO-tab URL. Flag-issue/resolve-issue live inline on the PO pane (buyer
 disclosure + supervisor resolve), as do the prepayment request/state and the
 late-fall-down re-source on the verified branch, and Copy-for-ERP as a `copy_chip`.
+Copy-for-ERP's inbound twin (AI paste-prefill): the awaiting_po pane carries a
+collapsed "Paste PO confirmation…" form (its own `<form>` — never nested in the
+confirm form) POSTing `/v2/partials/approvals/po/{line_id}/parse-confirmation`.
+`po_confirm_paste_service.parse_po_confirmation` finds the PO number regex-first
+(labeled token containing a digit — deterministic wins over the AI), one
+`claude_structured` fast call (interactive `max_attempts=1`) fills est-ship-date
+(ISO-validated), payment_method (whitelisted against PO_LINE_PAYMENT_METHODS),
+and serials (comma-joined into the `purchasing_serial_numbers` field), and
+cross-checks vendor/MPN/qty/unit-cost against the plan line into ADVISORY
+warnings. The route re-renders the SAME pane via `render_po_pane(po_prefill=…)`
+— amber "AI-filled — verify" banner + warnings above the form, NO db write; the
+buyer reviews and still clicks Confirm PO. Empty paste / AI failure render
+`po_paste_note` instead. ERP stays untouched: the human transports the text.
 
 
 **Resell workspace — resell/excess split-panel (Chunk F, ADDITIVE).** `/v2/resell` is
