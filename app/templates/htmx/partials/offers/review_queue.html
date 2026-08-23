@@ -65,7 +65,15 @@
             </div>
             <div>
               <span class="text-secondary font-medium">Lead Time</span>
-              <p class="text-gray-900">{{ o.lead_time or '--' }}</p>
+              <p class="text-gray-900">
+                {{ o.lead_time or '--' }}
+                {% if o.lead_time_days is not none %}
+                <span class="text-secondary">· {{ o.lead_time_days }}d</span>
+                {% if o.lead_time_days_ai %}
+                <span class="ml-0.5 text-[11px] uppercase tracking-wide text-amber-600" title="Lead time in days was inferred by AI from the free-text value — verify.">AI — verify</span>
+                {% endif %}
+                {% endif %}
+              </p>
             </div>
             <div>
               <span class="text-secondary font-medium">Source</span>

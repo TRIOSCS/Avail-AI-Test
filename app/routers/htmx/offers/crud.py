@@ -478,6 +478,9 @@ async def add_offer(
     qual["schema"] = 1  # forward-version the qualification blob (spec §3.1)
     offer.qualification = qual if any(qual[k] for k in _qkeys) else None
     apply_qualification(offer)  # non-raising: composes note + sets status
+    from ....services.offer_lead_time import apply_offer_lead_time
+
+    apply_offer_lead_time(offer)  # deterministic lead_time → lead_time_days (idea #12; no AI here)
     db.add(offer)
     db.flush()  # offer.id populated; activity row + offer committed together below
     # Offer hook: a manually entered offer is user-initiated proof of availability —
@@ -647,6 +650,9 @@ async def edit_offer(
         offer.condition = normalize_offer_condition(cond_raw) or cond_raw
 
     apply_qualification(offer)  # non-raising: composes note + sets status
+    from ....services.offer_lead_time import apply_offer_lead_time
+
+    apply_offer_lead_time(offer)  # re-derive lead_time_days from the (possibly edited) text (idea #12)
     offer.updated_at = now
     offer.updated_by_id = user.id
     db.commit()

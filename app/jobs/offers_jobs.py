@@ -85,6 +85,34 @@ def register_offers_jobs(scheduler, settings, db=None):
         name="Warn strategic vendors expiring soon",
     )
 
+    scheduler.add_job(
+        _job_backfill_offer_lead_times,
+        CronTrigger(hour=3, minute=15),
+        id="backfill_offer_lead_times",
+        name="Normalize offer lead times → lead_time_days (idea #12)",
+    )
+
+
+@_traced_job
+async def _job_backfill_offer_lead_times():
+    """Nightly: normalize offers' free-text lead_time into lead_time_days.
+
+    Deterministic first; AI (hard-guarded null) only for the residue the parser
+    can't resolve. Best-effort — a failure just means fewer rows normalized tonight.
+    """
+    from ..database import SessionLocal
+    from ..services.offer_lead_time import backfill_offer_lead_times
+
+    db = SessionLocal()
+    try:
+        n = await backfill_offer_lead_times(db, use_ai=True)
+        logger.info("Offer lead-time backfill: normalized {} offer(s)", n)
+    except Exception as e:
+        logger.exception(f"Offer lead-time backfill error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
 
 @_traced_job
 async def _job_proactive_digest_drafts():

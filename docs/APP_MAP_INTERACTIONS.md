@@ -977,6 +977,14 @@ the unavailability states). A test guards the header↔cell count
 prefilled from the VendorSightingSummary. The modal and the requisitions add-offer
 form share one field grid (offers/_offer_form_fields.html). Offer creation logs
 OFFER_CREATED, so converted/entered offers appear in the Activity tab automatically.
+Offer lead-time structurizer (idea #12): `Offer.lead_time` free text ("2-3wk") gets
+a normalized integer companion `offers.lead_time_days` (+ `lead_time_days_ai` flag;
+migration 213) so offers can be sorted/filtered by lead time. `offer_lead_time.apply_offer_lead_time`
+sets it DETERMINISTICALLY at save (`normalize_lead_time`, NO AI on the interactive
+path); the nightly `_job_backfill_offer_lead_times` (offers_jobs, 03:15) fills unset
+rows deterministically, then uses ONE Haiku call hard-guarded to null (never a guess)
+for the residue, marking those `lead_time_days_ai=True` → the review-queue row shows
+the amber "AI — verify" chip. The AI value never overrides a deterministic parse.
 Vendor dup nudge (idea #10): the shared grid's `vendor_name` input (id
 `offer-vendor-name`) hx-gets `GET /v2/partials/offers/vendor-dup-check` on blur →
 `offers.crud.offer_vendor_dup_check` reuses the DETERMINISTIC
