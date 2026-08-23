@@ -1536,6 +1536,18 @@ email_service.poll_inbox()
     |             per-line campaign sharing one conversation logs the reply once and
     |             never collides with the requisition-side log_email_activity row).
     |             A PURELY-resell reply (no Contact) skips AI parsing (never billed).
+    |             ON-DEMAND prefill (idea #3): the reply viewer's "Draft offer from
+    |             reply (AI)" button POSTs /v2/partials/resell/{list}/outreach/{o}/
+    |             parse-reply (owner-gated + 10/min throttle BEFORE the AI call).
+    |             resell_reply_parse_service.parse_buyer_reply strips HTML, one fast
+    |             claude_structured call scoped to the list's line MPNs → sanitized
+    |             draft rows {mpn,qty,unit_price,lead_time_days,terms,notes,on_list}
+    |             + take_all flag. Rows render in #ai-draft-results (its own swap
+    |             target so a parse never wipes the convert form); "Use" fills the
+    |             existing convert-to-offer form via a single-quoted data-ai-lines
+    |             carrier + JSON.parse (never inlined into double-quoted x-data — XSS
+    |             + attr-truncation). NO db write on parse; convert stays the sole
+    |             write path; the >=0.8 mining auto-create path is untouched.
     |
     v
 ai_email_parser.py
