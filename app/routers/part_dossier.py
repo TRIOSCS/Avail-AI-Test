@@ -34,8 +34,9 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from ..constants import AccessKey
 from ..database import get_db
-from ..dependencies import require_user
+from ..dependencies import require_user, user_has_access
 from ..models import User
 from ..models.intelligence import MaterialCard, MaterialCardDatasheet
 from ..models.sourcing import Requisition
@@ -126,9 +127,29 @@ async def dossier_hero(
 
         price_series = price_series_for_card(db, card.id)
 
+    # Equivalence class (idea #21): "Also known as" chips — stored verdicts only,
+    # never an LLM in the render path; failures just hide the chips.
+    equivalence = None
+    try:
+        from ..services.global_search_service import _equivalence_expansion
+
+        _eq_keys, equivalence = _equivalence_expansion(db, mpn)
+    except Exception:
+        logger.exception("dossier_hero equivalence expansion failed mpn={} key={}", mpn, key)
+
     ctx = _ctx(request, user)
     ctx.update(
-        {"mpn": display_mpn, "card": card, "history": history, "fru_view": fru_view, "price_series": price_series}
+        {
+            "mpn": display_mpn,
+            "card": card,
+            "history": history,
+            "fru_view": fru_view,
+            "price_series": price_series,
+            "equivalence": equivalence,
+            # Same gate as the search banner: the demote button only renders for
+            # users the PROACTIVE-gated verdict endpoint will actually accept.
+            "can_verdict": user_has_access(user, AccessKey.PROACTIVE, db),
+        }
     )
 
     # Auto-datasheet capture (background, never blocks the dossier render).

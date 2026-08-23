@@ -945,6 +945,14 @@ async def proactive_equivalence_verdict(
         raise HTTPException(400, str(e)) from e
     db.commit()
     word = "confirmed the same part" if verdict == "same" else "marked as different parts"
+    # origin=search (idea #21): the demote came from the search banner / dossier
+    # chip — swap just that chip with a tiny confirmation instead of teleporting
+    # the user into the Proactive Matches tab.
+    if str(form.get("origin") or "").strip() == "search":
+        return HTMLResponse(
+            '<span class="inline-flex items-center rounded border border-gray-200 bg-gray-50 px-1.5 py-0.5 '
+            'text-[11px] text-gray-400">removed — won&#39;t pool again</span>'
+        )
     return _render_matches_tab(request, user, db, success_msg=f"{part_a} / {part_b} {word}.")
 
 

@@ -23,6 +23,15 @@
     </div>
     {% endif %}
 
+    {# ── Equivalence note (idea #21): variant-key rows are pooled in — label them
+         so a result titled with a different suffix never reads as wrong. #}
+    {% if results.equivalence %}
+    <div class="px-3 py-1.5 text-xs text-amber-700 bg-amber-50">
+      Includes known variants:
+      {% for v in results.equivalence.variants %}<span class="font-mono">{{ v.spelling }}</span>{% if not loop.last %}, {% endif %}{% endfor %}
+    </div>
+    {% endif %}
+
     {# ── Best match card ── #}
     {% if results.best_match %}
     {% set bm = results.best_match %}
