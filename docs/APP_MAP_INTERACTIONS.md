@@ -977,6 +977,16 @@ the unavailability states). A test guards the header↔cell count
 prefilled from the VendorSightingSummary. The modal and the requisitions add-offer
 form share one field grid (offers/_offer_form_fields.html). Offer creation logs
 OFFER_CREATED, so converted/entered offers appear in the Activity tab automatically.
+Vendor dup nudge (idea #10): the shared grid's `vendor_name` input (id
+`offer-vendor-name`) hx-gets `GET /v2/partials/offers/vendor-dup-check` on blur →
+`offers.crud.offer_vendor_dup_check` reuses the DETERMINISTIC
+`vendor_duplicates.check_vendor_duplicate` (exact normalized + pg_trgm fuzzy, NO AI
+on the per-blur path) and swaps `offers/_vendor_dup_nudge.html` into `#vendor-dup-nudge`
+(empty on blank/no-match). Only FUZZY near-misses nudge — an EXACT match is the
+normal offer case (logging against an existing vendor, no new row minted), so it is
+suppressed (which also means adopting the canonical name never re-nudges on the next blur). The nudge's one-tap "Use …" adopt carries the canonical
+name in an autoescaped `data-name` attr and, on `@click`, sets the input's value and
+clears the nudge — never blocks the save, never re-links existing rows.
 
 Vendor rows (_vendor_row.html) also carry a row-level status treatment keyed off
 the server-computed vendor status `vs` (precedence resolved in
