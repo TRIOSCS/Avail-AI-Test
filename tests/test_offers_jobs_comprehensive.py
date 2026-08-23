@@ -75,7 +75,8 @@ class TestRegisterOffersJobs:
         assert "expire_strategic_vendors" in job_ids
         assert "warn_strategic_expiring" in job_ids
         assert "proactive_digest_drafts" in job_ids
-        assert mock_scheduler.add_job.call_count == 7
+        assert "backfill_offer_lead_times" in job_ids  # idea #12 nightly normalizer
+        assert mock_scheduler.add_job.call_count == 8
 
     def test_registers_without_proactive_matching(self):
         """When proactive_matching_enabled=False, proactive_matching job is skipped."""
@@ -89,7 +90,8 @@ class TestRegisterOffersJobs:
 
         job_ids = [c.kwargs.get("id") for c in mock_scheduler.add_job.call_args_list]
         assert "proactive_matching" not in job_ids
-        assert mock_scheduler.add_job.call_count == 5
+        assert "backfill_offer_lead_times" in job_ids  # unconditional (idea #12)
+        assert mock_scheduler.add_job.call_count == 6
 
     def test_proactive_interval_minimum_1_hour(self):
         """Proactive scan interval has a floor of 1 hour."""

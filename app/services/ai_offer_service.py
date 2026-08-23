@@ -33,6 +33,7 @@ from ..utils import safe_float, safe_int
 from ..utils.normalization import fuzzy_mpn_match, normalize_mpn_key
 from ..vendor_utils import normalize_vendor_name
 from .activity_service import log_activity
+from .offer_lead_time import apply_offer_lead_time
 from .vendor_unavailability import maybe_release_on_offer
 
 # -- Prospect Contact Promotion -----------------------------------------------
@@ -190,6 +191,7 @@ def save_parsed_offers(db: Session, requisition_id: int, response_id: int | None
             notes=o.notes,
             status=OfferStatus.PENDING_REVIEW,
         )
+        apply_offer_lead_time(offer)  # deterministic lead_time → lead_time_days at save (idea #12)
         db.add(offer)
         db.flush()
         _log_offer_created(db, offer, user_id)
@@ -329,6 +331,7 @@ def save_freeform_offers(
             notes=o.notes,
             status=OfferStatus.ACTIVE,
         )
+        apply_offer_lead_time(offer)  # deterministic lead_time → lead_time_days at save (idea #12)
         db.add(offer)
         db.flush()
         # Offer hook: freeform offers are saved ACTIVE after user review — user-
@@ -473,6 +476,7 @@ def save_form_parsed_offers(
             status=OfferStatus.ACTIVE,
         )
         apply_qualification(offer)  # non-raising: composes note + sets qualification_status
+        apply_offer_lead_time(offer)  # deterministic lead_time → lead_time_days at save (idea #12)
         db.add(offer)
         # Offer hook: the user reviewed and saved this parse ACTIVE — user-initiated
         # proof of availability, release the vendor's matching active records.

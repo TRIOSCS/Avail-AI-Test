@@ -48,6 +48,15 @@ class Offer(Base):
     unit_price = Column(Numeric(12, 4))
     currency = Column(String(10), default="USD")
     lead_time = Column(String(100))
+    # Normalized integer lead time (days) parsed from the free-text lead_time so
+    # offers can be sorted/filtered by "ships inside N days" (migration 213).
+    # lead_time_days_ai marks a value the nightly AI residue-backfill produced (vs
+    # the deterministic normalizer) so the UI shows the amber "AI — verify" chip.
+    lead_time_days = Column(Integer)
+    lead_time_days_ai = Column(Boolean, nullable=False, default=False, server_default="false")
+    # Stamped by the nightly AI residue tier (success OR decline) so a permanently-
+    # unparseable lead time is never re-billed to Claude every night (migration 213).
+    lead_time_ai_attempted_at = Column(UTCDateTime, nullable=True)
     date_code = Column(String(100))
     condition = Column(String(50))
     packaging = Column(String(100))
