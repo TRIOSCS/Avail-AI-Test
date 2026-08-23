@@ -5967,6 +5967,18 @@ fast_search(query, db, user)  — one universal entity search, grouped results:
     +---> Part number: matches Requirement / Offer / MaterialCard / Sighting by ILIKE
     |     AND by exact normalized_mpn == normalize_mpn_key(query) (separator-insensitive,
     |     index-backed), so a PN returns every req/offer/card/sighting it appears on.
+    +---> Equivalence-aware recall (idea #21): _equivalence_expansion pools the query's
+    |     stored part_equivalences verdict='same' class (human 'different' kill-switch
+    |     respected via expand_part; NO LLM at query time) into every normalized_mpn
+    |     match (`IN (class keys)`), and the result dict carries `equivalence.variants`
+    |     [{spelling, kind: ai|human, reason}]. full_results.html renders these as the
+    |     amber "Also matching known variants" banner — AI variants get the verify chip
+    |     + one-tap verdict=different POST to the existing proactive endpoint; the part
+    |     dossier hero shows the same as "Also known as" chips. A ZERO-hit MPN on the
+    |     deliberate results page (never the type-ahead) fires a background
+    |     _zero_hit_equivalence_sweep (own session, windowed spellings + the missed key
+    |     through classify_new_pairs limit=5, per-user throttle 5/min) so the next
+    |     search can pool variants.
     +---> Vendor: VendorCard surfaced by its own name/email/phone OR via a matching
     |     VendorContact (vendor_card_id subquery) OR a matching Offer.vendor_name — so a
     |     contact name / stocked MPN leads back to the card. Its contacts, offers, and
