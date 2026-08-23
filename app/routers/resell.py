@@ -48,6 +48,7 @@ from ..dependencies import require_access, require_fresh_token
 from ..file_utils import ParseError, parse_tabular_file
 from ..models import Company, User, VendorCard, VendorResponse
 from ..models.excess import CustomerBid, ExcessLineItem, ExcessList, ExcessOffer, ExcessOfferLine, ExcessOutreach
+from ..rate_limit import check_rate_limit
 from ..services import (
     bid_back_service,
     buyer_affinity_service,
@@ -56,6 +57,7 @@ from ..services import (
     resell_outreach_service,
     task_service,
 )
+from ..services.resell_reply_parse_service import parse_buyer_reply
 from ..template_env import template_response
 from ..utils.csv_export import stream_csv
 from ..utils.normalization import normalize_mpn_key
@@ -2584,6 +2586,49 @@ async def resell_outreach_reply(
             "replies": replies,
         },
     )
+
+
+@router.post("/v2/partials/resell/{list_id}/outreach/{outreach_id}/parse-reply", response_class=HTMLResponse)
+async def resell_outreach_parse_reply(
+    request: Request,
+    list_id: int,
+    outreach_id: int,
+    user: User = Depends(require_access(AccessKey.RESELL)),
+    db: Session = Depends(get_db),
+):
+    """AI-draft offer lines from the buyer's captured reply → the SAME viewer with
+    tappable draft rows pre-filling the convert form. No DB write — the trader reviews
+    and submits each line through the existing quick-add, and the mining pipeline's
+    auto-create path stays untouched (manual by recorded decision).
+
+    Ownership gates BEFORE the paid AI call; per-user throttle 10/min.
+    """
+    el, outreach = _load_outreach_for_owner(db, list_id, outreach_id, user)
+    replies = _conversation_replies(db, outreach.graph_conversation_id)
+
+    def _viewer(**extra):
+        return template_response(
+            "htmx/partials/resell/_reply_viewer.html",
+            {"request": request, "user": user, "list": el, "outreach": outreach, "replies": replies, **extra},
+        )
+
+    if not replies:
+        return _viewer(ai_note="No captured reply text to parse — record the bid manually below.")
+    if not check_rate_limit(user.id, "resell_reply_parse", limit=10, window_seconds=60):
+        return _viewer(ai_note="Too many parse attempts — wait a minute and try again.")
+
+    line_mpns = [
+        pn for (pn,) in db.query(ExcessLineItem.part_number).filter(ExcessLineItem.excess_list_id == el.id).all() if pn
+    ]
+    reply_text = "\n\n".join((vr.body or "") for vr in replies)
+    drafted = await parse_buyer_reply(reply_text, line_mpns=line_mpns)
+    if drafted is None:
+        return _viewer(ai_note="AI could not parse that reply — record the bid manually below.")
+    if not drafted["lines"] and not drafted["take_all"]:
+        # A designed, common outcome (buyer passed / asked a question) — say so
+        # instead of re-rendering a byte-identical viewer with no feedback.
+        return _viewer(ai_note="The AI found no concrete bid in this reply — record it manually below.")
+    return _viewer(ai_lines=drafted["lines"], ai_take_all=drafted["take_all"])
 
 
 @router.post("/api/resell/{list_id}/outreach/{outreach_id}/offer", response_class=HTMLResponse)
