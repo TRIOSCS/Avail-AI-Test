@@ -1,0 +1,22 @@
+{#
+  offers/_vendor_dup_nudge.html — one-tap vendor duplicate nudge (survey idea #10).
+  Swapped into #vendor-dup-nudge when the offer form's vendor_name blurs onto an
+  existing/near vendor. Adopting sets ONLY the input's value to the canonical name
+  (carried in an autoescaped data-name attribute, read via $el.dataset.name so a
+  name with quotes can't break out) and clears the nudge — never blocks the save,
+  never re-links rows. Deterministic: no AI on this path.
+  Receives: match ({id, name, match: exact|fuzzy, score}).
+  Called by: routers/htmx/offers/crud.py (offer_vendor_dup_check).
+#}
+<div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-amber-700">
+  <span>
+    {% if match.match == 'exact' %}“{{ match.name }}” already exists.
+    {% else %}Did you mean “{{ match.name }}” ({{ match.score }}% match)?{% endif %}
+  </span>
+  <button type="button"
+          data-name="{{ match.name }}"
+          @click="document.getElementById('offer-vendor-name').value = $el.dataset.name; document.getElementById('vendor-dup-nudge').innerHTML = ''"
+          class="rounded border border-amber-300 bg-white px-1.5 py-0.5 font-medium text-amber-700 hover:bg-amber-50">
+    Use “{{ match.name }}”
+  </button>
+</div>

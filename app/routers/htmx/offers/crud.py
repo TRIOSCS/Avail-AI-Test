@@ -357,6 +357,42 @@ async def review_offer(
     return await requisition_tab(request=request, req_id=req_id, tab="offers", user=user, db=db)
 
 
+@router.get("/v2/partials/offers/vendor-dup-check", response_class=HTMLResponse)
+async def offer_vendor_dup_check(
+    request: Request,
+    vendor_name: str = "",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Deterministic vendor duplicate nudge for the offer form's vendor_name field.
+
+    The offer form's ``vendor_name`` input hx-gets this route with its own value on
+    blur. Reuses vendor_duplicates.check_vendor_duplicate (exact normalized + pg_trgm
+    fuzzy — NO AI on this per-blur path) and renders a one-tap adopt nudge into
+    #vendor-dup-nudge, or an empty 200 when blank / no match. Adopting only swaps
+    the input's name string; it never blocks the save and never re-links rows.
+    """
+    from ....services.vendor_duplicates import check_vendor_duplicate
+    from . import template_response
+
+    if not vendor_name.strip():
+        return HTMLResponse("")
+    matches = check_vendor_duplicate(vendor_name.strip(), db)
+    if not matches:
+        return HTMLResponse("")
+    top = matches[0]
+    # On an OFFER form an EXACT match is the normal, desired case (this offer just
+    # references an existing vendor — no new row is minted, no fragmentation). Only
+    # FUZZY near-misses are worth a nudge; suppressing exact also means adopting the
+    # canonical name (→ exact on the next blur) never re-nudges.
+    if top["match"] != "fuzzy":
+        return HTMLResponse("")
+    return template_response(
+        "htmx/partials/offers/_vendor_dup_nudge.html",
+        {"request": request, "user": user, "match": top},
+    )
+
+
 @router.get("/v2/partials/requisitions/{req_id}/add-offer-form", response_class=HTMLResponse)
 async def add_offer_form(
     request: Request,
