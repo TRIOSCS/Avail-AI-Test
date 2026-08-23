@@ -5969,7 +5969,19 @@ The header search input (templates/htmx/partials/shared/topbar.html, name="q") d
 into `GET /v2/partials/search/global` → `htmx.search_views.global_search` →
 `global_search_service.fast_search(q, db, user)` → renders the grouped dropdown
 `partials/shared/search_results.html`. Pressing Enter posts `/v2/partials/search/ai` →
-`ai_search(q, db, user)` (Claude Haiku intent parse, falls back to fast_search). "View all"
+Ask AVAIL FIRST (idea #18): `ask_avail_service.answer_question` maps the question to ONE
+whitelisted report template (Claude picks a template NAME from a fixed enum + a params
+dict — NEVER free SQL) and runs the hand-written ORM query; a match renders
+`partials/search/ask_result.html` (uniform table + a transparency line naming the exact
+template+params + a one-tap CSV via `GET /v2/partials/search/ask.csv`, which re-validates
+the template name and streams `stream_csv`). Params are coerced per template (ints bounded
+≤100 rows, dates ISO, strings capped); requisition-scoped templates apply the same
+`_owned_req_ids` RESTRICTED_ROLES gating as search; the dispatch is throttled 20/min/user.
+No match (or throttle) → falls through to `ai_search(q, db, user)` (Claude Haiku intent
+parse, falls back to fast_search). Registry: 13 templates in `ask_avail_service.TEMPLATES`
+(open/by-customer/no-quote requisitions, unanswered/by-customer quotes, stale pending
+offers, vendor offer history, lines awaiting-PO / pending-verify, outstanding prepayments,
+top-searched parts, user field-edits, buy-plan approval cycle time). "View all"
 renders the full page `partials/search/full_results.html` via `/v2/partials/search/results`.
 
 ```

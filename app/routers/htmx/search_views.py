@@ -17,7 +17,7 @@ import asyncio
 import html as html_mod
 import json
 
-from fastapi import APIRouter, Depends, Form, Query, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -65,13 +65,64 @@ async def ai_search_endpoint(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """AI-powered search — triggered by Enter key."""
+    """AI-powered search — triggered by Enter key.
+
+    Ask AVAIL first: a question that maps to a whitelisted report template renders
+    the result table (idea #18). Anything else falls through to entity search.
+    """
+    from ...services.ask_avail_service import answer_question
     from ...services.global_search_service import ai_search
+
+    # Only dispatch the report classifier for question-shaped input (>=3 words or a
+    # trailing '?'), so a bare MPN/vendor lookup never pays a second Claude call on
+    # top of ai_search's own. Throttled per user; on refusal skip to entity search.
+    qs = q.strip()
+    looks_like_question = qs.endswith("?") or len(qs.split()) >= 3
+    if qs and looks_like_question and check_rate_limit(user.id, "ask_avail", limit=20, window_seconds=60):
+        ask = await answer_question(db, user, q)
+        if ask["matched"]:
+            return template_response(
+                "htmx/partials/search/ask_result.html",
+                {**_base_ctx(request, user), "ask": ask, "query": q},
+            )
 
     results = await ai_search(q, db, user)
     return template_response(
         "htmx/partials/shared/search_results.html",
         {**_base_ctx(request, user), "results": results, "query": q, "ai_search": True},
+    )
+
+
+@router.get("/v2/partials/search/ask.csv")
+async def ask_avail_csv(
+    template: str = "",
+    params: str = "",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Stream the exact Ask AVAIL template result as CSV (deterministic re-run).
+
+    Params arrive as a JSON string echoed from the rendered result; an unknown template
+    404s (never free SQL — the name is validated against the registry).
+    """
+    import json as _json
+
+    from ...services.ask_avail_service import TEMPLATES, run_template
+    from ...utils.csv_export import stream_csv
+
+    if template not in TEMPLATES:
+        raise HTTPException(404, "Unknown report template")
+    try:
+        parsed = _json.loads(params) if params else {}
+    except _json.JSONDecodeError:
+        parsed = {}
+    if not isinstance(parsed, dict):
+        parsed = {}
+    cols, rows, _effective = run_template(db, user, template, parsed)
+    return stream_csv(
+        filename=f"{template}.csv",
+        header=cols,
+        rows=([row.get(c) for c in cols] for row in rows),
     )
 
 
