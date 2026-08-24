@@ -291,3 +291,50 @@ class TestBulkActions:
         # Any failure → not green success.
         assert toast["type"] != "success"
         assert toast["type"] == "error"
+
+
+# ── PART 5: persisted dedup decisions ───────────────────────────────────────
+
+
+class TestDedupDecisionModel:
+    def test_models_importable_and_persist(self, db_session, admin_user):
+        from app.models import DedupDecision, DedupMergeAudit
+
+        db_session.add(DedupDecision(entity_type="vendor", id_a=1, id_b=2, decided_by_id=admin_user.id))
+        db_session.add(
+            DedupMergeAudit(
+                actor_id=admin_user.id,
+                entity_type="vendor",
+                action="merge",
+                kept_id=1,
+                kept_name="Keeper",
+                removed_id=2,
+                removed_name="Loser",
+            )
+        )
+        db_session.commit()
+        row = db_session.query(DedupDecision).one()
+        assert (row.entity_type, row.id_a, row.id_b) == ("vendor", 1, 2)
+        assert row.created_at is not None
+        audit = db_session.query(DedupMergeAudit).one()
+        assert audit.action == "merge"
+        assert audit.created_at is not None
+
+    def test_unique_pair_constraint(self, db_session):
+        from sqlalchemy.exc import IntegrityError
+
+        from app.models import DedupDecision
+
+        db_session.add(DedupDecision(entity_type="vendor", id_a=1, id_b=2))
+        db_session.commit()
+        # Same entity_type + same canonical pair → rejected.
+        db_session.add(DedupDecision(entity_type="vendor", id_a=1, id_b=2))
+        with pytest.raises(IntegrityError):
+            db_session.commit()
+        db_session.rollback()
+        # Same ids under a DIFFERENT entity_type is a different pair → allowed.
+        db_session.add(DedupDecision(entity_type="company", id_a=1, id_b=2))
+        db_session.commit()
+        from app.models import DedupDecision as DD
+
+        assert db_session.query(DD).count() == 2

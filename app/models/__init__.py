@@ -39,6 +39,9 @@ from .crm import (
     SiteContactAttachment,  # noqa: F401
 )
 
+# Dedup decisions (persisted dismissals + human merge/delete audit)
+from .dedup_decision import DedupDecision, DedupMergeAudit  # noqa: F401
+
 # Discovery / Prospecting
 from .discovery_batch import DiscoveryBatch  # noqa: F401
 
