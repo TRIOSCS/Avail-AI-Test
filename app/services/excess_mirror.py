@@ -180,12 +180,20 @@ def _find_mirror(db: Session, excess_line_item_id: int) -> Sighting | None:
     )
 
 
-def mirror_line(db: Session, line: ExcessLineItem, *, existing: Sighting | None = None) -> Sighting | None:
+def mirror_line(
+    db: Session,
+    line: ExcessLineItem,
+    *,
+    existing: Sighting | None = None,
+    requirement: Requirement | None = None,
+) -> Sighting | None:
     """Upsert the mirrored Sighting for one ``ExcessLineItem``.
 
     ``existing`` lets a caller that already ran :func:`_find_mirror` (sync_list_mirror's
     revive check) hand over the row instead of paying a second identical lookup; when
-    omitted (or None — no mirror yet) the lookup runs here.
+    omitted (or None — no mirror yet) the lookup runs here. ``requirement`` works the
+    same way for the list's virtual requirement — sync_list_mirror resolves it once
+    for the whole list instead of one query per line.
 
     Builds the row via ``sighting_from_row`` (the dict→ORM single source of truth) then
     sets the excess-specific fields the contract requires:
@@ -217,7 +225,7 @@ def mirror_line(db: Session, line: ExcessLineItem, *, existing: Sighting | None 
             return None
         line.material_card_id = card.id
 
-    requirement = ensure_virtual_requirement(db, excess_list)
+    requirement = requirement or ensure_virtual_requirement(db, excess_list)
     norm_key = normalize_mpn_key(line.part_number)
 
     # Synthesize the market-result dict sighting_from_row consumes. vendor_name is the
@@ -465,7 +473,7 @@ def sync_list_mirror(db: Session, excess_list: ExcessList) -> dict:
     ``skip_ai_estimates=True`` so this never issues a synchronous Claude call inside the
     locked transaction. Returns ``{"mirrored": int, "retired": int}``.
     """
-    ensure_virtual_requirement(db, excess_list)
+    requirement = ensure_virtual_requirement(db, excess_list)
     lines = db.query(ExcessLineItem).filter_by(excess_list_id=excess_list.id).all()
 
     posting_closed = _posting_is_closed(excess_list)
@@ -480,7 +488,7 @@ def sync_list_mirror(db: Session, excess_list: ExcessList) -> dict:
             # not (routine syncs must not fan out rebuilds; see docstring).
             prior = _find_mirror(db, line.id)
             was_live = prior is not None and not prior.is_unavailable
-            if mirror_line(db, line, existing=prior) is not None:
+            if mirror_line(db, line, existing=prior, requirement=requirement) is not None:
                 mirrored += 1
                 if not was_live:
                     revived_card_ids.add(line.material_card_id)

@@ -63,7 +63,7 @@ def _validation_echo_response(validation_token: str) -> PlainTextResponse:
 
 
 @router.post("/api/webhooks/graph")
-@limiter.limit("60/minute")
+@limiter.limit("600/minute")
 async def graph_webhook(
     request: Request,
     db: Session = Depends(get_db),
