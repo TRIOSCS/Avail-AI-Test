@@ -2,7 +2,7 @@
 # pinned lock with:  pip-compile --no-header requirements.in
 # Do NOT edit requirements.txt by hand — it is the compiled, fully-pinned output.
 fastapi==0.141.1
-uvicorn[standard]==0.52.3
+uvicorn[standard]==0.52.4
 sqlalchemy==2.0.52
 psycopg2-binary==2.9.12
 python-multipart==0.0.32
@@ -11,7 +11,7 @@ openpyxl==3.1.5
 jinja2==3.1.6
 # Email Mining v2 hardening
 filetype==1.2.0
-charset-normalizer==3.5.0
+charset-normalizer==3.5.1
 # Credential encryption
 cryptography==50.0.0
 # Observability
@@ -39,12 +39,12 @@ apscheduler>=3.11.3,<4.0
 alembic==1.19.1
 # Caching
 redis[hiredis]==8.1.0
-orjson>=3.11.9,<4.0
+orjson>=3.12.0,<4.0
 # CSRF protection
 starlette-csrf==3.0.0
 # NetComponents integration
 beautifulsoup4==4.15.0
-patchright==1.61.2
+patchright==1.62.1
 # Phone number parsing / E.164 normalization (Google libphonenumber Python port)
 phonenumbers==9.0.37
 # Typed settings from env vars (fail-fast validation at startup)
