@@ -564,7 +564,14 @@ def test_prepayments_list_pending(hub_client: TestClient, db_session: Session, t
     assert f"/v2/partials/approvals/prepayments/{pp.id}/pane" in r.text
 
 
-def test_prepayments_list_closed_shows_resolved(hub_client: TestClient, db_session: Session, test_user: User):
+def test_prepayments_list_approved_unpaid_in_live_and_closed(
+    hub_client: TestClient, db_session: Session, test_user: User
+):
+    """An APPROVED-but-unpaid prepayment is LIVE work (mark-paid / resend live on it):
+
+    it shows in the live list — under Everything else, never Needs your approval — and
+    stays in the Closed audit feed (its request is terminal).
+    """
     req, q, _ = _req_quote(db_session, test_user)
     bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
     ar, pp = _pending_prepay_request(db_session, bp, test_user)
@@ -574,10 +581,50 @@ def test_prepayments_list_closed_shows_resolved(hub_client: TestClient, db_sessi
     db_session.commit()
 
     live_txt = hub_client.get("/v2/partials/approvals/prepayments/list").text
-    assert f"prepay-{pp.id}" not in live_txt
+    assert f"prepay-{pp.id}" in live_txt  # surfaced live now
+    assert "Needs your approval" not in live_txt  # …but never as a decision
 
     closed_txt = hub_client.get("/v2/partials/approvals/prepayments/list?show_closed=true").text
     assert f"prepay-{pp.id}" in closed_txt
+
+
+def test_prepayments_list_paid_stays_out_of_live(hub_client: TestClient, db_session: Session, test_user: User):
+    req, q, _ = _req_quote(db_session, test_user)
+    bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
+    ar, pp = _pending_prepay_request(db_session, bp, test_user)
+    ar.status = ApprovalRequestStatus.APPROVED.value
+    ar.resolved_at = datetime.now(UTC)
+    pp.status = "paid"
+    db_session.commit()
+
+    live_txt = hub_client.get("/v2/partials/approvals/prepayments/list").text
+    assert f"prepay-{pp.id}" not in live_txt
+    closed_txt = hub_client.get("/v2/partials/approvals/prepayments/list?show_closed=true").text
+    assert f"prepay-{pp.id}" in closed_txt
+
+
+def test_prepayments_list_dedupes_prepay_rows(hub_client: TestClient, db_session: Session, test_user: User):
+    """Defensive: an approved prepayment that ALSO still has a REQUESTED request
+    renders exactly once (the decidable REQUESTED row wins)."""
+    req, q, _ = _req_quote(db_session, test_user)
+    bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
+    _ar, pp = _pending_prepay_request(db_session, bp, test_user)  # REQUESTED request
+    pp.status = "approved"
+    db_session.add(  # a second, terminal APPROVED request on the SAME prepayment
+        ApprovalRequest(
+            gate_type=ApprovalGateType.PREPAYMENT,
+            status=ApprovalRequestStatus.APPROVED,
+            subject_type=ApprovalSubjectType.PREPAYMENT,
+            subject_id=pp.id,
+            requested_by_id=test_user.id,
+            owner_id=test_user.id,
+            resolved_at=datetime.now(UTC),
+        )
+    )
+    db_session.commit()
+
+    live_txt = hub_client.get("/v2/partials/approvals/prepayments/list").text
+    assert live_txt.count(f'data-row-key="prepay-{pp.id}"') == 1
 
 
 def test_prepayments_list_amount_visible(hub_client: TestClient, db_session: Session, test_user: User):

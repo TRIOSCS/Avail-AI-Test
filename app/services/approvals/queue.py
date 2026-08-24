@@ -10,6 +10,10 @@ Purpose: ``pending_rows_for_gate`` / ``resolved_rows_for_gate`` build the rows o
              mirrors the engine's decide() gate), plus the routed-to approver names so an
              org-wide viewer sees who owns a request they cannot action.
          ``pending_count_for_gate`` is the org-wide REQUESTED total that drives a tab pill.
+         ``approved_unpaid_rows`` is the PREPAYMENT gate's live approved-but-unwired
+         window (terminal request, Prepayment.status still 'approved') — the rows the
+         Prepayments tab keeps live for mark-paid / resend even though nothing is
+         pending decision.
 
          These per-gate helpers are the leaner successor to the retired three-way
          ``build_queue_view``: the new Approvals hub (routers/htmx/approvals_hub.py) owns
@@ -41,6 +45,7 @@ from ...constants import (
     ApprovalRecipientStatus,
     ApprovalRequestStatus,
     ApprovalSubjectType,
+    PrepaymentStatus,
 )
 from ...models.approvals import ApprovalRequest, ApprovalStep, ApprovalStepRecipient
 from ...models.auth import User
@@ -163,6 +168,52 @@ def resolved_rows_for_gate(db: Session, gate_type, *, scope: str = "all", user: 
             decider_names=decider_names,
         )
         for ar in resolved
+    ]
+
+
+def approved_unpaid_rows(db: Session, user: User, *, scope: str = "all") -> list[RowVM]:
+    """APPROVED-but-unpaid prepayments for the Prepayments tab's LIVE list.
+
+    Once a PREPAYMENT request is decided, its ApprovalRequest goes terminal — so
+    ``pending_rows_for_gate`` can never carry the approved-but-unwired window, yet that
+    window is exactly where the money-loop actions (mark paid / resend pay link) live.
+    This reads the Prepayment lifecycle directly (``status == 'approved'``) via each
+    prepayment's terminal APPROVED request, returning RowVMs with ``can_act=False``
+    (nothing left to decide — a tracking row) and ``prepay_status='approved'``. Newest
+    first (request-id desc). Portable SQLAlchemy only (select/join/in_ — nothing
+    PG-specific); same constant-query contract as the sibling helpers.
+
+    ``scope="mine"`` narrows to requests *user* raised or owns (the SEE-MINE toggle).
+    """
+    q = (
+        select(ApprovalRequest)
+        .join(Prepayment, Prepayment.id == ApprovalRequest.subject_id)
+        .where(
+            ApprovalRequest.gate_type == ApprovalGateType.PREPAYMENT,
+            ApprovalRequest.subject_type == ApprovalSubjectType.PREPAYMENT,
+            ApprovalRequest.status == ApprovalRequestStatus.APPROVED,
+            Prepayment.status == PrepaymentStatus.APPROVED.value,
+        )
+        .order_by(ApprovalRequest.id.desc())
+        .limit(PENDING_CAP)
+    )
+    if scope == "mine":
+        q = q.where(_mine_clause(user))
+    rows = list(db.execute(q).scalars())
+    if not rows:
+        return []
+    requester_names = _requester_names(db, rows)
+    subjects = _load_subjects(db, rows)
+    return [
+        _row_vm(
+            ar,
+            pending=False,
+            actionable=set(),
+            approver_names={},
+            requester_names=requester_names,
+            subjects=subjects,
+        )
+        for ar in rows
     ]
 
 
