@@ -210,7 +210,11 @@
 
     <button @click="
       const rows = document.querySelectorAll('#quote-lines-body tr:not(#empty-lines-row)');
-      let text = 'MPN\tManufacturer\tQty\tCost\tSell\tMargin %\n';
+      {# Header MUST match the first 6 <td>s of line_row.html (MPN, Description,
+         Manufacturer, Qty, Cost, Sell) — the old header omitted Description, so
+         every value after MPN pasted under the WRONG label (Cost under "Sell").
+         Guarded by tests/test_quote_copy_table_header.py. #}
+      let text = 'MPN\tDescription\tManufacturer\tQty\tCost\tSell\n';
       rows.forEach(r => {
         const cells = r.querySelectorAll('td');
         if (cells.length >= 6) {
