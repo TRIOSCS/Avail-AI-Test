@@ -933,3 +933,33 @@ def test_unresolvable_part_skips_mirror(db_session: Session):
 
     assert result is None
     assert _customer_excess_sightings(db_session, company.id) == []
+
+
+# ---------------------------------------------------------------------------
+# Virtual-requirement resolve: once per sync, not once per line
+# ---------------------------------------------------------------------------
+
+
+def test_sync_resolves_virtual_requirement_once_for_whole_list(db_session: Session, monkeypatch):
+    """sync_list_mirror resolves the virtual requirement ONCE and hands it to every
+    mirror_line call — not one lookup per line (the old per-line re-resolve)."""
+    import app.services.excess_mirror as em
+
+    company = _make_company(db_session)
+    owner = _make_user(db_session)
+    el = _make_list_with_lines(db_session, owner, company, ["LM358N", "NE555P", "LM317T"])
+
+    calls = 0
+    real = em.ensure_virtual_requirement
+
+    def counting(db, excess_list):
+        nonlocal calls
+        calls += 1
+        return real(db, excess_list)
+
+    monkeypatch.setattr(em, "ensure_virtual_requirement", counting)
+
+    result = em.sync_list_mirror(db_session, el)
+    db_session.commit()
+    assert result["mirrored"] == 3
+    assert calls == 1
