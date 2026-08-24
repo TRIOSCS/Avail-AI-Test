@@ -15,7 +15,8 @@ where both companies share the same owner.
 
 Called by: scheduler.py (job_auto_dedup)
 Depends on: vendor_merge_service, company_merge_service, company_utils, claude_client,
-    vendor_utils.fuzzy_score_vendor (shared fuzzy scorer — never inline fuzzy)
+    vendor_utils.fuzzy_score_vendor (shared fuzzy scorer — never inline fuzzy),
+    dedup_decision_service (dismissed-pair skip)
 """
 
 from collections.abc import Coroutine
@@ -80,6 +81,12 @@ def _dedup_vendors(db: Session) -> int:
         .all()
     )
 
+    # Human dismissals are final for this job — never merge a dismissed pair, even
+    # if auto_dedup_merge_enabled is ever flipped on.
+    from .dedup_decision_service import load_dismissed_pairs
+
+    dismissed = load_dismissed_pairs(db)["vendor"]
+
     merged = 0
     merged_ids = set()
 
@@ -91,6 +98,9 @@ def _dedup_vendors(db: Session) -> int:
         for b in cards[i + 1 :]:
             if b.id in merged_ids:
                 continue
+
+            if (min(a.id, b.id), max(a.id, b.id)) in dismissed:
+                continue  # human said "not a duplicate" — skip before any scoring
 
             score = fuzzy_score_vendor(a.normalized_name or "", b.normalized_name or "")
             if score < 92:
@@ -164,11 +174,19 @@ def _dedup_companies(db: Session) -> int:
     from .company_merge_service import merge_companies
 
     candidates = find_company_dedup_candidates(db, threshold=92, limit=50)
+
+    from .dedup_decision_service import load_dismissed_pairs
+
+    dismissed = load_dismissed_pairs(db)["company"]
+
     merged = 0
 
     for c in candidates:
+        a_id, b_id = c["company_a"]["id"], c["company_b"]["id"]
+        if (min(a_id, b_id), max(a_id, b_id)) in dismissed:
+            continue  # human-dismissed pair — never auto-merge
         keep_id = c["auto_keep_id"]
-        remove_id = c["company_b"]["id"] if keep_id == c["company_a"]["id"] else c["company_a"]["id"]
+        remove_id = b_id if keep_id == a_id else a_id
         score = c["score"]
 
         # Check if different owners — if so, skip (intentional duplicates)
