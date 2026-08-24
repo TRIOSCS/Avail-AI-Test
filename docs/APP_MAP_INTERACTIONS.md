@@ -3792,6 +3792,17 @@ merges different-`account_owner_id` accounts) are reused AS-IS.
   to paint the queue; HTMX callers still get the bare `spec_codes_pending.html` partial. Coverage:
   `tests/routers/admin/test_spec_codes_pending.py` (HTMX pass renders the queue, full-page reload
   serves the shell).
+- **Manufacturer-alias approvals (idea #11):** same pending-queue pattern for brand normalization.
+  The nightly `_job_harvest_manufacturer_aliases` (knowledge_jobs, 03:45) collects distinct
+  manufacturer strings from offers/sightings/requirements that MISS `normalize_brand_name` (and
+  aren't garbage, already canonical/aliased, or already pending), asks Claude (fast tier, per
+  string) to map each to an existing canonical or `new`/`unknown` — demoting a hallucinated
+  canonical not in the table to `unknown` — and inserts `ManufacturerAliasPending` (migration 214,
+  unique `variant`). The Data-Ops-style admin queue lives at
+  `GET /v2/partials/admin/manufacturer-aliases` (`require_settings_access`, same shell content-
+  negotiation); Approve → `manufacturer_alias_harvester.approve_manufacturer_alias` appends the
+  variant to the canonical `Manufacturer.aliases` JSON (or creates the canonical for a `new`),
+  Reject dismisses. Raw source-reported manufacturer columns are NEVER rewritten.
 - **Vendor-Duplicates loop (same template) had the identical flat-field bug** — it read
   `pair.name_a/id_a/sightings_a` while `vendor_utils.find_vendor_dedup_candidates` returns
   NESTED `{vendor_a:{id,name,sightings}, vendor_b:{…}, score}` → vendor rows rendered blank

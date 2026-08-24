@@ -24,7 +24,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship, validates
 
-from ..constants import RequisitionStatus, SourcingStatus
+from ..constants import ManufacturerAliasStatus, RequisitionStatus, SourcingStatus
 from ..database import UTCDateTime
 from .base import AttachmentColumnsMixin, Base, warn_enum_member
 
@@ -248,6 +248,33 @@ class Manufacturer(Base):
     canonical_name = Column(String(255), nullable=False, unique=True, index=True)
     aliases = Column(JSON, default=list)
     website = Column(String(500))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
+
+
+class ManufacturerAliasPending(Base):
+    """AI-proposed manufacturer alias awaiting human approval (survey idea #11).
+
+    The nightly harvester queues manufacturer strings that miss normalize_brand_name,
+    each mapped by Claude to an existing canonical or 'new'/'unknown'. Approve appends
+    the variant to the canonical Manufacturer.aliases JSON (spec_codes pending pattern);
+    reject flips ``status`` to 'rejected' and KEEPS the row so the same variant is not
+    re-classified (re-billed) and re-queued every night. Never rewrites raw
+    source-reported manufacturer columns.
+
+    Called by: app/services/manufacturer_alias_harvester.py, app/routers/admin/manufacturer_aliases.py
+    Depends on: Base.
+    """
+
+    __tablename__ = "manufacturer_aliases_pending"
+
+    id = Column(Integer, primary_key=True)
+    variant = Column(String(255), nullable=False, unique=True)
+    variant_normalized = Column(String(255), nullable=False, index=True)
+    proposed_canonical = Column(String(255), nullable=True)
+    proposed_kind = Column(String(20), nullable=False)  # existing | new | unknown
+    status = Column(String(20), nullable=False, default=ManufacturerAliasStatus.PENDING.value)  # pending | rejected
+    source = Column(String(20), nullable=False, default="ai")
+    reason = Column(Text, nullable=True)
     created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
 
 
