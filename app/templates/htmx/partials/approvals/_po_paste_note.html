@@ -1,0 +1,9 @@
+{#
+  approvals/_po_paste_note.html — tiny note swapped into #po-paste-result on the
+  PO pane's paste fold (empty paste / AI failure / throttle). Deliberately NOT a
+  pane re-render: the pasted text, the open fold, and any typed-but-unsubmitted
+  confirm-form values stay untouched.
+  Receives: note (str).
+  Called by: routers/htmx/approvals_hub.py (_po_paste_note_fragment).
+#}
+<p class="text-xs text-rose-600">{{ note }}</p>

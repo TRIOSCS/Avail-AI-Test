@@ -19,11 +19,16 @@
        advance: false,
        select(key, url, auto) {
          this.sel = key; this.paneUrl = url;
-         htmx.ajax('GET', url, { target: '#aw-pane', swap: 'innerHTML', indicator: '#aw-pane-ind' });
-         // Nav audit #3: the selection lives in the URL (REPLACE, not push — the
-         // workspace stays ONE history entry, so Back always exits it in one press
-         // and a reload/share restores tab + selected deal exactly).
-         history.replaceState(history.state, '', '/v2/approvals?tab={{ tab }}&select=' + encodeURIComponent(key));
+         // Drive the URL through htmx (replace:) rather than a raw history.replaceState:
+         // htmx then tracks the select URL as its current path and, on the next
+         // navigation, snapshots the whole workspace (tab + this selected pane) under it.
+         // Back into the workspace restores that snapshot from cache INSTANTLY — the
+         // right tab and deal — instead of a full reload (nav audit #3/#6). Still REPLACE,
+         // so the workspace stays ONE history entry and Back exits it in one press.
+         htmx.ajax('GET', url, {
+           target: '#aw-pane', swap: 'innerHTML', indicator: '#aw-pane-ind',
+           replace: '/v2/approvals?tab={{ tab }}&select=' + encodeURIComponent(key),
+         });
          // Auto-selection (aw-default) must not yank the phone viewport mid-pane
          // (nav audit #8) — scroll only on an explicit row tap.
          {# 768 matches Tailwind's md breakpoint — the CSS (max-md) and this JS must

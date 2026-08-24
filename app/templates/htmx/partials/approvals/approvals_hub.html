@@ -14,7 +14,12 @@
 {% from "htmx/partials/shared/_macros.html" import lazy_body %}
 <title hx-swap-oob="true">Approvals — AvailAI</title>
 
-<div class="page-fluid" x-data="{ tab: '{{ active_tab }}' }">
+{# tab seeds from the URL, not the baked active_tab: on a history-cache restore Alpine
+   re-evaluates x-data against the (already-correct) address bar, so the active pill
+   matches the restored tab instead of snapping back to the first-rendered tab. Falls
+   back to active_tab on a fresh load with no ?tab (nav audit #3). #}
+<div class="page-fluid"
+     x-data="{ tab: new URLSearchParams(location.search).get('tab') || '{{ active_tab }}' }">
 
   {# ── Tab switcher — Alpine-reactive highlight so the active pill updates the instant
        a tab is clicked, before the server swap returns. #}

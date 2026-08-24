@@ -13,23 +13,25 @@ Depends on: app.search_service, app.services.global_search_service,
     app.services.sse_broker, app.scoring, app.vendor_utils
 """
 
+import asyncio
 import html as html_mod
 import json
 
-from fastapi import APIRouter, Depends, Form, Query, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from loguru import logger
 from sqlalchemy.orm import Session
 
 from ...constants import AccessKey, ApiSourceStatus, SourcingStatus
 from ...database import get_db
-from ...dependencies import require_access, require_requisition_access, require_user
+from ...dependencies import require_access, require_requisition_access, require_user, user_has_access
 from ...models import ApiSource, Requirement, Requisition, Sighting, SourcingLead, User
-from ...rate_limit import limiter
+from ...rate_limit import check_rate_limit, limiter
 from ...scoring import classify_lead, explain_lead, score_unified
 from ...services.sighting_ingest import sighting_from_row
 from ...services.vendor_unavailability import apply_to_fresh_sightings
 from ...template_env import template_response, templates
+from ...utils.async_helpers import safe_background_task
 from ...utils.sql_helpers import escape_like
 from ._shared import _base_ctx, set_canonical_url
 
@@ -63,14 +65,102 @@ async def ai_search_endpoint(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """AI-powered search — triggered by Enter key."""
+    """AI-powered search — triggered by Enter key.
+
+    Ask AVAIL first: a question that maps to a whitelisted report template renders
+    the result table (idea #18). Anything else falls through to entity search.
+    """
+    from ...services.ask_avail_service import answer_question
     from ...services.global_search_service import ai_search
+
+    # Only dispatch the report classifier for question-shaped input (>=3 words or a
+    # trailing '?'), so a bare MPN/vendor lookup never pays a second Claude call on
+    # top of ai_search's own. Throttled per user; on refusal skip to entity search.
+    qs = q.strip()
+    looks_like_question = qs.endswith("?") or len(qs.split()) >= 3
+    if qs and looks_like_question and check_rate_limit(user.id, "ask_avail", limit=20, window_seconds=60):
+        ask = await answer_question(db, user, q)
+        if ask["matched"]:
+            return template_response(
+                "htmx/partials/search/ask_result.html",
+                {**_base_ctx(request, user), "ask": ask, "query": q},
+            )
 
     results = await ai_search(q, db, user)
     return template_response(
         "htmx/partials/shared/search_results.html",
         {**_base_ctx(request, user), "results": results, "query": q, "ai_search": True},
     )
+
+
+@router.get("/v2/partials/search/ask.csv")
+async def ask_avail_csv(
+    template: str = "",
+    params: str = "",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Stream the exact Ask AVAIL template result as CSV (deterministic re-run).
+
+    Params arrive as a JSON string echoed from the rendered result; an unknown template
+    404s (never free SQL — the name is validated against the registry).
+    """
+    import json as _json
+
+    from ...services.ask_avail_service import TEMPLATES, run_template
+    from ...utils.csv_export import stream_csv
+
+    if template not in TEMPLATES:
+        raise HTTPException(404, "Unknown report template")
+    try:
+        parsed = _json.loads(params) if params else {}
+    except _json.JSONDecodeError:
+        parsed = {}
+    if not isinstance(parsed, dict):
+        parsed = {}
+    cols, rows, _effective = run_template(db, user, template, parsed)
+    return stream_csv(
+        filename=f"{template}.csv",
+        header=cols,
+        rows=([row.get(c) for c in cols] for row in rows),
+    )
+
+
+# One sweep at a time per process: the windowed scan + O(n²) pair-finding is real
+# CPU, and concurrent sweeps would race to classify the same pairs (paying Claude
+# for duplicates the unique index then discards). A later zero-hit search simply
+# re-triggers once the running sweep finishes.
+_sweep_lock = asyncio.Lock()
+
+
+async def _zero_hit_equivalence_sweep(query: str) -> None:
+    """Background classify pass seeded by a zero-hit MPN search (survey idea #21).
+
+    Runs OUTSIDE the request (via safe_background_task, own session) so no LLM
+    ever sits in the search path: the windowed candidate population plus the
+    missed query key go through classify_new_pairs with involving=<missed key> —
+    the budget is spent ONLY on pairs touching the part the user searched (which
+    also caps what rotating junk queries can mint). Best-effort — any failure
+    just means no new verdicts this time.
+    """
+    from ...database import SessionLocal
+    from ...services.part_equivalence import classify_new_pairs, norm_key, windowed_spellings_by_key
+
+    if _sweep_lock.locked():
+        return
+    async with _sweep_lock:
+        db = SessionLocal()
+        try:
+            spellings = await asyncio.to_thread(windowed_spellings_by_key, db)
+            key = norm_key(query)
+            if not key:
+                return
+            spellings.setdefault(key, query.strip().upper())
+            await classify_new_pairs(db, spellings, limit=5, involving=key)
+        except Exception as e:
+            logger.warning("zero-hit equivalence sweep failed for {!r}: {}", query, e)
+        finally:
+            db.close()
 
 
 @router.get("/v2/partials/search/results", response_class=HTMLResponse)
@@ -82,11 +172,33 @@ async def search_results_page(
 ):
     """Full search results page."""
     from ...services.global_search_service import fast_search
+    from ...utils.normalization import normalize_mpn_key
 
     results = fast_search(q, db, user) if q else {"best_match": None, "groups": {}, "total_count": 0}
+    # Zero-hit MPN on the DELIBERATE results page (never the per-keystroke
+    # type-ahead) seeds a background equivalence sweep, throttled per user. The
+    # digit requirement keeps vendor/contact words ("arrow", "smith") from ever
+    # burning AI budget — real MPNs virtually always carry a digit.
+    mpn_key = normalize_mpn_key(q) if q else ""
+    if (
+        q
+        and results["total_count"] == 0
+        and mpn_key
+        and len(mpn_key) >= 4
+        and any(ch.isdigit() for ch in mpn_key)
+        and check_rate_limit(user.id, "eq_zero_hit", limit=5, window_seconds=60)
+    ):
+        await safe_background_task(_zero_hit_equivalence_sweep(q), task_name="zero_hit_equivalence_sweep")
     resp = template_response(
         "htmx/partials/search/full_results.html",
-        {**_base_ctx(request, user), "results": results, "query": q},
+        {
+            **_base_ctx(request, user),
+            "results": results,
+            "query": q,
+            # Gates the equivalence banner's demote button — the verdict endpoint
+            # requires PROACTIVE access, so never render an affordance that 403s.
+            "can_verdict": user_has_access(user, AccessKey.PROACTIVE, db),
+        },
     )
     # Nav audit #10: the refine box used to push /v2/search/results with no ?q, so a
     # reload came back empty. The canonical stamp carries the live query instead.

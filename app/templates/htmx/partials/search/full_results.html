@@ -131,6 +131,33 @@
     </p>
   </div>
 
+  {% if results.equivalence and results.total_count > 0 %}
+  {# ── Equivalence-aware recall (idea #21): the query's stored verdict='same'
+       class also matched — every AI-pooled variant is visibly amber with the
+       one-tap "not the same part" demote (human verdict outranks AI, permanently).
+       The demote is a conformant hx-post BUTTON (no form nested in the span); on
+       success the endpoint's origin=search branch swaps just this chip. ── #}
+  <div class="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+    <span class="font-semibold">Also matching known variants:</span>
+    {% for v in results.equivalence.variants %}
+    <span class="inline-flex items-center gap-1.5 rounded border border-amber-300 bg-white px-1.5 py-0.5 font-mono">
+      {{ v.spelling }}
+      {% if v.kind == 'ai' %}
+      <span class="text-[11px] uppercase tracking-wide text-amber-600" title="{{ v.reason }}">AI — verify</span>
+      {% if can_verdict %}
+      <button type="button"
+              hx-post="/v2/partials/proactive/equivalence/verdict"
+              hx-vals='{{ {"part_a": query, "part_b": v.spelling, "verdict": "different", "origin": "search"}|tojson }}'
+              hx-target="closest span" hx-swap="outerHTML"
+              hx-confirm="Mark {{ v.spelling }} as NOT the same part as {{ query }}? This removes it from pooled results permanently."
+              class="text-amber-500 hover:text-rose-600" title="Not the same part">&#10005;</button>
+      {% endif %}
+      {% endif %}
+    </span>
+    {% endfor %}
+  </div>
+  {% endif %}
+
   {# ── Search input (pre-filled) ── #}
   <div class="relative mb-6 max-w-xl">
     <svg xmlns="http://www.w3.org/2000/svg" class="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-brand-400"

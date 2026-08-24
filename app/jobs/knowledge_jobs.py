@@ -27,6 +27,33 @@ def register_knowledge_jobs(scheduler, settings):
         name="Mark expired knowledge entries",
     )
 
+    scheduler.add_job(
+        _job_harvest_manufacturer_aliases,
+        CronTrigger(hour=3, minute=45),
+        id="harvest_manufacturer_aliases",
+        name="Harvest manufacturer aliases → pending queue (idea #11)",
+    )
+
+
+@_traced_job
+async def _job_harvest_manufacturer_aliases():
+    """Nightly: queue AI-proposed manufacturer aliases for human approval (idea #11).
+
+    Best-effort — a failure just means fewer proposals queued tonight.
+    """
+    from app.database import SessionLocal
+    from app.services.manufacturer_alias_harvester import harvest_manufacturer_aliases
+
+    db = SessionLocal()
+    try:
+        n = await harvest_manufacturer_aliases(db)
+        logger.info("Manufacturer alias harvest: queued {} proposal(s)", n)
+    except Exception as e:
+        logger.exception("manufacturer alias harvest job failed: {}", e)
+        db.rollback()
+    finally:
+        db.close()
+
 
 @_traced_job
 async def _job_expire_stale():

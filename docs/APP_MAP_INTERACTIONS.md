@@ -977,6 +977,24 @@ the unavailability states). A test guards the header↔cell count
 prefilled from the VendorSightingSummary. The modal and the requisitions add-offer
 form share one field grid (offers/_offer_form_fields.html). Offer creation logs
 OFFER_CREATED, so converted/entered offers appear in the Activity tab automatically.
+Offer lead-time structurizer (idea #12): `Offer.lead_time` free text ("2-3wk") gets
+a normalized integer companion `offers.lead_time_days` (+ `lead_time_days_ai` flag;
+migration 213) so offers can be sorted/filtered by lead time. `offer_lead_time.apply_offer_lead_time`
+sets it DETERMINISTICALLY at save (`normalize_lead_time`, NO AI on the interactive
+path); the nightly `_job_backfill_offer_lead_times` (offers_jobs, 03:15) fills unset
+rows deterministically, then uses ONE Haiku call hard-guarded to null (never a guess)
+for the residue, marking those `lead_time_days_ai=True` → the review-queue row shows
+the amber "AI — verify" chip. The AI value never overrides a deterministic parse.
+Vendor dup nudge (idea #10): the shared grid's `vendor_name` input (id
+`offer-vendor-name`) hx-gets `GET /v2/partials/offers/vendor-dup-check` on blur →
+`offers.crud.offer_vendor_dup_check` reuses the DETERMINISTIC
+`vendor_duplicates.check_vendor_duplicate` (exact normalized + pg_trgm fuzzy, NO AI
+on the per-blur path) and swaps `offers/_vendor_dup_nudge.html` into `#vendor-dup-nudge`
+(empty on blank/no-match). Only FUZZY near-misses nudge — an EXACT match is the
+normal offer case (logging against an existing vendor, no new row minted), so it is
+suppressed (which also means adopting the canonical name never re-nudges on the next blur). The nudge's one-tap "Use …" adopt carries the canonical
+name in an autoescaped `data-name` attr and, on `@click`, sets the input's value and
+clears the nudge — never blocks the save, never re-links existing rows.
 
 Vendor rows (_vendor_row.html) also carry a row-level status treatment keyed off
 the server-computed vendor status `vs` (precedence resolved in
@@ -1536,6 +1554,18 @@ email_service.poll_inbox()
     |             per-line campaign sharing one conversation logs the reply once and
     |             never collides with the requisition-side log_email_activity row).
     |             A PURELY-resell reply (no Contact) skips AI parsing (never billed).
+    |             ON-DEMAND prefill (idea #3): the reply viewer's "Draft offer from
+    |             reply (AI)" button POSTs /v2/partials/resell/{list}/outreach/{o}/
+    |             parse-reply (owner-gated + 10/min throttle BEFORE the AI call).
+    |             resell_reply_parse_service.parse_buyer_reply strips HTML, one fast
+    |             claude_structured call scoped to the list's line MPNs → sanitized
+    |             draft rows {mpn,qty,unit_price,lead_time_days,terms,notes,on_list}
+    |             + take_all flag. Rows render in #ai-draft-results (its own swap
+    |             target so a parse never wipes the convert form); "Use" fills the
+    |             existing convert-to-offer form via a single-quoted data-ai-lines
+    |             carrier + JSON.parse (never inlined into double-quoted x-data — XSS
+    |             + attr-truncation). NO db write on parse; convert stays the sole
+    |             write path; the >=0.8 mining auto-create path is untouched.
     |
     v
 ai_email_parser.py
@@ -2138,6 +2168,19 @@ to the token's buyer). Cut-PO task rows (`source_ref buyline:{id}`) deep-link th
 same PO-tab URL. Flag-issue/resolve-issue live inline on the PO pane (buyer
 disclosure + supervisor resolve), as do the prepayment request/state and the
 late-fall-down re-source on the verified branch, and Copy-for-ERP as a `copy_chip`.
+Copy-for-ERP's inbound twin (AI paste-prefill): the awaiting_po pane carries a
+collapsed "Paste PO confirmation…" form (its own `<form>` — never nested in the
+confirm form) POSTing `/v2/partials/approvals/po/{line_id}/parse-confirmation`.
+`po_confirm_paste_service.parse_po_confirmation` finds the PO number regex-first
+(labeled token containing a digit — deterministic wins over the AI), one
+`claude_structured` fast call (interactive `max_attempts=1`) fills est-ship-date
+(ISO-validated), payment_method (whitelisted against PO_LINE_PAYMENT_METHODS),
+and serials (comma-joined into the `purchasing_serial_numbers` field), and
+cross-checks vendor/MPN/qty/unit-cost against the plan line into ADVISORY
+warnings. The route re-renders the SAME pane via `render_po_pane(po_prefill=…)`
+— amber "AI-filled — verify" banner + warnings above the form, NO db write; the
+buyer reviews and still clicks Confirm PO. Empty paste / AI failure render
+`po_paste_note` instead. ERP stays untouched: the human transports the text.
 
 
 **Resell workspace — resell/excess split-panel (Chunk F, ADDITIVE).** `/v2/resell` is
@@ -3749,6 +3792,17 @@ merges different-`account_owner_id` accounts) are reused AS-IS.
   to paint the queue; HTMX callers still get the bare `spec_codes_pending.html` partial. Coverage:
   `tests/routers/admin/test_spec_codes_pending.py` (HTMX pass renders the queue, full-page reload
   serves the shell).
+- **Manufacturer-alias approvals (idea #11):** same pending-queue pattern for brand normalization.
+  The nightly `_job_harvest_manufacturer_aliases` (knowledge_jobs, 03:45) collects distinct
+  manufacturer strings from offers/sightings/requirements that MISS `normalize_brand_name` (and
+  aren't garbage, already canonical/aliased, or already pending), asks Claude (fast tier, per
+  string) to map each to an existing canonical or `new`/`unknown` — demoting a hallucinated
+  canonical not in the table to `unknown` — and inserts `ManufacturerAliasPending` (migration 214,
+  unique `variant`). The Data-Ops-style admin queue lives at
+  `GET /v2/partials/admin/manufacturer-aliases` (`require_settings_access`, same shell content-
+  negotiation); Approve → `manufacturer_alias_harvester.approve_manufacturer_alias` appends the
+  variant to the canonical `Manufacturer.aliases` JSON (or creates the canonical for a `new`),
+  Reject dismisses. Raw source-reported manufacturer columns are NEVER rewritten.
 - **Vendor-Duplicates loop (same template) had the identical flat-field bug** — it read
   `pair.name_a/id_a/sightings_a` while `vendor_utils.find_vendor_dedup_candidates` returns
   NESTED `{vendor_a:{id,name,sightings}, vendor_b:{…}, score}` → vendor rows rendered blank
@@ -5961,7 +6015,19 @@ The header search input (templates/htmx/partials/shared/topbar.html, name="q") d
 into `GET /v2/partials/search/global` → `htmx.search_views.global_search` →
 `global_search_service.fast_search(q, db, user)` → renders the grouped dropdown
 `partials/shared/search_results.html`. Pressing Enter posts `/v2/partials/search/ai` →
-`ai_search(q, db, user)` (Claude Haiku intent parse, falls back to fast_search). "View all"
+Ask AVAIL FIRST (idea #18): `ask_avail_service.answer_question` maps the question to ONE
+whitelisted report template (Claude picks a template NAME from a fixed enum + a params
+dict — NEVER free SQL) and runs the hand-written ORM query; a match renders
+`partials/search/ask_result.html` (uniform table + a transparency line naming the exact
+template+params + a one-tap CSV via `GET /v2/partials/search/ask.csv`, which re-validates
+the template name and streams `stream_csv`). Params are coerced per template (ints bounded
+≤100 rows, dates ISO, strings capped); requisition-scoped templates apply the same
+`_owned_req_ids` RESTRICTED_ROLES gating as search; the dispatch is throttled 20/min/user.
+No match (or throttle) → falls through to `ai_search(q, db, user)` (Claude Haiku intent
+parse, falls back to fast_search). Registry: 13 templates in `ask_avail_service.TEMPLATES`
+(open/by-customer/no-quote requisitions, unanswered/by-customer quotes, stale pending
+offers, vendor offer history, lines awaiting-PO / pending-verify, outstanding prepayments,
+top-searched parts, user field-edits, buy-plan approval cycle time). "View all"
 renders the full page `partials/search/full_results.html` via `/v2/partials/search/results`.
 
 ```
@@ -5971,6 +6037,18 @@ fast_search(query, db, user)  — one universal entity search, grouped results:
     +---> Part number: matches Requirement / Offer / MaterialCard / Sighting by ILIKE
     |     AND by exact normalized_mpn == normalize_mpn_key(query) (separator-insensitive,
     |     index-backed), so a PN returns every req/offer/card/sighting it appears on.
+    +---> Equivalence-aware recall (idea #21): _equivalence_expansion pools the query's
+    |     stored part_equivalences verdict='same' class (human 'different' kill-switch
+    |     respected via expand_part; NO LLM at query time) into every normalized_mpn
+    |     match (`IN (class keys)`), and the result dict carries `equivalence.variants`
+    |     [{spelling, kind: ai|human, reason}]. full_results.html renders these as the
+    |     amber "Also matching known variants" banner — AI variants get the verify chip
+    |     + one-tap verdict=different POST to the existing proactive endpoint; the part
+    |     dossier hero shows the same as "Also known as" chips. A ZERO-hit MPN on the
+    |     deliberate results page (never the type-ahead) fires a background
+    |     _zero_hit_equivalence_sweep (own session, windowed spellings + the missed key
+    |     through classify_new_pairs limit=5, per-user throttle 5/min) so the next
+    |     search can pool variants.
     +---> Vendor: VendorCard surfaced by its own name/email/phone OR via a matching
     |     VendorContact (vendor_card_id subquery) OR a matching Offer.vendor_name — so a
     |     contact name / stocked MPN leads back to the card. Its contacts, offers, and

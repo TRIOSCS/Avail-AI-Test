@@ -17,7 +17,9 @@
    points the convert form at the right POST route (email-convert vs manual log-bid). #}
 {% set manual = manual|default(false) %}
 {% set convert_url = convert_url|default('/api/resell/' ~ el.id ~ '/outreach/' ~ outreach.id ~ '/offer') %}
-<div class="p-5" x-data="{ showConvert: {{ 'false' if outreach.status == 'bid' else 'true' }} }">
+<div class="p-5" id="resell-reply-viewer"
+     x-data="{ showConvert: {{ 'true' if outreach.status != 'bid' else 'false' }} }"
+     @open-convert="showConvert = true">
 
   {# ── Header ─────────────────────────────────────────────────────── #}
   <div class="flex items-start justify-between gap-3 mb-4">
@@ -71,6 +73,73 @@
   </div>
   {% endif %}
 
+  {# ── AI draft from reply (survey idea #3): parse the captured reply into
+       tappable draft rows — the convert form below stays the ONLY write path.
+       This whole block is its own swap target so a parse never re-renders (and
+       wipes) the convert form the trader may be typing in. The AI JSON rides a
+       SINGLE-quoted data-* carrier (tojson escapes < > & ') read via JSON.parse —
+       never inlined into a double-quoted x-data attribute (XSS + attr-truncation).
+       fill(i) opens the form by dispatching open-convert to the viewer root. ── #}
+  {% if not manual %}
+  <div id="ai-draft-results" class="mt-4"
+       data-ai-lines='{{ (ai_lines or []) | tojson }}'
+       x-data="{ parsing: false,
+                 aiLines: JSON.parse($el.dataset.aiLines || '[]'),
+                 fill(i) {
+                   const l = this.aiLines[i];
+                   const f = document.getElementById('convert-offer-form');
+                   if (!f) return;
+                   f.mpn_raw.value = l.mpn || '';
+                   f.quantity.value = l.quantity ?? '';
+                   f.unit_price.value = l.unit_price ?? '';
+                   f.lead_time_days.value = l.lead_time_days ?? '';
+                   f.terms_text.value = l.terms || '';
+                   f.notes.value = l.notes || '';
+                   this.$dispatch('open-convert');
+                 } }">
+    {% if replies %}
+    <button type="button"
+            hx-post="/v2/partials/resell/{{ el.id }}/outreach/{{ outreach.id }}/parse-reply"
+            hx-target="#ai-draft-results" hx-select="#ai-draft-results" hx-swap="outerHTML"
+            @htmx:before-request="parsing = true"
+            @htmx:after-request="parsing = false"
+            data-loading-disable :disabled="parsing"
+            class="btn btn-secondary btn-sm">
+      <span x-text="parsing ? 'Drafting…' : 'Draft offer from reply (AI)'">Draft offer from reply (AI)</span>
+    </button>
+    {% endif %}
+    {% if ai_note %}
+    <p class="mt-2 text-xs text-rose-600">{{ ai_note }}</p>
+    {% endif %}
+    {% if ai_take_all %}
+    <div class="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+      The buyer appears to bid on the <span class="font-semibold">whole list</span> (take-all). This form records
+      <span class="font-semibold">individual per-line offers only</span> — enter each quoted line below and capture
+      the take-all intent in Notes (a take-all scope is not recorded here).
+    </div>
+    {% endif %}
+    {% if ai_lines %}
+    <div class="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2.5 space-y-1.5">
+      <div class="text-xs font-semibold text-amber-800">AI-drafted from the reply — tap Use, verify every field, then save.</div>
+      {% for l in ai_lines %}
+      <div class="flex flex-wrap items-center gap-2 rounded border border-amber-300 bg-white px-2 py-1 text-xs">
+        <span class="font-mono">{{ l.mpn }}</span>
+        <span class="text-gray-600">qty {{ l.quantity if l.quantity is not none else '—' }}</span>
+        <span class="text-gray-600">${{ l.unit_price if l.unit_price is not none else '—' }}</span>
+        {% if l.lead_time_days is not none %}<span class="text-gray-600">{{ l.lead_time_days }}d lead</span>{% endif %}
+        {% if l.terms %}<span class="text-gray-500">{{ l.terms }}</span>{% endif %}
+        {% if not l.on_list %}
+        <span class="rounded bg-rose-50 px-1 py-0.5 text-[11px] text-rose-600 border border-rose-200">not on this list</span>
+        {% endif %}
+        <button type="button" @click="fill({{ loop.index0 }})"
+                class="ml-auto text-accent-600 hover:text-accent-700 font-medium">Use</button>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
   {# ── Convert to offer ───────────────────────────────────────────── #}
   <div class="mt-5 pt-4 border-t border-gray-100">
     <div class="flex items-center justify-between">
@@ -83,7 +152,7 @@
     </div>
     <p class="text-secondary mt-0.5">Record the buyer's price and quantity as a tracked offer.</p>
 
-    <form x-show="showConvert" x-cloak
+    <form x-show="showConvert" x-cloak id="convert-offer-form"
           hx-post="{{ convert_url }}"
           hx-target="#tab-outreach-{{ el.id }}"
           hx-swap="innerHTML"

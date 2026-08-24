@@ -335,3 +335,33 @@ def test_best_match_null_id_uses_boolean_default():
         src_ = (_T / rel).read_text()
         assert 'bm.requisition_id|default("")' not in src_, rel  # the unsafe form is gone
         assert 'bm.requisition_id|default("", true)' in src_, rel
+
+
+# ── 7. Instant workspace-restore (browser-verified 2026-08-20; source pins) ──
+
+
+def test_select_drives_url_through_htmx_not_raw_pushstate():
+    # select() must use htmx's replace: option (so htmx tracks the URL and snapshots the
+    # workspace for instant cache-restore on Back) — NOT raw history.replaceState, which
+    # htmx can't see (guaranteed cache miss → full reload). Browser-verified.
+    src = (_T / "approvals/_workspace_split.html").read_text()
+    assert "replace: '/v2/approvals?tab=" in src
+    # the raw replaceState in select() is gone (the resize/drag localStorage stays)
+    assert "history.replaceState(history.state" not in src
+
+
+def test_hub_tab_seeds_from_url():
+    # The tab-pill highlight (Alpine `tab`) must seed from the URL, so a history restore
+    # shows the restored tab active instead of the first-rendered tab.
+    src = (_T / "approvals/approvals_hub.html").read_text()
+    assert "new URLSearchParams(location.search).get('tab')" in src
+
+
+def test_ap_hub_body_loader_stripped_after_settle():
+    # The one-shot #ap-hub-body load trigger is stripped after it settles so a history
+    # restore uses cached content instead of re-firing the stale-tab loader (F5).
+    js = (Path("app/static/htmx_app.js")).read_text()
+    assert "htmx:afterSettle" in js
+    assert "removeAttribute('hx-trigger')" in js
+    # the old re-render-on-restore listener (which raced the baked loader) is retired
+    assert "addEventListener('htmx:historyRestore'" not in js

@@ -123,7 +123,7 @@ def expand_parts(db: Session, parts: set[str]) -> dict[str, dict]:
     for p in parts:
         base = norm_key(p)
         if not base:
-            out[p] = {"keys": [], "ai_variants": {}}
+            out[p] = {"keys": [], "ai_variants": {}, "pool_source": {}}
             continue
         state[p] = {"keys": {base}, "ai_variants": {}}
         frontier.add(base)
@@ -166,12 +166,20 @@ def expand_parts(db: Session, parts: set[str]) -> dict[str, dict]:
                     continue
                 keys.add(other)
                 info["ai_variants"][other] = r.reason or "AI: same part, ordering-code variant"
+                # Source of the edge that ACTUALLY pooled this key into the class —
+                # surfaces render the amber verify chip iff this is 'ai', regardless
+                # of unrelated human edges elsewhere touching the same key.
+                info.setdefault("pool_source", {})[other] = r.source
                 frontier.add(other)
         if not frontier:
             break
 
     for p, info in state.items():
-        out[p] = {"keys": sorted(info["keys"]), "ai_variants": info["ai_variants"]}
+        out[p] = {
+            "keys": sorted(info["keys"]),
+            "ai_variants": info["ai_variants"],
+            "pool_source": info.get("pool_source", {}),
+        }
     return out
 
 
@@ -218,11 +226,22 @@ def windowed_spellings_by_key(db: Session) -> dict[str, str]:
     return out
 
 
-async def classify_new_pairs(db: Session, spellings_by_key: dict[str, str], *, limit: int = MAX_PAIRS_PER_PASS) -> int:
+async def classify_new_pairs(
+    db: Session,
+    spellings_by_key: dict[str, str],
+    *,
+    limit: int = MAX_PAIRS_PER_PASS,
+    involving: str | None = None,
+) -> int:
     """Ask Claude about not-yet-classified candidate pairs; store verdicts.
 
     One call per pair, Haiku tier, verdict cached forever (a human can flip it).
     Failures skip the pair — it retries on a later pass. Commits.
+
+    ``involving`` restricts classification to pairs touching that normalized key —
+    the zero-hit search sweep uses it so its budget is spent on the part the user
+    actually searched (and so rotating junk queries can only mint verdicts about
+    their own key, never the whole window's backlog).
     """
     from ..utils.claude_client import claude_json
 
@@ -230,6 +249,8 @@ async def classify_new_pairs(db: Session, spellings_by_key: dict[str, str], *, l
     # inline would block the event loop when the window is large. Offload it to a
     # worker thread so the loop stays responsive — same pairs, same verdicts.
     pairs = await asyncio.get_running_loop().run_in_executor(None, find_candidate_pairs, spellings_by_key)
+    if involving:
+        pairs = [p for p in pairs if involving in p]
     if not pairs:
         return 0
     existing = {

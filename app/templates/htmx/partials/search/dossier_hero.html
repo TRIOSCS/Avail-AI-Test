@@ -32,6 +32,31 @@
           <span x-show="copied" x-cloak class="text-[11px] text-emerald-600 font-medium">copied</span>
         </div>
 
+        {% if equivalence %}
+        {# Also-known-as chips (idea #21): stored equivalence verdicts; AI-pooled
+           rows carry the amber verify chip + one-tap permanent demote (conformant
+           hx-post button; origin=search swaps just this chip on success). #}
+        <div class="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-amber-800">
+          <span class="font-medium">Also known as:</span>
+          {% for v in equivalence.variants %}
+          <span class="inline-flex items-center gap-1 rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 font-mono">
+            {{ v.spelling }}
+            {% if v.kind == 'ai' %}
+            <span class="text-[11px] uppercase tracking-wide text-amber-600" title="{{ v.reason }}">AI — verify</span>
+            {% if can_verdict %}
+            <button type="button"
+                    hx-post="/v2/partials/proactive/equivalence/verdict"
+                    hx-vals='{{ {"part_a": mpn, "part_b": v.spelling, "verdict": "different", "origin": "search"}|tojson }}'
+                    hx-target="closest span" hx-swap="outerHTML"
+                    hx-confirm="Mark {{ v.spelling }} as NOT the same part as {{ mpn }}? This removes it from pooled results permanently."
+                    class="text-amber-500 hover:text-rose-600" title="Not the same part">&#10005;</button>
+            {% endif %}
+            {% endif %}
+          </span>
+          {% endfor %}
+        </div>
+        {% endif %}
+
         <div class="mt-2 flex flex-wrap items-center gap-1.5">
           {% if known %}
           {% if card.manufacturer %}<span class="text-sm font-medium text-gray-700">{{ card.manufacturer }}</span>{% endif %}

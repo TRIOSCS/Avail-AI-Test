@@ -1,0 +1,53 @@
+{#
+  search/ask_result.html — Ask AVAIL result table (survey idea #18).
+  Renders one whitelisted report template's (columns, rows) plus a transparency
+  line naming EXACTLY which template + params ran, and a one-tap CSV export that
+  re-runs the same template deterministically. Autoescaped throughout; the CSV
+  route re-validates the template name against the registry.
+  Receives: ask ({template, label, params, columns, rows}), query (str).
+  Called by: routers/htmx/search_views.py (ai_search_endpoint on a template match).
+#}
+<div class="page-fluid px-4 py-6">
+  <div class="mb-4">
+    <h1 class="text-lg font-semibold text-gray-900">{{ ask.label }}</h1>
+    <p class="mt-1 text-xs text-gray-500">
+      Answering “<span class="text-gray-700">{{ query }}</span>” via report
+      <span class="font-mono text-gray-700">{{ ask.template }}</span>{% if ask.params %}
+      with <span class="font-mono text-gray-700">{{ ask.params | tojson }}</span>{% endif %}.
+      <span class="text-gray-400">Runs a fixed query — never free-form SQL.</span>
+    </p>
+  </div>
+
+  <div class="mb-3 flex items-center gap-3">
+    <span class="text-sm text-gray-600">{{ ask.rows | length }} row{{ "s" if ask.rows | length != 1 }}</span>
+    {% if ask.rows %}
+    <a class="btn btn-secondary btn-sm"
+       href="/v2/partials/search/ask.csv?template={{ ask.template | urlencode }}&params={{ ask.params | tojson | urlencode }}">
+      Export CSV
+    </a>
+    {% endif %}
+  </div>
+
+  {% if ask.rows %}
+  <div class="overflow-x-auto rounded-lg border border-gray-200">
+    <table class="compact-table min-w-full">
+      <thead>
+        <tr>
+          {% for col in ask.columns %}<th class="text-left">{{ col.replace('_', ' ') }}</th>{% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in ask.rows %}
+        <tr>
+          {% for col in ask.columns %}<td class="text-xs">{{ row.get(col) if row.get(col) is not none else '—' }}</td>{% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="rounded-lg border border-dashed border-gray-200 p-6 text-center text-sm text-gray-500">
+    No rows matched this report.
+  </div>
+  {% endif %}
+</div>

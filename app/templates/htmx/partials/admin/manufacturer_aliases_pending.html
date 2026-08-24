@@ -1,0 +1,65 @@
+{#
+  admin/manufacturer_aliases_pending.html — pending manufacturer-alias approval queue
+  (survey idea #11). AI-proposed mappings of raw manufacturer variants to a canonical.
+  Approve appends the variant to the canonical's aliases (or creates the canonical);
+  reject dismisses. Every action swaps the whole queue back.
+  Receives: rows (ManufacturerAliasPending[]), user.
+  Called by: routers/admin/manufacturer_aliases.py.
+#}
+<div id="mfr-alias-queue" class="page-fluid px-4 py-6">
+  <div class="mb-4">
+    <h1 class="text-lg font-semibold text-gray-900">Manufacturer aliases — pending review</h1>
+    <p class="mt-1 text-xs text-gray-500">
+      AI-proposed mappings of raw manufacturer spellings to a canonical maker. Approving an
+      <span class="font-medium">existing</span> match appends the spelling as an alias so the
+      brand facet stops splitting; approving a <span class="text-emerald-700">new</span> row
+      creates a brand-new canonical maker. <span class="text-gray-400">Unknown</span> rows
+      (fragments/distributors) are reject-only. Nothing changes the raw source-reported values.
+    </p>
+  </div>
+
+  {% if rows %}
+  <div class="overflow-x-auto rounded-lg border border-gray-200">
+    <table class="compact-table min-w-full">
+      <thead>
+        <tr>
+          <th class="text-left">Variant</th>
+          <th class="text-left">Proposed</th>
+          <th class="text-left">Reason</th>
+          <th class="text-right">Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td class="font-mono text-xs">{{ r.variant }}</td>
+          <td class="text-xs">
+            {% if r.proposed_kind == 'existing' %}→ <span class="font-medium">{{ r.proposed_canonical }}</span>
+            {% elif r.proposed_kind == 'new' %}<span class="text-emerald-700">new canonical</span>
+            {% else %}<span class="text-gray-400">unknown</span>{% endif %}
+          </td>
+          <td class="text-xs text-gray-500">{{ r.reason or '—' }}</td>
+          <td class="text-right whitespace-nowrap">
+            {% if r.proposed_kind != 'unknown' %}
+            <button type="button"
+                    hx-post="/v2/partials/admin/manufacturer-aliases/{{ r.id }}/approve"
+                    hx-target="#mfr-alias-queue" hx-swap="outerHTML"
+                    class="btn btn-primary btn-sm">Approve</button>
+            {% endif %}
+            <button type="button"
+                    hx-post="/v2/partials/admin/manufacturer-aliases/{{ r.id }}/reject"
+                    hx-target="#mfr-alias-queue" hx-swap="outerHTML"
+                    hx-confirm="Dismiss this proposal?"
+                    class="btn btn-secondary btn-sm">Reject</button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="rounded-lg border border-dashed border-gray-200 p-6 text-center text-sm text-gray-500">
+    No pending manufacturer aliases. The nightly harvester queues new proposals here.
+  </div>
+  {% endif %}
+</div>

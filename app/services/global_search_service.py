@@ -19,7 +19,7 @@ import hashlib
 from collections.abc import Callable
 
 from loguru import logger
-from sqlalchemy import String, cast, func, or_
+from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.orm import Query, Session
 
 from app.constants import RESTRICTED_ROLES
@@ -97,19 +97,74 @@ def _scope_owned_reqs(q: Query, user: User | None, *, req_id_col) -> Query:
     return q.filter(req_id_col.in_(owned))
 
 
-def _add_mpn_match(sb: SearchBuilder, query: str, *ilike_cols, normalized_col):
+def _add_mpn_match(sb: SearchBuilder, query: str, *ilike_cols, normalized_col, eq_keys: set[str] | None = None):
     """OR an exact normalized-MPN match onto the ILIKE filter across *ilike_cols*.
 
     Typing "lm-2596s-5.0" canonicalizes to the same key the normalized_mpn columns
     store, so a part number reliably hits its requirement/offer/card/sighting via the
     index even when separators differ. Falls back to plain ILIKE when the query has no
     usable MPN key (e.g. a vendor name).
+
+    ``eq_keys`` (survey idea #21): the query's stored equivalence class — its own key
+    plus verdict='same' variants — so a search under one ordering-suffix spelling
+    recalls rows stored under another. A stored-table join only; never an LLM.
     """
     clause = sb.ilike_filter(*ilike_cols)
     mpn_key = normalize_mpn_key(query)
-    if mpn_key and len(mpn_key) >= 3:
+    if eq_keys and len(eq_keys) > 1:
+        clause = or_(clause, normalized_col.in_(sorted(eq_keys)))
+    elif mpn_key and len(mpn_key) >= 3:
         clause = or_(clause, normalized_col == mpn_key)
     return clause
+
+
+def _equivalence_expansion(db: Session, query: str, user: User | None = None) -> tuple[set[str] | None, dict | None]:
+    """(pooled keys, template-facing variants block) for an MPN query.
+
+    Reads the stored part_equivalences verdicts (human 'different' kill-switch included,
+    via expand_part) — no LLM in the query path. Returns (None, None) when the query has
+    no usable MPN key or the class has no variants. Each variant's kind comes from the
+    EDGE that pooled it (expand_parts' pool_source) so an AI-pooled key always renders
+    the amber verify chip, even when an unrelated human edge touches the same key.
+
+    RESTRICTED_ROLES never see foreign offers'/requirements' raw spellings — their
+    variant spellings come from the verdict rows' own examples instead.
+    """
+    from ..models.intelligence import PartEquivalence
+    from .part_equivalence import expand_part, observed_spellings
+
+    mpn_key = normalize_mpn_key(query)
+    if not mpn_key or len(mpn_key) < 3:
+        return None, None
+    eq = expand_part(db, query)
+    keys = set(eq["keys"])
+    variant_keys = keys - {mpn_key}
+    if not variant_keys:
+        return None, None
+    pool_source = eq.get("pool_source", {})
+    if _is_restricted(user):
+        spellings: dict[str, set[str]] = {}
+        for r in db.scalars(
+            select(PartEquivalence).where(
+                PartEquivalence.verdict == "same",
+                or_(PartEquivalence.key_a.in_(variant_keys), PartEquivalence.key_b.in_(variant_keys)),
+            )
+        ):
+            for k, example in ((r.key_a, r.example_a), (r.key_b, r.example_b)):
+                if k in variant_keys and example:
+                    spellings.setdefault(k, set()).add(example)
+    else:
+        spellings = observed_spellings(db, variant_keys)
+    variants = [
+        {
+            "key": k,
+            "spelling": sorted(spellings.get(k) or {k})[0],
+            "kind": pool_source.get(k, "ai"),
+            "reason": eq["ai_variants"].get(k, ""),
+        }
+        for k in sorted(variant_keys)
+    ]
+    return keys, {"variants": variants}
 
 
 def _to_dict(obj, fields: list[str], entity_type: str) -> dict:
@@ -226,6 +281,11 @@ def fast_search(query: str, db: Session, user: User | None = None) -> dict:
     sb = SearchBuilder(query.strip())
     use_pg = _is_postgres(db)
 
+    # Equivalence-aware recall (survey idea #21): pool the query's stored
+    # verdict='same' class into every MPN-keyed match below. Stored-table join
+    # only — no LLM at query time.
+    eq_keys, equivalence = _equivalence_expansion(db, query, user)
+
     groups = {}
     all_results = []
 
@@ -326,6 +386,7 @@ def fast_search(query: str, db: Session, user: User | None = None) -> dict:
                 Requirement.brand,
                 Requirement.substitutes_text,
                 normalized_col=Requirement.normalized_mpn,
+                eq_keys=eq_keys,
             )
         ),
         user,
@@ -342,7 +403,9 @@ def fast_search(query: str, db: Session, user: User | None = None) -> dict:
     # --- Offers — dedup by (mpn, vendor_name) so same offer combo shows once ---
     q = _scope_owned_reqs(
         db.query(Offer).filter(
-            _add_mpn_match(sb, query, Offer.vendor_name, Offer.mpn, normalized_col=Offer.normalized_mpn)
+            _add_mpn_match(
+                sb, query, Offer.vendor_name, Offer.mpn, normalized_col=Offer.normalized_mpn, eq_keys=eq_keys
+            )
         ),
         user,
         req_id_col=Offer.requisition_id,
@@ -367,6 +430,7 @@ def fast_search(query: str, db: Session, user: User | None = None) -> dict:
             MaterialCard.brand,
             MaterialCard.description,
             normalized_col=MaterialCard.normalized_mpn,
+            eq_keys=eq_keys,
         ),
     )
     if use_pg:
@@ -389,6 +453,7 @@ def fast_search(query: str, db: Session, user: User | None = None) -> dict:
                 Sighting.vendor_name,
                 Sighting.manufacturer,
                 normalized_col=Sighting.normalized_mpn,
+                eq_keys=eq_keys,
             )
         )
         # Exclude the resell mirror's synthetic rows — supply advertising on a hidden
@@ -409,6 +474,9 @@ def fast_search(query: str, db: Session, user: User | None = None) -> dict:
         "best_match": best,
         "groups": groups,
         "total_count": len(all_results),
+        # Present only when the query's equivalence class pooled variant keys —
+        # the results templates render these as the "also matching" banner.
+        "equivalence": equivalence,
     }
 
 

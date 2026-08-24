@@ -24,7 +24,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, joinedload
@@ -43,12 +43,14 @@ from ...database import get_db
 from ...dependencies import can_verify_po_line, require_access, require_user
 from ...models import BuyPlan, BuyPlanLine, User
 from ...models.approvals import ApprovalRequest, ApprovalStep, ApprovalStepRecipient
+from ...rate_limit import check_rate_limit
 from ...services.approvals.po_queue import build_po_queue_view
 from ...services.approvals.queue import (
     buy_plan_tracking_rows,
     pending_rows_for_gate,
     resolved_rows_for_gate,
 )
+from ...services.po_confirm_paste_service import parse_po_confirmation
 from ...template_env import template_response
 from ...utils.csv_export import stream_csv
 from ._shared import _base_ctx
@@ -654,7 +656,14 @@ async def approvals_plan_header(
 # ── Purchase-order line detail pane ─────────────────────────────────────
 
 
-def render_po_pane(request: Request, user: User, db: Session, line_id: int) -> HTMLResponse:
+def render_po_pane(
+    request: Request,
+    user: User,
+    db: Session,
+    line_id: int,
+    *,
+    po_prefill: dict | None = None,
+) -> HTMLResponse:
     """Build + render the PO-line detail pane (shared by the pane GET route and the
     confirm-po / verify-po / resource handlers' origin=approvals_workspace branches).
 
@@ -761,6 +770,11 @@ def render_po_pane(request: Request, user: User, db: Session, line_id: int) -> H
             ),
             # Notes + attachments (2.4): the line's own thread.
             **_notes_ctx(db, user, plan_id=plan.id, line_id=line.id),
+            # PO-confirm paste-prefill (survey idea #6): AI-drafted confirm-form
+            # values + advisory cross-check warnings; the buyer reviews and still
+            # clicks Confirm PO. Empty/failed-parse notes go through the small
+            # #po-paste-result fragment instead (never a pane re-render).
+            "po_prefill": po_prefill,
         }
     )
     return template_response("htmx/partials/approvals/_pane_po_line.html", ctx)
@@ -775,6 +789,60 @@ async def approvals_po_pane(
 ):
     """The Purchase Orders right-hand detail pane for one buy-plan line."""
     return render_po_pane(request, user, db, line_id)
+
+
+@router.post("/v2/partials/approvals/po/{line_id:int}/parse-confirmation", response_class=HTMLResponse)
+async def approvals_po_parse_confirmation(
+    request: Request,
+    line_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+    pasted_text: str = Form(""),
+) -> HTMLResponse:
+    """AI-parse pasted PO-confirmation text → the SAME pane with the confirm form pre-
+    filled (advisory mismatch warnings included).
+
+    No DB write — the buyer reviews every field and still submits Confirm PO themselves.
+    Ownership, line-status, and a per-user throttle all gate BEFORE the paid AI call.
+    Failure paths return a small #po-paste-result fragment (the pasted text and any
+    typed values stay untouched); success retargets the full #aw-pane.
+    """
+    from ...dependencies import get_buyplan_for_user
+
+    line = db.get(BuyPlanLine, line_id, options=[joinedload(BuyPlanLine.offer), joinedload(BuyPlanLine.requirement)])
+    if line is None:
+        raise HTTPException(404, "PO line not found")
+    # Ownership BEFORE any AI work (mirrors approvals_po_sent_check): a restricted
+    # non-owner 404s here, never burning a Claude call on a line they can't view.
+    get_buyplan_for_user(db, user, line.buy_plan_id)
+    if line.status != BuyPlanLineStatus.AWAITING_PO.value:
+        # The line moved on (e.g. confirmed in another tab) — the pane's current
+        # state IS the feedback; no AI call for a form that no longer renders.
+        return render_po_pane(request, user, db, line_id)
+    text = (pasted_text or "").strip()
+    if not text:
+        return _po_paste_note_fragment(request, "Nothing to parse — paste the text first.")
+    if not check_rate_limit(user.id, "po_confirm_paste", limit=10, window_seconds=60):
+        return _po_paste_note_fragment(request, "Too many parse attempts — wait a minute and try again.")
+    prefill = await parse_po_confirmation(
+        text,
+        line_mpn=(line.requirement.primary_mpn if line.requirement else None)
+        or (line.offer.mpn if line.offer else None),
+        vendor_name=line.offer.vendor_name if line.offer else None,
+        quantity=line.quantity,
+        unit_cost=float(line.unit_cost) if line.unit_cost is not None else None,
+    )
+    if prefill is None:
+        return _po_paste_note_fragment(request, "AI could not parse that text — try trimming it and re-parsing.")
+    response = render_po_pane(request, user, db, line_id, po_prefill=prefill)
+    response.headers["HX-Retarget"] = "#aw-pane"
+    return response
+
+
+def _po_paste_note_fragment(request: Request, note: str) -> HTMLResponse:
+    """A tiny note into #po-paste-result — deliberately NOT a pane re-render, so the
+    pasted text, the open fold, and any typed-but-unsubmitted values stay intact."""
+    return template_response("htmx/partials/approvals/_po_paste_note.html", {"request": request, "note": note})
 
 
 @router.get("/v2/partials/approvals/po/{line_id:int}/sent-check", response_class=HTMLResponse)
