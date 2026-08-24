@@ -383,7 +383,15 @@ def _render_data_ops(request: Request, user: User, db: Session) -> Response:
     (a crashed scan must never look like a clean dataset). Reused by the merge
     endpoints so a successful merge re-renders the surrounding list and stale pairs
     drop without a manual refresh.
+    Dismissed pairs (DedupDecision) are post-filtered out here at the router — never
+    inside the six finder backends.
     """
+    from ...services.dedup_decision_service import filter_dismissed_pairs, load_dismissed_pairs
+
+    # ONE query for all three entity types; each list is overfetched by the number
+    # of dismissed pairs of its type so post-filtering can't starve the 30-row page.
+    dismissed = load_dismissed_pairs(db)
+
     vendor_dupes: list = []
     company_dupes: list = []
     vendor_scan_failed = False
@@ -391,14 +399,16 @@ def _render_data_ops(request: Request, user: User, db: Session) -> Response:
     try:
         from ...vendor_utils import find_vendor_dedup_candidates
 
-        vendor_dupes = find_vendor_dedup_candidates(db, threshold=85, limit=30)
+        vendor_dupes = find_vendor_dedup_candidates(db, threshold=85, limit=30 + len(dismissed["vendor"]))
+        vendor_dupes = filter_dismissed_pairs(vendor_dupes, dismissed["vendor"], "vendor")[:30]
     except Exception as e:
         vendor_scan_failed = True
         logger.warning(f"Vendor dedup scan failed: {e}")
     try:
         from ...company_utils import find_company_dedup_candidates
 
-        company_dupes = find_company_dedup_candidates(db, threshold=85, limit=30)
+        company_dupes = find_company_dedup_candidates(db, threshold=85, limit=30 + len(dismissed["company"]))
+        company_dupes = filter_dismissed_pairs(company_dupes, dismissed["company"], "company")[:30]
     except Exception as e:
         company_scan_failed = True
         logger.warning(f"Company dedup scan failed: {e}")
@@ -408,7 +418,8 @@ def _render_data_ops(request: Request, user: User, db: Session) -> Response:
     try:
         from ...services.contact_dedup_candidates import find_contact_dedup_candidates
 
-        contact_dupes = find_contact_dedup_candidates(db, limit=30)
+        contact_dupes = find_contact_dedup_candidates(db, limit=30 + len(dismissed["contact"]))
+        contact_dupes = filter_dismissed_pairs(contact_dupes, dismissed["contact"], "contact")[:30]
     except Exception as e:
         contact_scan_failed = True
         logger.warning(f"Contact dedup scan failed: {e}")

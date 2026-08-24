@@ -368,3 +368,70 @@ class TestDedupDecisionModel:
         from app.models import DedupDecision as DD
 
         assert db_session.query(DD).count() == 2
+
+
+class TestDismissedFiltering:
+    def test_dismissed_vendor_pair_absent_from_next_render(self, admin_client, db_session):
+        # Names must clear the finder's token_sort_ratio threshold (85) or the pair
+        # never surfaces and the test would pass vacuously ("Hidden V" scores 80).
+        v1, v2 = _vendors(db_session, "Hidden Components", "Hidden Components Inc")
+        admin_client.post("/v2/partials/admin/vendor-bulk", data={"action": "dismiss", "pairs": f"{v1.id}-{v2.id}"})
+        html = admin_client.get("/v2/partials/settings/data-ops").text
+        assert f'data-pair="{v1.id}-{v2.id}"' not in html
+        assert f'data-pair="{v2.id}-{v1.id}"' not in html
+        assert "No duplicate vendors found at the current threshold." in html
+
+    def test_dismissed_company_pair_absent_from_next_render(self, admin_client, db_session):
+        c1, c2 = _companies(db_session, "Hidden Co", "Hidden Co Inc")
+        admin_client.post("/v2/partials/admin/company-bulk", data={"action": "dismiss", "pairs": f"{c1.id}-{c2.id}"})
+        html = admin_client.get("/v2/partials/settings/data-ops").text
+        assert f'data-pair="{c1.id}-{c2.id}"' not in html
+        assert f'data-pair="{c2.id}-{c1.id}"' not in html
+        assert "No duplicate companies found at the current threshold." in html
+
+    def test_undismissed_pair_still_renders(self, admin_client, db_session):
+        """Filtering is per-pair — dismissing one pair must not hide another."""
+        v1, v2 = _vendors(db_session, "Keep Components", "Keep Components Inc")
+        v3, v4 = _vendors(db_session, "Gone Components", "Gone Components Inc")
+        admin_client.post("/v2/partials/admin/vendor-bulk", data={"action": "dismiss", "pairs": f"{v3.id}-{v4.id}"})
+        html = admin_client.get("/v2/partials/settings/data-ops").text
+        assert f'data-pair="{v1.id}-{v2.id}"' in html
+        assert f'data-pair="{v3.id}-{v4.id}"' not in html
+
+    def test_overfetch_keeps_page_populated(self, admin_client, db_session):
+        """With 2 dismissed pairs, the finder is asked for 30+2 candidates and the page
+        still shows a full 30 rows after post-filtering (no starvation)."""
+        from unittest.mock import patch
+
+        from app.models import DedupDecision
+
+        calls: list[int] = []
+
+        def fake_finder(db, threshold=85, limit=50):
+            calls.append(limit)
+            return [
+                {
+                    "vendor_a": {"id": 10000 + i, "name": f"Fake {i}", "sightings": 5},
+                    "vendor_b": {"id": 20000 + i, "name": f"Fake {i} Inc", "sightings": 2},
+                    "score": 90,
+                }
+                for i in range(limit)
+            ]
+
+        db_session.add_all(
+            [
+                DedupDecision(entity_type="vendor", id_a=10000, id_b=20000),
+                DedupDecision(entity_type="vendor", id_a=10001, id_b=20001),
+            ]
+        )
+        db_session.commit()
+
+        with patch("app.vendor_utils.find_vendor_dedup_candidates", side_effect=fake_finder):
+            html = admin_client.get("/v2/partials/settings/data-ops").text
+
+        assert calls == [32]  # 30-row page + 2 dismissed = overfetch
+        # Company/contact sections are empty (empty DB), so every data-pair row is
+        # a vendor row: the page is still FULL after post-filtering.
+        assert html.count('data-pair="') == 30
+        assert 'data-pair="10000-20000"' not in html
+        assert 'data-pair="10001-20001"' not in html

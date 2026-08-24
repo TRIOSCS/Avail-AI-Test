@@ -317,3 +317,15 @@ class TestDataOpsRoutes:
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 403
+
+    def test_dismissed_contact_pair_excluded_from_render(self, admin_client, db_session):
+        """A persisted contact dismissal removes the pair from the candidates list."""
+        from app.models import DedupDecision
+
+        a, b = _email_pair(db_session)
+        lo, hi = sorted((a.id, b.id))
+        db_session.add(DedupDecision(entity_type="contact", id_a=lo, id_b=hi))
+        db_session.commit()
+        resp = admin_client.get("/v2/partials/settings/data-ops", headers={"HX-Request": "true"})
+        assert resp.status_code == 200
+        assert "No cross-company contact duplicates found." in resp.text
