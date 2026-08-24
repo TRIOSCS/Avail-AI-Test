@@ -5988,11 +5988,14 @@ Result rendering (list.html, server-side in materials_faceted_partial) — HYBRI
     |     _CARD_SPECS_MAX / _FALLBACK_SPECS_MAX); the router just calls it. Values are
     |     formatted by format_spec_value: SI-prefix promotion from canonical-unit
     |     magnitudes (4700000000 pF → "4.7 mF"; W never kilo-promotes, V/A stop at
-    |     kilo), verbatim units otherwise, Yes/No booleans. NOTE: values render human
-    |     units on cards while the sidebar's numeric range/chip inputs still take
-    |     canonical magnitudes (e.g. pF) — known asymmetry, input-side units are a
-    |     separate feature. tests/test_spec_format.py pins every seed canonical unit
-    |     as either scalable or deliberately verbatim.
+    |     kilo), verbatim units otherwise, Yes/No booleans. The SAME formatter feeds
+    |     the part dossier (format_specs_for_display → dossier_specs.html: schema
+    |     labels + human units + provenance badges) and the sidebar's numeric facets
+    |     (common-value chips show human labels like "100 nF" while submitting the
+    |     canonical magnitude; range inputs carry a "spans X – Y · enter values in
+    |     <unit>" hint — typed min/max are still canonical magnitudes by design).
+    |     tests/test_spec_format.py pins every seed canonical unit as either scalable
+    |     or deliberately verbatim.
     +---> Spec chips also render WITHOUT a commodity: each card's own category's
     |     is_primary schema keys (one batched CommoditySpecSchema query), else the first
     |     3 scalar specs_structured entries. Every chip carries title="label: value".

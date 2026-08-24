@@ -126,6 +126,62 @@ def test_unscoped_speccless_card_shows_no_placeholder(client, db_session: Sessio
     assert "No specs recorded" not in resp.text
 
 
+def test_dossier_specs_render_human_units(client, db_session: Session):
+    """The part dossier shows the SAME formatted values as the material cards — never
+    the raw canonical magnitude — with schema labels and evidence badges."""
+    _seed_cap_schema(db_session)
+    _cap_card(db_session, specs=_FULL_SPECS)
+    db_session.commit()
+
+    resp = client.get("/v2/partials/search/dossier/specs?mpn=GRM188R71H104")
+    assert resp.status_code == 200
+    assert "Capacitance" in resp.text  # schema label, not "capacitance" key
+    assert "100 nF" in resp.text
+    assert "100000" not in resp.text  # raw canonical magnitude never renders
+    assert "source: test" in resp.text  # provenance badge survives the formatting
+
+
+def test_dossier_specs_unknown_keys_prettified(client, db_session: Session):
+    # Separator-free MPN: the dossier resolves by normalize_mpn_key(), which strips
+    # separators, while this fixture stores mpn.lower() verbatim.
+    _cap_card(db_session, mpn="CAPODD1", specs={"weird_key": {"value": 42, "source": "test"}})
+    db_session.commit()
+    resp = client.get("/v2/partials/search/dossier/specs?mpn=CAPODD1")
+    assert resp.status_code == 200
+    assert "weird key" in resp.text
+    assert "42" in resp.text
+
+
+def test_sidebar_numeric_chips_and_range_show_human_units(client, db_session: Session):
+    """Filter sidebar: common-value chips read '100 nF' (canonical value still
+    submitted underneath) and the range inputs carry a human span hint."""
+    from app.models.faceted_search import MaterialSpecFacet
+
+    _seed_cap_schema(db_session)
+    c1 = _cap_card(db_session, mpn="CAP-A", specs=_FULL_SPECS)
+    c2 = _cap_card(db_session, mpn="CAP-B", specs=None)
+    db_session.add_all(
+        [
+            MaterialSpecFacet(
+                material_card_id=c1.id, category="capacitors", spec_key="capacitance", value_numeric=100000
+            ),
+            MaterialSpecFacet(
+                material_card_id=c2.id, category="capacitors", spec_key="capacitance", value_numeric=4700000000
+            ),
+        ]
+    )
+    db_session.commit()
+
+    resp = client.get("/v2/partials/materials/filters/sub?commodity=capacitors")
+    assert resp.status_code == 200
+    # Chip label is human; the toggle still submits the canonical magnitude.
+    assert "100 nF" in resp.text
+    assert "toggleNumericChip" in resp.text and "100000" in resp.text
+    # Range hint explains the observed span and the canonical input unit.
+    assert "spans 100 nF – 4.7 mF" in resp.text
+    assert "enter values in pF" in resp.text
+
+
 def test_off_vocab_category_falls_back_to_raw_spec_keys(client, db_session: Session):
     # ~35 legacy prod cards carry non-canonical categories; the ORM guard is
     # write-time only, so the list must render them via the prettified-key fallback.

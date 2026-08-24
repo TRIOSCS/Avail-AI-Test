@@ -122,6 +122,52 @@ def _spec_scalar(raw: Any) -> str | int | float | bool | None:
     return val if isinstance(val, (str, int, float, bool)) else None
 
 
+def format_specs_for_display(db: Session, category: str | None, specs: dict | None) -> list[dict]:
+    """Full, schema-ordered human view of one card's specs_structured (part dossier).
+
+    Schema-known keys first (primary → sort_order, schema display names + human units),
+    then unknown keys prettified with plain formatting. Each item carries the provenance
+    the dossier's evidence badges need: {label, value, source, confidence}.
+    """
+    from ..models.faceted_search import CommoditySpecSchema
+
+    specs = specs or {}
+    if not specs:
+        return []
+
+    def _item(label: str, value: str, raw: Any) -> dict:
+        src = raw.get("source") if isinstance(raw, dict) else None
+        conf = raw.get("confidence") if isinstance(raw, dict) else None
+        return {"label": label, "value": value, "source": src, "confidence": conf}
+
+    rows: list[CommoditySpecSchema] = []
+    if category:
+        rows = (
+            db.query(CommoditySpecSchema)
+            .filter(CommoditySpecSchema.commodity == category.lower().strip())
+            .order_by(CommoditySpecSchema.is_primary.desc(), CommoditySpecSchema.sort_order)
+            .all()
+        )
+
+    items: list[dict] = []
+    seen: set[str] = set()
+    for s in rows:
+        raw = specs.get(s.spec_key)
+        val = _spec_scalar(raw)
+        if val is None:
+            continue
+        seen.add(str(s.spec_key))
+        items.append(_item(str(s.display_name), format_spec_value(val, s.data_type, s.canonical_unit or s.unit), raw))
+    for k, raw in specs.items():
+        if k in seen:
+            continue
+        val = _spec_scalar(raw)
+        if val is None:
+            continue
+        items.append(_item(k.replace("_", " "), format_spec_value(val), raw))
+    return items
+
+
 def build_card_specs(db: Session, materials: list, commodity: str | None = None) -> None:
     """Attach display spec chips to material cards: m._card_specs, m._specs_more.
 

@@ -76,7 +76,9 @@
   <button type="button" @click='toggleNumericChip({{ spec_key|tojson }}, {{ chip.value|tojson }})'
           :class='(subFilters[{{ (spec_key ~ "__vals")|tojson }}] || []).includes({{ chip.value|tojson }}) ? "bg-accent-50 text-accent-700 border-accent-300" : "bg-white text-gray-500 border-gray-200 hover:border-gray-300"'
           class="px-2 py-0.5 text-[12px] border rounded-lg transition-colors tabular-nums">
-    {{ '%g'|format(chip.value) }} <span class="opacity-60">({{ counts.get(chip.value|string, 0) }})</span>
+    {# Human label ("100 nF") when the service provides one; the submitted value
+       stays the canonical magnitude so filtering is unchanged. #}
+    {{ chip.label or '%g'|format(chip.value) }} <span class="opacity-60">({{ counts.get(chip.value|string, 0) }})</span>
   </button>
   {% endfor %}
 </div>
@@ -104,6 +106,11 @@
            class="w-full px-2 py-1.5 text-sm border border-gray-200 rounded input-focus tabular-nums"
            min="{{ range_data.min }}" max="{{ range_data.max }}" step="any">
   </div>
+  {% if range_data.label %}
+  {# Human reading of the observed span — the inputs themselves take canonical
+     magnitudes (the "(unit)" in the header), so show what that span means. #}
+  <p class="mt-1 text-[11px] text-gray-400">spans {{ range_data.label }}{% if unit %} &middot; enter values in {{ unit }}{% endif %}</p>
+  {% endif %}
   {% else %}
   <p class="text-secondary italic">No data available</p>
   {% endif %}
