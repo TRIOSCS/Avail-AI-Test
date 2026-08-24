@@ -908,6 +908,70 @@ async def admin_contact_merge(
     )
 
 
+@router.post("/v2/partials/admin/vendor-dismiss", response_class=HTMLResponse)
+async def admin_vendor_dismiss(
+    request: Request,
+    id_a: int = Form(...),
+    id_b: int = Form(...),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Persist a single vendor-pair dismissal (hidden until un-dismissed)."""
+    from ...services.dedup_decision_service import record_dismissals
+
+    return _dedup_single_action(
+        request,
+        user,
+        db,
+        action_fn=lambda: record_dismissals(db, "vendor", [(id_a, id_b)], user.id),
+        success_msg_fn=lambda result: "Pair dismissed — hidden until un-dismissed.",
+        error_prefix="Dismiss failed",
+    )
+
+
+@router.post("/v2/partials/admin/company-dismiss", response_class=HTMLResponse)
+async def admin_company_dismiss(
+    request: Request,
+    id_a: int = Form(...),
+    id_b: int = Form(...),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Persist a single company-pair dismissal (hidden until un-dismissed)."""
+    from ...services.dedup_decision_service import record_dismissals
+
+    return _dedup_single_action(
+        request,
+        user,
+        db,
+        action_fn=lambda: record_dismissals(db, "company", [(id_a, id_b)], user.id),
+        success_msg_fn=lambda result: "Pair dismissed — hidden until un-dismissed.",
+        error_prefix="Dismiss failed",
+    )
+
+
+@router.post("/v2/partials/admin/contact-dismiss", response_class=HTMLResponse)
+async def admin_contact_dismiss(
+    request: Request,
+    id_a: int = Form(...),
+    id_b: int = Form(...),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Persist a single contact-pair dismissal (replaces the old Alpine-only client
+    hide, which lost the decision on every re-render)."""
+    from ...services.dedup_decision_service import record_dismissals
+
+    return _dedup_single_action(
+        request,
+        user,
+        db,
+        action_fn=lambda: record_dismissals(db, "contact", [(id_a, id_b)], user.id),
+        success_msg_fn=lambda result: "Pair dismissed — hidden until un-dismissed.",
+        error_prefix="Dismiss failed",
+    )
+
+
 @router.post("/v2/partials/admin/contact-ai-check", response_class=HTMLResponse)
 async def admin_contact_ai_check(
     request: Request,

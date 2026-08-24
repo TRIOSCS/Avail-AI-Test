@@ -435,3 +435,43 @@ class TestDismissedFiltering:
         assert html.count('data-pair="') == 30
         assert 'data-pair="10000-20000"' not in html
         assert 'data-pair="10001-20001"' not in html
+
+
+# ── PART 6: per-row Dismiss endpoints ───────────────────────────────────────
+
+
+class TestPerRowDismiss:
+    def test_vendor_dismiss_persists_and_hides(self, admin_client, db_session, admin_user):
+        from app.models import DedupDecision
+
+        # Names must score ≥85 on token_sort_ratio so the pair WOULD render
+        # absent the dismissal — otherwise the "hidden" asserts pass trivially.
+        v1, v2 = _vendors(db_session, "Row Components", "Row Components Inc")
+        resp = admin_client.post("/v2/partials/admin/vendor-dismiss", data={"id_a": str(v2.id), "id_b": str(v1.id)})
+        assert resp.status_code == 200, resp.text[:1500]
+        row = db_session.query(DedupDecision).one()
+        assert (row.entity_type, row.id_a, row.id_b) == ("vendor", min(v1.id, v2.id), max(v1.id, v2.id))
+        assert row.decided_by_id == admin_user.id
+        # The re-rendered pane (the response body) no longer shows the pair.
+        assert f'data-pair="{v1.id}-{v2.id}"' not in resp.text
+        assert f'data-pair="{v2.id}-{v1.id}"' not in resp.text
+
+    def test_company_dismiss_persists(self, admin_client, db_session):
+        from app.models import DedupDecision
+
+        c1, c2 = _companies(db_session, "Row Co", "Row Co Inc")
+        resp = admin_client.post("/v2/partials/admin/company-dismiss", data={"id_a": str(c1.id), "id_b": str(c2.id)})
+        assert resp.status_code == 200, resp.text[:1500]
+        row = db_session.query(DedupDecision).one()
+        assert row.entity_type == "company"
+
+    def test_render_has_per_row_dismiss_buttons(self, admin_client, db_session):
+        _vendors(db_session)
+        _companies(db_session)
+        html = admin_client.get("/v2/partials/settings/data-ops").text
+        assert "/v2/partials/admin/vendor-dismiss" in html
+        assert "/v2/partials/admin/company-dismiss" in html
+
+    def test_dismiss_requires_admin(self, client, db_session):
+        resp = client.post("/v2/partials/admin/vendor-dismiss", data={"id_a": "1", "id_b": "2"})
+        assert resp.status_code == 403

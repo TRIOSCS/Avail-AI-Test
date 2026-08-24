@@ -6,7 +6,7 @@
    so stale pairs referencing the merged entity drop without a manual refresh).
    Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
-{% from "htmx/partials/settings/_macros.html" import merge_button, delete_both_button, mass_action_bar -%}
+{% from "htmx/partials/settings/_macros.html" import merge_button, delete_both_button, dismiss_button, mass_action_bar -%}
 <div class="space-y-6">
 
   {# ── Pending OEM Spec-Code Mappings (admin approval queue) ── #}
@@ -102,6 +102,7 @@
           {{ merge_button('          ', '/v2/partials/admin/vendor-merge', '#settings-content', keeper.id, loser.id, keeper.name, loser.name, true) }}
           {{ merge_button('          ', '/v2/partials/admin/vendor-merge', '#settings-content', loser.id, keeper.id, loser.name, keeper.name, false) }}
           {{ delete_both_button('/v2/partials/admin/vendor-delete-both', '#settings-content', keeper.id, loser.id, keeper.name, loser.name) }}
+          {{ dismiss_button('/v2/partials/admin/vendor-dismiss', '#settings-content', keeper.id, loser.id) }}
         </div>
       </div>
       {% endfor %}
@@ -174,6 +175,7 @@
           {{ merge_button('          ', '/v2/partials/admin/company-merge', '#settings-content', keeper.id, loser.id, keeper.name, loser.name, true) }}
           {{ merge_button('          ', '/v2/partials/admin/company-merge', '#settings-content', loser.id, keeper.id, loser.name, keeper.name, false) }}
           {{ delete_both_button('/v2/partials/admin/company-delete-both', '#settings-content', keeper.id, loser.id, keeper.name, loser.name) }}
+          {{ dismiss_button('/v2/partials/admin/company-dismiss', '#settings-content', keeper.id, loser.id) }}
         </div>
       </div>
       {% endfor %}
@@ -204,8 +206,7 @@
       {% for pair in contact_dupes %}
       {% set keeper = pair.contact_a if pair.auto_keep_id == pair.contact_a.id else pair.contact_b %}
       {% set loser = pair.contact_b if pair.auto_keep_id == pair.contact_a.id else pair.contact_a %}
-      <div class="px-4 py-3" data-pair="{{ keeper.id }}-{{ loser.id }}"
-           x-data="{ dismissed: false }" x-show="!dismissed">
+      <div class="px-4 py-3" data-pair="{{ keeper.id }}-{{ loser.id }}">
         <div class="flex items-start gap-4">
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 text-sm flex-wrap">
@@ -236,10 +237,7 @@
               AI: same person?
             </button>
             {% endif %}
-            <button type="button" @click="dismissed = true"
-                    class="px-2 py-1 text-xs rounded bg-white text-gray-500 border border-gray-300 hover:bg-gray-50">
-              Dismiss
-            </button>
+            {{ dismiss_button('/v2/partials/admin/contact-dismiss', '#settings-content', keeper.id, loser.id) }}
           </div>
         </div>
       </div>
