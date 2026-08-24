@@ -37,9 +37,15 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=True),
         sa.UniqueConstraint("variant", name="uq_mfr_alias_pending_variant"),
     )
-    op.create_index("ix_mfr_alias_pending_norm", "manufacturer_aliases_pending", ["variant_normalized"])
+    # Name must match SQLAlchemy's auto-name for Column(..., index=True) on the model, or
+    # the fresh-DB schema-drift gate sees a remove_index/add_index pair.
+    op.create_index(
+        "ix_manufacturer_aliases_pending_variant_normalized",
+        "manufacturer_aliases_pending",
+        ["variant_normalized"],
+    )
 
 
 def downgrade() -> None:
-    op.drop_index("ix_mfr_alias_pending_norm", table_name="manufacturer_aliases_pending")
+    op.drop_index("ix_manufacturer_aliases_pending_variant_normalized", table_name="manufacturer_aliases_pending")
     op.drop_table("manufacturer_aliases_pending")
