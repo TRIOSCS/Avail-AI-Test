@@ -1436,7 +1436,7 @@ async def _submit_parse_batch(
     """Submit pending VendorResponses to Anthropic Batch API for parsing."""
     from app.services.response_parser import RESPONSE_PARSE_SCHEMA, SYSTEM_PROMPT
     from app.utils.claude_client import claude_batch_submit
-    from app.utils.text_utils import clean_email_body
+    from app.utils.text_utils import clean_email_body, wrap_untrusted
 
     requests = []
     request_map = {}  # custom_id -> vendor_response_id
@@ -1444,7 +1444,11 @@ async def _submit_parse_batch(
     for vr in pending:
         cid = f"vr-{vr.id}"
         body_truncated = clean_email_body(vr.body or "")[:4000]
-        prompt = f"Vendor: {vr.vendor_name}\nSubject: {vr.subject}\n\nVendor reply:\n{body_truncated}"
+        prompt = (
+            f"Vendor: {vr.vendor_name}\n"
+            f"Subject: {wrap_untrusted(vr.subject or '', tag='subject')}\n"
+            f"\nVendor reply:\n{wrap_untrusted(body_truncated)}"
+        )
         requests.append(
             {
                 "custom_id": cid,

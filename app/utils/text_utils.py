@@ -60,8 +60,15 @@ def wrap_untrusted(text: str, tag: str = "email") -> str:
     Deterministically defuses any literal closing delimiter for ``tag``
     inside the text — "</email>", "</EMAIL>", "</ email>", "< /email>" all
     become "<\\/email>" — so external content can never break out of the
-    delimited block. Only the given tag is defused; other tags are left
-    alone. Callers must truncate BEFORE wrapping, never after.
+    delimited block. Closers whose tag merely STARTS with ``tag`` (e.g.
+    "</emails>" when tag="email") are also defused: the match is a prefix
+    match, fail-safe over-matching by design. Cross-tag closers are
+    deliberately NOT defused, so multi-block prompts carry a containment
+    assumption: place blocks so an earlier block's injected closer for a
+    LATER block's tag cannot truncate it — concretely, subject blocks
+    precede body blocks at every current call site, so a "</email>"
+    smuggled into a subject sits before the "<email>" block even opens.
+    Callers must truncate BEFORE wrapping, never after.
     """
     closing_re = re.compile(rf"<\s*/\s*{re.escape(tag)}", re.IGNORECASE)
     neutralized = closing_re.sub(lambda _match: f"<\\/{tag}", text)
