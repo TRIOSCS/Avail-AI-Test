@@ -5,8 +5,10 @@
   Prefilled from the line: vendor (read-only + a hidden vendor_name fallback), PO#, amount
   (unit_cost*qty, editable), currency (USD default), payment method, test-report flag,
   buyer remarks. Posts (form-encoded) to
-  /v2/partials/prepayments, which spawns the prepayment + its routed approval and returns a
-  success/error toast (no page swap — HX-Reswap:none). The modal closes on any 2xx.
+  /v2/partials/prepayments, which spawns the prepayment + its routed approval; success
+  re-renders the origin surface + toast and closes the modal (any 2xx). Refusals are
+  REAL 400s rendered inline into #pp-modal-error (hx-target-4xx, response-targets ext)
+  so the modal stays open with input intact.
   Receives: line (BuyPlanLine), plan (BuyPlan), vendor_name (str|None), amount (float),
             payment_methods (list of (value, label)).
   Depends on: HTMX, Alpine.js ($dispatch close-modal), Tailwind CSS.
@@ -26,6 +28,11 @@
     <div>Plan #{{ plan.id }}{% if plan.sales_order_number %} · SO <span class='font-mono text-gray-900'>{{ plan.sales_order_number }}</span>{% endif %}</div>
   </div>
 
+  {# Inline refusal surface (SET-03 pattern, settings/users.html): the create route's
+     400s render HERE via hx-target-4xx (response-targets ext, loaded in base.html) —
+     the modal stays open, input intact. Empty div renders zero-height. #}
+  <div id='pp-modal-error'></div>
+
   {# #12: origin/hub_scope thread the caller's surface so the create route re-renders it.
      #2: x-data tracks the PO total (po) vs the entered amount (amt); :data-deviates flags a
      >5% swing that the hx-on::confirm hook turns into a warn-only client confirm. #}
@@ -33,6 +40,7 @@
         hx-target='{% if origin == "approvals_hub" %}#ap-hub-body{% elif origin == "approvals_workspace" %}#aw-pane{% else %}#main-content{% endif %}'
         hx-swap='innerHTML'
         hx-push-url='false'
+        hx-target-4xx='#pp-modal-error'
         x-data='{ po: {{ "%.2f"|format(amount) }}, amt: {{ "%.2f"|format(amount) }} }'
         :data-deviates='po > 0 && isFinite(amt) && Math.abs(amt - po) / po > 0.05 ? "1" : ""'
         hx-on::confirm='if (this.dataset.deviates) { event.preventDefault(); if (window.confirm("The amount differs from the PO line total by more than 5%. Submit anyway?")) event.detail.issueRequest(true); }'

@@ -4,7 +4,9 @@ Covers the buyer-facing request surface added on top of create_prepayment:
   - GET  /v2/partials/prepayments/new?line_id=... renders the modal, prefilled with the
     line's amount (unit_cost*qty) and vendor;
   - POST /v2/partials/prepayments (form-encoded) creates a Prepayment linked to the line
-    and returns 200 + an HX-Trigger success toast;
+    and returns 200 + an HX-Trigger success toast; refusals (bad amount, duplicate
+    pending, no eligible approver, COD) are REAL 400s rendered inline into the modal's
+    #pp-modal-error via hx-target-4xx, so the modal stays open with input intact;
   - can_request_prepayment gates button visibility on ownership + cut-PO state.
 
 Called by: pytest
@@ -315,7 +317,13 @@ def test_po_pane_line_with_pending_prepayment_shows_pill_and_badge(client, db_se
     assert "prepayments/new" not in body  # live button suppressed
 
 
-def test_htmx_create_duplicate_pending_returns_error_toast(client, db_session: Session, test_user: User):
+def test_htmx_create_duplicate_pending_returns_inline_400(client, db_session: Session, test_user: User):
+    """Service refusals render INLINE in the modal at a real 4xx (hx-target-4xx /
+    response-targets).
+
+    The old 200 error-toast contract closed the modal and ate the buyer's input —
+    close_modal_on_success fires on ANY 2xx.
+    """
     _seed_approver(db_session)
     _bp, line = _plan_with_line(db_session, test_user)
     db_session.commit()
@@ -331,11 +339,58 @@ def test_htmx_create_duplicate_pending_returns_error_toast(client, db_session: S
     assert first.status_code == 200, first.text
 
     second = client.post("/v2/partials/prepayments", data=payload, headers={"HX-Request": "true"})
-    # Duplicate-pending guard → honest error toast (200 + HX-Reswap none), not a silent 500.
-    assert second.status_code == 200
-    assert second.headers.get("HX-Reswap") == "none"
-    assert "error" in second.headers.get("HX-Trigger", "")
+    assert second.status_code == 400  # real 4xx → the modal stays open
+    assert "already awaiting approval" in second.text  # the inline reason partial
+    assert "error" in second.headers.get("HX-Trigger", "")  # the toast still fires too
     assert db_session.query(Prepayment).filter_by(buy_plan_line_id=line.id).count() == 1
+
+
+def test_htmx_create_bad_amount_returns_inline_400(client, db_session: Session, test_user: User):
+    _seed_approver(db_session)
+    _bp, line = _plan_with_line(db_session, test_user)
+    db_session.commit()
+
+    r = client.post(
+        "/v2/partials/prepayments",
+        data={
+            "buy_plan_id": line.buy_plan_id,
+            "buy_plan_line_id": line.id,
+            "payment_method": "wire",
+            "total_incl_fees": "not-a-number",
+        },
+        headers={"HX-Request": "true"},
+    )
+    assert r.status_code == 400
+    assert "valid prepayment amount" in r.text
+    assert db_session.query(Prepayment).filter_by(buy_plan_line_id=line.id).count() == 0
+
+
+def test_htmx_create_no_eligible_approver_returns_inline_400(client, db_session: Session, test_user: User):
+    # Deliberately NO approver seeded → routing raises NoEligibleApproverError.
+    _bp, line = _plan_with_line(db_session, test_user)
+    db_session.commit()
+
+    r = client.post(
+        "/v2/partials/prepayments",
+        data={
+            "buy_plan_id": line.buy_plan_id,
+            "buy_plan_line_id": line.id,
+            "payment_method": "wire",
+            "total_incl_fees": "50.00",
+        },
+        headers={"HX-Request": "true"},
+    )
+    assert r.status_code == 400
+    assert db_session.query(Prepayment).filter_by(buy_plan_line_id=line.id).count() == 0
+
+
+def test_request_modal_wires_inline_error_target(client, db_session: Session, test_user: User):
+    _bp, line = _plan_with_line(db_session, test_user)
+    db_session.commit()
+
+    body = client.get(f"/v2/partials/prepayments/new?line_id={line.id}", headers={"HX-Request": "true"}).text
+    assert "hx-target-4xx" in body
+    assert "pp-modal-error" in body
 
 
 # ── Button visibility ────────────────────────────────────────────────────

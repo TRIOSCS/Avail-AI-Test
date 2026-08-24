@@ -51,13 +51,14 @@ _PAYMENT_METHOD_CHOICES: list[tuple[str, str]] = [
 _TRUTHY = {"true", "on", "1", "yes"}
 
 
-def _cod_guard_response(message: str) -> HTMLResponse:
-    """The friendly 400 for a blocked prepayment request (COD line / bad method).
+def _form_error_response(message: str) -> HTMLResponse:
+    """The friendly 400 for a refused prepayment request (COD line, bad method, bad
+    amount, duplicate pending, no eligible approver).
 
-    A small inline partial (rendered into the modal body via response-targets or read
-    by tests) + a toast, with a REAL 400 status so callers and tests see the refusal —
-    unlike ``toast_error_response``'s 200-no-swap, this is a hard guard, not a
-    transient service error.
+    A small inline partial (rendered into the modal's #pp-modal-error via the
+    response-targets ext's hx-target-4xx) + a toast, with a REAL 400 status. Never
+    ``toast_error_response`` here: that returns 200, and close_modal_on_success closes
+    the modal on any 2xx — the buyer's input would be eaten.
     """
     resp = HTMLResponse(
         f'<div class="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">{message}</div>',
@@ -129,8 +130,9 @@ async def prepayment_request_create(
     """HTMX create: parse the request form, spawn the prepayment + approval, toast success.
 
     On a service ValueError (line not on plan / no cut PO / duplicate pending) or
-    NoEligibleApproverError, roll back and return an error toast so the modal surfaces the
-    reason instead of a silent no-op.
+    NoEligibleApproverError, roll back and return the inline 400 partial (rendered into
+    the modal's #pp-modal-error via hx-target-4xx) — a real 4xx keeps the modal open
+    with input intact, where the old 200 error toast closed it.
 
     On success, re-render the caller's surface (threaded via ``origin``, mirroring the
     verify-po / resource routes): ``approvals_hub`` → the PO Approval tab body into
@@ -141,18 +143,18 @@ async def prepayment_request_create(
     try:
         amount = Decimal(total_incl_fees)
     except (InvalidOperation, TypeError):
-        return toast_error_response("Enter a valid prepayment amount.")
+        return _form_error_response("Enter a valid prepayment amount.")
 
     # Method must be one of the frozen prepayment methods (COD is not in the list — a
     # forged/stale form can't smuggle it in).
     if payment_method and payment_method not in {m.value for m in PREPAYMENT_METHODS}:
-        return _cod_guard_response("That payment method can't be prepaid — pick wire, PayPal, credit card, or ACH.")
+        return _form_error_response("That payment method can't be prepaid — pick wire, PayPal, credit card, or ACH.")
 
     # COD guard (spec §8): a COD line has nothing to pay in advance. Enforced HERE, in
     # the router, BEFORE create_prepayment — prepayment_service.py stays untouched.
     guard_line = db.get(BuyPlanLine, buy_plan_line_id)
     if guard_line is not None and guard_line.payment_method == PaymentMethod.COD.value:
-        return _cod_guard_response(
+        return _form_error_response(
             "This PO is COD — payment happens on delivery, so there's nothing to pay in advance."
         )
 
@@ -175,10 +177,10 @@ async def prepayment_request_create(
         db.commit()
     except NoEligibleApproverError as exc:
         db.rollback()
-        return toast_error_response(str(exc))
+        return _form_error_response(str(exc))
     except ValueError as exc:
         db.rollback()
-        return toast_error_response(str(exc))
+        return _form_error_response(str(exc))
 
     # Notify accounting/AP (email + Teams) that a prepayment was requested — DO NOT PAY YET.
     # Fire-and-forget: the runner isolates every error so a failed notice never breaks the
