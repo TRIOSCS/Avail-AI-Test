@@ -19,6 +19,7 @@ from fastapi import APIRouter
 # time so that the patched version is picked up.
 from ...services.credential_service import decrypt_value, encrypt_value, mask_value  # noqa: F401
 from .buy_plan_ops import router as buy_plan_ops_router
+from .manufacturer_aliases import router as manufacturer_aliases_router
 from .spec_codes import router as spec_codes_router
 from .system import router as system_router
 from .users import router as users_router
@@ -26,5 +27,6 @@ from .users import router as users_router
 router = APIRouter()
 router.include_router(system_router)
 router.include_router(spec_codes_router)
+router.include_router(manufacturer_aliases_router)
 router.include_router(buy_plan_ops_router)
 router.include_router(users_router)

@@ -173,6 +173,18 @@ class SourcingStatus(StrEnum):
     ARCHIVE_VIEW = nonmember(frozenset({"won", "lost", "hotlist"}))
 
 
+class ManufacturerAliasStatus(StrEnum):
+    """Review lifecycle for an AI-proposed ManufacturerAliasPending row.
+
+    PENDING awaits human review. REJECTED is retained (not deleted) as a marker so the
+    nightly harvester never re-classifies/re-queues the same variant; approve deletes
+    the row outright once the alias/canonical exists.
+    """
+
+    PENDING = "pending"
+    REJECTED = "rejected"
+
+
 class ExcessListStatus(StrEnum):
     """Status lifecycle for ExcessList records.
 

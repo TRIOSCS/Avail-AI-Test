@@ -96,6 +96,18 @@ def _load_map(db: Session) -> dict[str, str]:
     return mapping
 
 
+def invalidate_canonical_map() -> None:
+    """Drop the memoized alias map so the next _load_map rebuilds it from the table.
+
+    Call after any write that adds a canonical or an alias (e.g. approving a pending
+    manufacturer alias). Without this, a newly-approved alias stays invisible to
+    normalize_brand_name for the whole process lifetime — the map is memoized once and
+    never re-read outside TESTING (the harvester would also keep re-proposing it).
+    """
+    global _canonical_by_lower
+    _canonical_by_lower = None
+
+
 def is_garbage_brand_value(value: str | None) -> bool:
     """True when *value* can never be a real brand/maker name.
 
