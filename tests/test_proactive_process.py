@@ -496,3 +496,51 @@ def test_top_picks_carry_ai_variant_flag(db_session):
     by_mpn = {p["mpn"]: p for p in picks}
     assert by_mpn["GSOT36C"]["has_ai_variants"] is True
     assert by_mpn["LTSR15-NP"]["has_ai_variants"] is False
+
+
+def test_build_draft_offers_stamps_ai_variant_flags(db_session):
+    s = _scenario(db_session)
+    ai = _mk_ai_match(
+        db_session,
+        customer_mpn="GSOT36C",
+        variant_mpn="GSOT36C-E3-08",
+        owner=s["rep"],
+        company=s["beckhoff"],
+        site=s["beckhoff_site"],
+    )
+    build_draft_offers(db_session, s["rep"], [s["m1"].id, ai.id])
+    db_session.commit()
+    draft = db_session.query(ProactiveOffer).one()
+    flags = {li["mpn"]: li["ai_variant"] for li in draft.line_items}
+    assert flags["GSOT36C"] is True
+    assert flags["LTSR15-NP"] is False
+
+
+def test_list_draft_offers_exposes_has_ai_variants(db_session):
+    s = _scenario(db_session)
+    ai = _mk_ai_match(
+        db_session,
+        customer_mpn="GSOT36C",
+        variant_mpn="GSOT36C-E3-08",
+        owner=s["rep"],
+        company=s["beckhoff"],
+        site=s["beckhoff_site"],
+    )
+    build_draft_offers(db_session, s["rep"], [ai.id, s["m3"].id])
+    db_session.commit()
+    by_company = {d["company_name"]: d for d in list_draft_offers(db_session, s["rep"])}
+    assert by_company["Beckhoff"]["has_ai_variants"] is True
+    assert by_company["Siemens"]["has_ai_variants"] is False
+
+
+def test_list_draft_offers_legacy_lines_without_key_read_false(db_session):
+    """Drafts staged before this change have no 'ai_variant' key — the list flag
+    defaults False (the send gate re-derives authoritatively either way)."""
+    s = _scenario(db_session)
+    build_draft_offers(db_session, s["rep"], [s["m1"].id])
+    db_session.commit()
+    draft = db_session.query(ProactiveOffer).one()
+    draft.line_items = [{k: v for k, v in li.items() if k != "ai_variant"} for li in draft.line_items]
+    db_session.commit()
+    drafts = list_draft_offers(db_session, s["rep"])
+    assert drafts[0]["has_ai_variants"] is False

@@ -342,11 +342,13 @@ def _upsert_throttles(db: Session, matches: list, site_id: int, po_id: int, now:
             throttle_by_mpn[m.mpn] = new_throttle
 
 
-def _build_line_items(matches: list, sell_prices: dict) -> tuple[list, Decimal, Decimal]:
+def _build_line_items(matches: list, sell_prices: dict, rollups: dict | None = None) -> tuple[list, Decimal, Decimal]:
     """Line items + totals for a customer offer email.
 
     Shared by the prepare-page send and the Process draft builder. Missing sell prices
-    default to cost x 1.3.
+    default to cost x 1.3. ``rollups`` (compute_offer_rollups output keyed by uppercased
+    part) stamps a per-line ``ai_variant`` display hint; send paths re-derive the flag
+    at send time, so a missing/None rollups only affects display, never the gate.
     """
     line_items = []
     total_sell = Decimal("0")
@@ -384,6 +386,9 @@ def _build_line_items(matches: list, sell_prices: dict) -> tuple[list, Decimal, 
                 "sell_price": float(sell),
                 "condition": offer.condition,
                 "lead_time": offer.lead_time,
+                "ai_variant": bool(
+                    ((rollups or {}).get((m.mpn or "").strip().upper()) or {}).get("has_ai_variants", False)
+                ),
             }
         )
     return line_items, total_sell, total_cost
@@ -505,8 +510,11 @@ async def send_proactive_offer(
     if not recipient_emails:
         raise ValueError("Selected contacts have no email addresses")
 
-    # Build line items
-    line_items, total_sell, total_cost = _build_line_items(matches, sell_prices)
+    # Build line items (rollups also feed the AI-variant send gate — Task 5)
+    from .proactive_matching import compute_offer_rollups
+
+    rollups = compute_offer_rollups(db, parts={(m.mpn or "").strip().upper() for m in matches if m.mpn})
+    line_items, total_sell, total_cost = _build_line_items(matches, sell_prices, rollups)
 
     # Build email HTML — signed by the relationship owner (the matches' rep),
     # even when a manager is the one clicking send.
@@ -655,6 +663,12 @@ def build_draft_offers(db: Session, user: User, match_ids: list[int], *, allow_a
         else:
             skipped_backorder += 1  # no customer account — nowhere to email
 
+    from .proactive_matching import compute_offer_rollups
+
+    # ONE batch rollup call for every staged part (PERF guard — see
+    # get_matches_for_user lines 105-109); stamps the per-line ai_variant hint.
+    rollups = compute_offer_rollups(db, parts={(m.mpn or "").strip().upper() for m in matches if m.mpn})
+
     drafts_created = 0
     needs_contact = 0
     for site_id, site_matches in by_site.items():
@@ -678,7 +692,7 @@ def build_draft_offers(db: Session, user: User, match_ids: list[int], *, allow_a
             if anchor and anchor["price"]:
                 sell_prices[str(m.id)] = float(anchor["price"])
 
-        line_items, total_sell, total_cost = _build_line_items(site_matches, sell_prices)
+        line_items, total_sell, total_cost = _build_line_items(site_matches, sell_prices, rollups)
         if not line_items:
             continue
 
@@ -744,6 +758,7 @@ def list_draft_offers(db: Session, user: User, *, allow_all: bool = False) -> li
                 "line_count": len(po.line_items or []),
                 "match_ids": [li.get("match_id") for li in (po.line_items or []) if li.get("match_id")],
                 "total_sell": float(po.total_sell) if po.total_sell else 0.0,
+                "has_ai_variants": any(li.get("ai_variant") for li in (po.line_items or [])),
             }
         )
     return out
