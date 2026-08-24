@@ -236,11 +236,29 @@ def _render_prepayment_tab(request: Request, user, db: Session, scope: str) -> H
     return render_tab_body(request, user, db, "prepayment", scope)
 
 
+def _lifecycle_rerender(
+    request: Request, user, db: Session, pp: Prepayment, *, origin: str, scope: str
+) -> HTMLResponse:
+    """Post-action surface re-render for the mark-paid / unmark-paid / resend POSTs,
+    mirroring prepayment_request_create's origin threading: ``approvals_workspace`` →
+    the prepayment detail pane into #aw-pane + an awListRefresh nudge (the workspace
+    list repaints itself); anything else → #ap-hub-body, the Prepayments hub-tab body
+    (the unchanged default)."""
+    if origin == "approvals_workspace":
+        from .htmx.approvals_hub import render_prepayment_pane
+
+        resp = render_prepayment_pane(request, user, db, pp.id)
+        resp.headers["HX-Trigger"] = "awListRefresh"
+        return resp
+    return _render_prepayment_tab(request, user, db, scope)
+
+
 @router.get("/v2/partials/prepayments/{prepayment_id}/mark-paid", response_class=HTMLResponse)
 def prepayment_mark_paid_modal(
     request: Request,
     prepayment_id: int,
     scope: str = "all",
+    origin: str = "",
     db: Session = Depends(get_db),
     current_user=Depends(require_user),
 ):
@@ -263,6 +281,7 @@ def prepayment_mark_paid_modal(
         "pp": pp,
         "amount": pp.total_incl_fees,
         "scope": "mine" if scope == "mine" else "all",
+        "origin": origin if origin == "approvals_workspace" else "",
     }
     return template_response("htmx/partials/prepayments/mark_paid_modal.html", ctx)
 
@@ -274,6 +293,7 @@ async def prepayment_mark_paid(
     wire_reference: str | None = Form(None),
     paid_amount: str | None = Form(None),
     scope: str = Form("all"),
+    origin: str = Form(""),
     db: Session = Depends(get_db),
     current_user=Depends(require_user),
 ):
@@ -305,7 +325,7 @@ async def prepayment_mark_paid(
     except ValueError as exc:
         return toast_error_response(str(exc))
 
-    resp = _render_prepayment_tab(request, current_user, db, scope)
+    resp = _lifecycle_rerender(request, current_user, db, pp, origin=origin, scope=scope)
     set_toast(resp, "Prepayment marked paid.", "success", merge=True)
     return resp
 
@@ -315,6 +335,7 @@ async def prepayment_unmark_paid(
     request: Request,
     prepayment_id: int,
     scope: str = Form("all"),
+    origin: str = Form(""),
     db: Session = Depends(get_db),
     current_user=Depends(require_user),
 ):
@@ -333,7 +354,7 @@ async def prepayment_unmark_paid(
     except ValueError as exc:
         return toast_error_response(str(exc))
 
-    resp = _render_prepayment_tab(request, current_user, db, scope)
+    resp = _lifecycle_rerender(request, current_user, db, pp, origin=origin, scope=scope)
     set_toast(resp, "Payment reversed — prepayment returned to approved.", "success", merge=True)
     return resp
 
@@ -343,6 +364,7 @@ async def prepayment_resend_pay_link(
     request: Request,
     prepayment_id: int,
     scope: str = Form("all"),
+    origin: str = Form(""),
     db: Session = Depends(get_db),
     current_user=Depends(require_user),
 ):
@@ -368,6 +390,6 @@ async def prepayment_resend_pay_link(
 
     await run_prepayment_notify_bg(notify_prepayment_approved, pp.id)
 
-    resp = _render_prepayment_tab(request, current_user, db, scope)
+    resp = _lifecycle_rerender(request, current_user, db, pp, origin=origin, scope=scope)
     set_toast(resp, "OK-to-wire email resent to accounting.", "success", merge=True)
     return resp
