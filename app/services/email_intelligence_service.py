@@ -22,10 +22,13 @@ from typing import TYPE_CHECKING
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from app.utils.text_utils import UNTRUSTED_EMAIL_NOTICE, wrap_untrusted
+
 if TYPE_CHECKING:
     from ..models.intelligence import EmailIntelligence
 
-CLASSIFICATION_SYSTEM = """\
+CLASSIFICATION_SYSTEM = (
+    """\
 You are an email classifier for an electronic component brokerage.
 
 Classify this email into exactly ONE category:
@@ -51,6 +54,9 @@ Return ONLY valid JSON:
   "brands_detected": ["Brand1"],
   "commodities_detected": ["Category1"]
 }"""
+    + "\n\n"
+    + UNTRUSTED_EMAIL_NOTICE
+)
 
 
 async def classify_email_ai(
@@ -65,7 +71,11 @@ async def classify_email_ai(
     from app.utils.claude_client import claude_json
     from app.utils.claude_errors import ClaudeError, ClaudeUnavailableError
 
-    prompt = f"From: {sender_email}\nSubject: {subject}\n\nBody:\n{body[:3000]}"
+    prompt = (
+        f"From: {sender_email}\n"
+        f"Subject: {wrap_untrusted(subject, tag='subject')}\n\n"
+        f"Body:\n{wrap_untrusted(body[:3000])}"
+    )
 
     try:
         result = await claude_json(
