@@ -444,3 +444,41 @@ def test_resend_origin_workspace_rerenders_pane(hub_client: TestClient, db_sessi
     assert 'id="aw-pane-body"' in r.text
     assert "awListRefresh" in r.headers.get("HX-Trigger", "")
     assert bg.called
+
+
+# ── Pane lifecycle action buttons (approved / paid branches) ─────────────
+
+
+def test_pane_approved_offers_mark_paid_and_resend(hub_client: TestClient, db_session: Session, test_user: User):
+    _bp, _line, pp, _ar = _approved_pp(db_session, test_user)
+    body = hub_client.get(f"/v2/partials/approvals/prepayments/{pp.id}/pane").text
+    assert f"/v2/partials/prepayments/{pp.id}/mark-paid?origin=approvals_workspace" in body
+    assert f"/v2/partials/prepayments/{pp.id}/resend-pay-link" in body
+    assert "hx-confirm" in body  # resend asks before re-emailing accounting
+    assert f"/v2/partials/prepayments/{pp.id}/unmark-paid" not in body  # not paid yet
+
+
+def test_pane_paid_offers_undo_for_manager_only(hub_client: TestClient, db_session: Session, test_user: User):
+    _bp, _line, pp, _ar = _approved_pp(db_session, test_user)
+    pp.status = PrepaymentStatus.PAID.value
+    pp.paid_at = datetime.now(UTC)
+    pp.pay_token = None
+    db_session.commit()
+
+    body = hub_client.get(f"/v2/partials/approvals/prepayments/{pp.id}/pane").text
+    assert f"/v2/partials/prepayments/{pp.id}/unmark-paid" not in body  # buyer: no undo
+
+    test_user.role = "manager"
+    db_session.commit()
+    body = hub_client.get(f"/v2/partials/approvals/prepayments/{pp.id}/pane").text
+    assert f"/v2/partials/prepayments/{pp.id}/unmark-paid" in body
+    assert "stops working" in body  # the hx-confirm warns the old emailed link dies
+    assert f"/v2/partials/prepayments/{pp.id}/mark-paid" not in body  # paid: no re-mark
+
+
+def test_pane_requested_has_no_lifecycle_buttons(hub_client: TestClient, db_session: Session, test_user: User):
+    _bp, _line, pp, _ar = _prepay_on_line(db_session, test_user)
+    body = hub_client.get(f"/v2/partials/approvals/prepayments/{pp.id}/pane").text
+    assert "/mark-paid" not in body
+    assert "/resend-pay-link" not in body
+    assert "/unmark-paid" not in body

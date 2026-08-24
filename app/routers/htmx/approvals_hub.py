@@ -898,7 +898,7 @@ def render_prepayment_pane(request: Request, user: User, db: Session, prepayment
     gate as render_plan_pane / render_po_pane): a restricted non-owner 404s.
     """
     from ...constants import PREPAYMENT_METHODS, ApprovalSubjectType
-    from ...dependencies import get_buyplan_for_user
+    from ...dependencies import get_buyplan_for_user, is_manager_or_admin
     from ...models.quality_plan import Prepayment
     from ...services.approvals.queue import _beneficiary
     from ...services.stale_guard import stale_token
@@ -959,6 +959,10 @@ def render_prepayment_pane(request: Request, user: User, db: Session, prepayment
             ],
             "method_label": (pp.payment_method or "").upper() or "—",
             "pp_stale_token": stale_token(pp),
+            # Undo-paid is a manager/admin oversight action — this flag MUST mirror the
+            # unmark-paid route's is_manager_or_admin 403 so the button never renders
+            # where the POST would refuse.
+            "can_undo_paid": is_manager_or_admin(user),
             # Notes + attachments (2.4): the prepayment's own thread.
             **_notes_ctx(db, user, plan_id=pp.buy_plan_id, prepayment_id=pp.id),
         }
