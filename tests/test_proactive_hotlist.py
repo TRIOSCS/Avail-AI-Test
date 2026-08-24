@@ -17,13 +17,16 @@ from app.models import (
     CustomerSite,
     MaterialCard,
     Offer,
+    PartEquivalence,
     ProactiveMatch,
     Requirement,
     Requisition,
     User,
 )
 from app.models.purchase_history import CustomerPartHistory
+from app.services.part_equivalence import norm_key
 from app.services.proactive_matching import find_matches_for_offer
+from app.services.proactive_service import get_matches_for_user
 from tests.conftest import engine  # noqa: F401
 
 
@@ -157,3 +160,44 @@ def test_hotlist_and_cph_dedup_one_match(db_session):
     assert len([m for m in matches if m.company_id == co.id]) == 1
     # The hotlist pass owns the slot — purchase history is context, not a seed.
     assert rows[0].match_source == "hotlist"
+
+
+def test_ai_variant_hotlist_match_displays_customer_spelling_with_amber_flag(db_session):
+    """An AI-verdict variant offer against a hotlisted ask stores the CUSTOMER spelling,
+    so the Matches-tab rollup pools the variant supply under it and sets has_ai_variants
+    — the amber 'AI match — verify' chip's data source."""
+    db = db_session
+    d = _setup(db, mpn="GSOT36C")  # hotlist ask under the customer spelling
+    ka, kb = sorted([norm_key("GSOT36C"), norm_key("GSOT36C-E3-08")])
+    db.add(
+        PartEquivalence(
+            key_a=ka,
+            key_b=kb,
+            example_a="GSOT36C",
+            example_b="GSOT36C-E3-08",
+            verdict="same",
+            source="ai",
+            reason="pkg suffix",
+        )
+    )
+    variant_offer = Offer(
+        vendor_name="Sierra",
+        mpn="GSOT36C-E3-08",
+        qty_available=177_630,
+        unit_price=Decimal("0.05"),
+        status="active",
+    )
+    db.add(variant_offer)
+    db.commit()
+
+    matches = find_matches_for_offer(variant_offer.id, db)
+    db.commit()
+    hot = [m for m in matches if m.company_id == d["company"].id]
+    assert len(hot) == 1
+    assert hot[0].mpn == "GSOT36C"  # customer's own spelling wins the display
+
+    result = get_matches_for_user(db, d["owner"].id)
+    rows = [m for g in result["groups"] for m in g["matches"]]
+    row = next(r for r in rows if r["mpn"] == "GSOT36C")
+    assert row["has_ai_variants"] is True
+    assert "GSOT36C-E3-08" in row["variants"]
