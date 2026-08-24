@@ -186,4 +186,70 @@
     {% endif %}
   </div>
 
+  {# ── Contact Dedup (cross-company, SUGGEST-ONLY) ────────── #}
+  {# Cross-site/cross-company contact dupes — the gap the nightly same-site job never sees.
+     Contacts NEVER auto-merge here: every pair is a human decision (Merge / Dismiss), with
+     an optional on-demand "AI: same person?" assist for the fuzzy name+domain band. #}
+  <div class="bg-white border border-line-base rounded-lg overflow-hidden">
+    <div class="px-4 py-3 bg-gray-50 border-b">
+      <h2 class="text-lg font-semibold text-gray-900">Contact Duplicates <span class="text-xs font-normal text-gray-500">· cross-company</span></h2>
+    </div>
+
+    {% if contact_scan_failed %}
+    <div class="px-4 py-8 text-center">
+      <p class="text-sm text-rose-600">Couldn't check for duplicate contacts right now &mdash; try Refresh.</p>
+    </div>
+    {% elif contact_dupes %}
+    <div class="divide-y divide-gray-100">
+      {% for pair in contact_dupes %}
+      {% set keeper = pair.contact_a if pair.auto_keep_id == pair.contact_a.id else pair.contact_b %}
+      {% set loser = pair.contact_b if pair.auto_keep_id == pair.contact_a.id else pair.contact_a %}
+      <div class="px-4 py-3" data-pair="{{ keeper.id }}-{{ loser.id }}"
+           x-data="{ dismissed: false }" x-show="!dismissed">
+        <div class="flex items-start gap-4">
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 text-sm flex-wrap">
+              <span class="font-medium text-gray-900">{{ pair.contact_a.full_name }}</span>
+              <span class="text-gray-400 text-xs">{{ pair.contact_a.company_name }}</span>
+              <span class="text-gray-400">&harr;</span>
+              <span class="font-medium text-gray-900">{{ pair.contact_b.full_name }}</span>
+              <span class="text-gray-400 text-xs">{{ pair.contact_b.company_name }}</span>
+            </div>
+            <p class="text-xs text-gray-600 mt-0.5">
+              {% if pair.match == 'email' %}<span class="text-emerald-700 font-medium">same email</span>
+              {% else %}<span class="text-amber-700 font-medium">{{ pair.score }}% name · same domain</span>{% endif %}
+              &middot; {{ pair.contact_a.email }} / {{ pair.contact_b.email }}
+              &middot; suggested keep: <span class="font-medium text-gray-700">{{ keeper.full_name|truncate(24) }}</span>
+            </p>
+            <div class="mt-1" id="ai-verdict-{{ keeper.id }}-{{ loser.id }}"></div>
+          </div>
+          <div class="flex gap-2 shrink-0 flex-wrap justify-end">
+            {{ merge_button('            ', '/v2/partials/admin/contact-merge', '#settings-content', keeper.id, loser.id, keeper.full_name, loser.full_name, true) }}
+            {{ merge_button('            ', '/v2/partials/admin/contact-merge', '#settings-content', loser.id, keeper.id, loser.full_name, keeper.full_name, false) }}
+            {% if pair.match == 'name+domain' %}
+            <button type="button"
+                    hx-post="/v2/partials/admin/contact-ai-check"
+                    hx-vals='{"id_a": {{ keeper.id }}, "id_b": {{ loser.id }}}'
+                    hx-target="#ai-verdict-{{ keeper.id }}-{{ loser.id }}"
+                    hx-swap="innerHTML"
+                    class="px-2 py-1 text-xs rounded bg-white text-accent-600 border border-accent-200 hover:bg-accent-50">
+              AI: same person?
+            </button>
+            {% endif %}
+            <button type="button" @click="dismissed = true"
+                    class="px-2 py-1 text-xs rounded bg-white text-gray-500 border border-gray-300 hover:bg-gray-50">
+              Dismiss
+            </button>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="px-4 py-8 text-center">
+      <p class="text-sm text-gray-600">No cross-company contact duplicates found.</p>
+    </div>
+    {% endif %}
+  </div>
+
 </div>

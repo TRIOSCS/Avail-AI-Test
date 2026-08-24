@@ -3803,6 +3803,20 @@ merges different-`account_owner_id` accounts) are reused AS-IS.
   negotiation); Approve → `manufacturer_alias_harvester.approve_manufacturer_alias` appends the
   variant to the canonical `Manufacturer.aliases` JSON (or creates the canonical for a `new`),
   Reject dismisses. Raw source-reported manufacturer columns are NEVER rewritten.
+- **Cross-company Contact Duplicates (idea #15):** a third section on the Data Ops tab,
+  alongside Vendor/Company Duplicates and computed the same way — live on each render, no
+  storage (so NO migration). `contact_dedup_candidates.find_contact_dedup_candidates` returns
+  cross-SITE `SiteContact` pairs in two high-precision bands: `email` (identical email,
+  different `customer_site`) and `name+domain` (fuzzy `full_name` ≥82 + shared email domain).
+  It deliberately does NOT surface pure name-only cross-company pairs (too noisy — "same name,
+  different company" is often different people). This is the complement of the nightly
+  `_job_contact_dedup`, which still auto-merges only SAME-site same-email(case) contacts
+  (unchanged — that narrow exact-key collapse is safe). Contacts NEVER auto-merge here: each
+  pair is a human `Merge` (→ `contact_merge_service.merge_contacts` via
+  `POST /v2/partials/admin/contact-merge`, the shared `_dedup_single_action` skeleton) or a
+  client-side `Dismiss`. The `name+domain` band also gets an on-demand "AI: same person?"
+  assist (`POST /v2/partials/admin/contact-ai-check` → `ai_confirm_same_person`, fast tier,
+  per-user rate-limited, single attempt, graceful chip on failure — advisory only).
 - **Vendor-Duplicates loop (same template) had the identical flat-field bug** — it read
   `pair.name_a/id_a/sightings_a` while `vendor_utils.find_vendor_dedup_candidates` returns
   NESTED `{vendor_a:{id,name,sightings}, vendor_b:{…}, score}` → vendor rows rendered blank

@@ -403,11 +403,23 @@ def _render_data_ops(request: Request, user: User, db: Session) -> Response:
         company_scan_failed = True
         logger.warning(f"Company dedup scan failed: {e}")
 
+    contact_dupes: list = []
+    contact_scan_failed = False
+    try:
+        from ...services.contact_dedup_candidates import find_contact_dedup_candidates
+
+        contact_dupes = find_contact_dedup_candidates(db, limit=30)
+    except Exception as e:
+        contact_scan_failed = True
+        logger.warning(f"Contact dedup scan failed: {e}")
+
     ctx = _base_ctx(request, user, "settings")
     ctx["vendor_dupes"] = vendor_dupes
     ctx["company_dupes"] = company_dupes
+    ctx["contact_dupes"] = contact_dupes
     ctx["vendor_scan_failed"] = vendor_scan_failed
     ctx["company_scan_failed"] = company_scan_failed
+    ctx["contact_scan_failed"] = contact_scan_failed
     return template_response("htmx/partials/settings/data_ops.html", ctx)
 
 
@@ -855,6 +867,80 @@ async def admin_company_merge(
         success_msg_fn=_msg,
         error_prefix="Company merge failed",
     )
+
+
+@router.post("/v2/partials/admin/contact-merge", response_class=HTMLResponse)
+async def admin_contact_merge(
+    request: Request,
+    keep_id: int = Form(...),
+    remove_id: int = Form(...),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Merge two cross-site contacts via HTMX (suggest-then-confirm; never
+    automatic)."""
+    from ...models.crm import SiteContact
+    from ...services.contact_merge_service import merge_contacts
+
+    def _msg(result: dict) -> str:
+        kept = db.get(SiteContact, result.get("kept", keep_id))
+        kept_name = kept.full_name if kept and kept.full_name else "contact"
+        return f"Merged into {kept_name}. {result.get('reassigned', 0)} records reassigned."
+
+    return _dedup_single_action(
+        request,
+        user,
+        db,
+        action_fn=lambda: merge_contacts(keep_id, remove_id, db),
+        success_msg_fn=_msg,
+        error_prefix="Contact merge failed",
+    )
+
+
+@router.post("/v2/partials/admin/contact-ai-check", response_class=HTMLResponse)
+async def admin_contact_ai_check(
+    request: Request,
+    id_a: int = Form(...),
+    id_b: int = Form(...),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """On-demand 'AI: same person?' assist for one cross-site contact pair.
+
+    Interactive AI: fast tier, per-user rate limit, single attempt, and a graceful chip on
+    any failure — it must never 500 the Data Ops pane. It only ADVISES; the human still
+    clicks Merge or Dismiss.
+    """
+    from ...dependencies import is_admin
+    from ...models.crm import Company, CustomerSite, SiteContact
+    from ...rate_limit import check_rate_limit
+    from ...services.contact_dedup_candidates import ai_confirm_same_person
+
+    if not is_admin(user):
+        raise HTTPException(403, "Admin only")
+
+    def _load(cid: int) -> dict | None:
+        row = (
+            db.query(SiteContact, Company)
+            .join(CustomerSite, SiteContact.customer_site_id == CustomerSite.id)
+            .join(Company, CustomerSite.company_id == Company.id)
+            .filter(SiteContact.id == cid)
+            .first()
+        )
+        if not row:
+            return None
+        sc, company = row
+        return {"full_name": sc.full_name, "email": sc.email, "company_name": company.name}
+
+    a, b = _load(id_a), _load(id_b)
+    ctx = _base_ctx(request, user, "settings")
+    if a is None or b is None:
+        ctx["verdict"] = {"ok": False, "message": "Contact no longer exists."}
+    elif not check_rate_limit(user.id, "contact_ai_check", limit=15, window_seconds=60):
+        ctx["verdict"] = {"ok": False, "message": "Slow down a moment, then try again."}
+    else:
+        ctx["verdict"] = await ai_confirm_same_person(a, b)
+    return template_response("htmx/partials/settings/_contact_ai_verdict.html", ctx)
 
 
 @router.post("/v2/partials/admin/vendor-delete-both", response_class=HTMLResponse)

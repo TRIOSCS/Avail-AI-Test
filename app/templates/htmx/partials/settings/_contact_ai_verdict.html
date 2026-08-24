@@ -1,0 +1,15 @@
+{# _contact_ai_verdict.html — on-demand "AI: same person?" chip for one contact pair.
+   Receives: verdict — {ok:True, same_person, confidence, reason} or {ok:False, message}.
+   Advisory only; the human still clicks Merge / Dismiss. Swapped into #ai-verdict-<k>-<l>.
+#}
+{% if not verdict.ok %}
+<span class="inline-block text-xs text-gray-500 italic">{{ verdict.message }}</span>
+{% elif verdict.same_person %}
+<span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
+  ✦ Likely same person ({{ (verdict.confidence * 100)|round|int }}%){% if verdict.reason %} — {{ verdict.reason }}{% endif %}
+</span>
+{% else %}
+<span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-gray-50 text-gray-600 border border-gray-200">
+  ✦ Likely different people ({{ (verdict.confidence * 100)|round|int }}%){% if verdict.reason %} — {{ verdict.reason }}{% endif %}
+</span>
+{% endif %}
