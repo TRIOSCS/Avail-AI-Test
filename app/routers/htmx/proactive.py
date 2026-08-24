@@ -500,6 +500,7 @@ async def proactive_send_offer(
     contact_ids = [int(cid) for cid in contact_ids_raw if cid and str(cid).isdigit()]
     subject = form.get("subject", "").strip()
     body = form.get("body", "").strip()
+    confirm_ai_variants = str(form.get("confirm_ai_variants") or "") == "1"
 
     # Parse rep-entered sell prices keyed as sell_price_<match_id>
     sell_prices: dict[str, float] = {}
@@ -546,6 +547,7 @@ async def proactive_send_offer(
             subject=subject or None,
             email_html=email_html,
             allow_all=is_manager_or_admin(user),
+            confirm_ai_variants=confirm_ai_variants,
         )
 
         # Honest outcome (QC 2026-08-13): send_proactive_offer swallows a Graph

@@ -467,12 +467,17 @@ async def send_proactive_offer(
     notes: str | None = None,
     email_html: str | None = None,
     allow_all: bool = False,
+    confirm_ai_variants: bool = False,
 ) -> dict:
     """Send a proactive offer email to a customer.
 
     ``allow_all`` lets a manager/admin send on a rep's matches; the offer is
     always attributed to the matches' salesperson, the mail goes out from the
     ACTOR's mailbox. Returns the created ProactiveOffer dict.
+
+    Raises ValueError when the live rollup pools AI-matched variant spellings
+    for any selected match and ``confirm_ai_variants`` was not passed — the
+    same server-enforced confirm as the prepared-send path.
     """
     # Load and validate matches
     query = db.query(ProactiveMatch).filter(ProactiveMatch.id.in_(match_ids))
@@ -514,6 +519,12 @@ async def send_proactive_offer(
     from .proactive_matching import compute_offer_rollups
 
     rollups = compute_offer_rollups(db, parts={(m.mpn or "").strip().upper() for m in matches if m.mpn})
+
+    # AI-variant send gate (2026-08-24): same rule as send_draft_offer, enforced
+    # before the ProactiveOffer row is created so a refusal leaves no residue.
+    if any(r["has_ai_variants"] for r in rollups.values()) and not confirm_ai_variants:
+        raise ValueError("This offer includes AI-matched variant part numbers — verify before sending")
+
     line_items, total_sell, total_cost = _build_line_items(matches, sell_prices, rollups)
 
     # Build email HTML — signed by the relationship owner (the matches' rep),
