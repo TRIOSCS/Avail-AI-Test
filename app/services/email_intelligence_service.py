@@ -531,7 +531,8 @@ FACT_EXPIRY_DEFAULTS: dict[str, int | None] = {
     "condition_note": 180,
 }
 
-FACT_EXTRACTION_PROMPT = """\
+FACT_EXTRACTION_PROMPT = (
+    """\
 You are an expert at extracting durable facts from electronic component \
 vendor emails. Extract concrete, reusable facts — NOT pricing data \
 (that is handled separately).
@@ -555,6 +556,9 @@ For each fact found, provide:
 - confidence: 0.0-1.0
 
 Only extract facts you are confident about. Skip vague or ambiguous statements."""
+    + "\n\n"
+    + UNTRUSTED_EMAIL_NOTICE
+)
 
 FACT_EXTRACTION_SCHEMA = {
     "type": "object",
@@ -613,7 +617,7 @@ async def extract_durable_facts(
 
         from app.utils.claude_client import claude_structured
 
-        prompt = f"From: {sender_name} <{sender_email}>\n\nBody:\n{body[:3000]}"
+        prompt = f"From: {sender_name} <{sender_email}>\n\nBody:\n{wrap_untrusted(body[:3000])}"
 
         result = await claude_structured(
             prompt,
