@@ -290,6 +290,9 @@ def get_top_picks(db: Session, user_id: int, *, limit: int = 10) -> list[dict]:
                 "score": m.match_score or 0,
                 "available_qty": rollup["available_qty"],
                 "low_cost": rollup["low_cost"],
+                # Equivalence-pooled AI hint (2026-08-24): parity with the
+                # Matches-tab rows this strip sits above.
+                "has_ai_variants": rollup.get("has_ai_variants", False),
                 "requirement_count": m.requirement_count or 0,
                 "last_asked_display": (
                     f"{m.last_asked_at.month}/{m.last_asked_at.day}/{m.last_asked_at.year}" if m.last_asked_at else ""

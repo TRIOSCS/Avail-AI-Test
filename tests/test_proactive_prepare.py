@@ -855,3 +855,57 @@ def test_afterswap_reinits_alpine_on_proactive_contact_list():
     assert "rfq-affinity-section" in allowlist
     assert "settings-content" in allowlist
     assert "lead-drawer-content" in allowlist
+
+
+def _flag_lm358n_class_as_ai(db):
+    """Verdict 'same' against a variant spelling + live supply under it — LM358N's
+    rollup then pools the variant and reports has_ai_variants."""
+    from app.models import PartEquivalence
+    from app.services.part_equivalence import norm_key
+
+    ka, kb = sorted([norm_key("LM358N"), norm_key("LM358N-E3")])
+    db.add(
+        PartEquivalence(
+            key_a=ka,
+            key_b=kb,
+            example_a="LM358N",
+            example_b="LM358N-E3",
+            verdict="same",
+            source="ai",
+            reason="pkg suffix",
+        )
+    )
+    db.add(Offer(vendor_name="Sierra", mpn="LM358N-E3", qty_available=100, unit_price=Decimal("0.40"), status="active"))
+    db.commit()
+
+
+def test_prepare_page_flags_ai_variant_rows(db_session):
+    """Flagged rows carry the amber chip; the send form carries the hidden confirm."""
+    data = _setup_send_scenario(db_session)
+    _flag_lm358n_class_as_ai(db_session)
+    client, app = _add_contact_client(db_session, data["owner"])
+    try:
+        resp = client.post(
+            "/v2/proactive/prepare/{}".format(data["site"].id),
+            data={"match_ids": str(data["match"].id)},
+        )
+    finally:
+        _cleanup_overrides(app)
+    assert resp.status_code == 200, resp.text
+    assert "AI match" in resp.text  # the amber chip on the flagged row
+    assert 'name="confirm_ai_variants"' in resp.text  # posted to the send gate
+
+
+def test_prepare_page_clean_rows_have_no_ai_chip_or_confirm(db_session):
+    data = _setup_send_scenario(db_session)
+    client, app = _add_contact_client(db_session, data["owner"])
+    try:
+        resp = client.post(
+            "/v2/proactive/prepare/{}".format(data["site"].id),
+            data={"match_ids": str(data["match"].id)},
+        )
+    finally:
+        _cleanup_overrides(app)
+    assert resp.status_code == 200, resp.text
+    assert "AI match" not in resp.text
+    assert 'name="confirm_ai_variants"' not in resp.text

@@ -199,7 +199,13 @@ async def proactive_prepare_page(
         .all()
     )
 
+    from ...services.proactive_matching import compute_offer_rollups
     from ...services.proactive_service import DEFAULT_PROACTIVE_MARKUP
+
+    # AI-variant flags for the row chips + Task 5's server-side send gate.
+    # ONE batch call for every distinct part (PERF guard pattern —
+    # services/proactive_service.py:105-109).
+    rollups = compute_offer_rollups(db, parts={(m.mpn or "").strip().upper() for m in matches if m.mpn})
 
     match_data = []
     for m in matches:
@@ -218,6 +224,7 @@ async def proactive_prepare_page(
                 "suggested_sell": f"{(unit_price * DEFAULT_PROACTIVE_MARKUP) if unit_price else 0:.4f}",
                 "margin_pct": m.margin_pct,
                 "match_score": m.match_score or 0,
+                "has_ai_variants": (rollups.get((m.mpn or "").strip().upper()) or {}).get("has_ai_variants", False),
             }
         )
 
@@ -240,6 +247,7 @@ async def proactive_prepare_page(
             "company_name": company.name if company else "Customer",
             "site_name": site.site_name if site else "",
             "matches": match_data,
+            "any_ai_variants": any(m["has_ai_variants"] for m in match_data),
             "match_ids_json": json.dumps([m["id"] for m in match_data]),
             "contacts": contact_data,
             "error_msg": "",

@@ -96,6 +96,48 @@ def _mk_match(db, *, mpn, owner, company, site, price="8.00", qty=500, target=30
     return m
 
 
+def _mk_ai_match(db, *, customer_mpn, variant_mpn, owner, company, site, price="0.05", qty=1000, target=300):
+    """Match displayed under the CUSTOMER spelling whose live supply sits under an AI-
+    verdict variant spelling — compute_offer_rollups flags it has_ai_variants."""
+    from app.models import PartEquivalence, Requirement
+    from app.services.part_equivalence import norm_key
+
+    ka, kb = sorted([norm_key(customer_mpn), norm_key(variant_mpn)])
+    db.add(
+        PartEquivalence(
+            key_a=ka,
+            key_b=kb,
+            example_a=customer_mpn,
+            example_b=variant_mpn,
+            verdict="same",
+            source="ai",
+            reason="pkg suffix",
+        )
+    )
+    offer = Offer(vendor_name="Arrow", mpn=variant_mpn, qty_available=qty, unit_price=Decimal(price), status="active")
+    db.add(offer)
+    db.flush()
+    req = Requisition(name=f"req-{customer_mpn}", customer_site_id=site.id, status="open", created_by=owner.id)
+    db.add(req)
+    db.flush()
+    requirement = Requirement(requisition_id=req.id, primary_mpn=customer_mpn, target_qty=target)
+    db.add(requirement)
+    db.flush()
+    m = ProactiveMatch(
+        offer_id=offer.id,
+        requirement_id=requirement.id,
+        salesperson_id=owner.id,
+        mpn=customer_mpn,
+        company_id=company.id,
+        customer_site_id=site.id,
+        status="new",
+        match_score=70,
+    )
+    db.add(m)
+    db.commit()
+    return m
+
+
 def _scenario(db):
     rep = _mk_user(db, "Sales Rep", "rep@trio.com")
     other = _mk_user(db, "Other Rep", "other@trio.com")
@@ -433,3 +475,24 @@ def test_proactive_offer_claim_is_exclusive(pg_session, pg_engine):
 
     assert first == 1  # this caller won the claim and sends
     assert second == 0  # the racer finds no DRAFT row and must not send
+
+
+# ── AI-variant flag surfaces (2026-08-24) ────────────────────────────────
+
+
+def test_top_picks_carry_ai_variant_flag(db_session):
+    from app.services.proactive_service import get_top_picks
+
+    s = _scenario(db_session)
+    _mk_ai_match(
+        db_session,
+        customer_mpn="GSOT36C",
+        variant_mpn="GSOT36C-E3-08",
+        owner=s["rep"],
+        company=s["beckhoff"],
+        site=s["beckhoff_site"],
+    )
+    picks = get_top_picks(db_session, s["rep"].id)
+    by_mpn = {p["mpn"]: p for p in picks}
+    assert by_mpn["GSOT36C"]["has_ai_variants"] is True
+    assert by_mpn["LTSR15-NP"]["has_ai_variants"] is False
