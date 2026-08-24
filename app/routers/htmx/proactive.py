@@ -1017,8 +1017,17 @@ async def proactive_prepared_send(
     token = await get_valid_token(user, db)
     if not token:
         raise HTTPException(400, "No valid Microsoft token — sign in again to send")
+    form = await request.form()
+    confirm_ai_variants = str(form.get("confirm_ai_variants") or "") == "1"
     try:
-        result = await send_draft_offer(db, user, token, po_id, allow_all=is_manager_or_admin(user))
+        result = await send_draft_offer(
+            db,
+            user,
+            token,
+            po_id,
+            allow_all=is_manager_or_admin(user),
+            confirm_ai_variants=confirm_ai_variants,
+        )
     except ValueError as e:
         raise HTTPException(403 if "Not your" in str(e) else 400, str(e)) from e
     recipients = ", ".join(result.get("recipient_emails", []))

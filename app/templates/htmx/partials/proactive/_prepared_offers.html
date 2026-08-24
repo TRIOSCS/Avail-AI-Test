@@ -20,7 +20,14 @@
         </svg>
       </button>
       <div class="flex-1 min-w-0">
-        <p class="text-sm font-medium text-gray-900 truncate">{{ p.company_name }}</p>
+        <p class="text-sm font-medium text-gray-900 truncate">{{ p.company_name }}
+          {% if p.has_ai_variants %}
+          <span class="badge-mini bg-amber-100 text-amber-800 border border-amber-300 ml-1"
+                title="This offer includes AI-matched variant part numbers — verify before sending">
+            AI match — verify
+          </span>
+          {% endif %}
+        </p>
         <p class="text-xs text-gray-500 truncate">
           {{ p.line_count }} part{{ 's' if p.line_count != 1 }} · ${{ p.total_sell|money }}
           {% if scope == 'all' %} · {{ p.salesperson_name }}{% endif %}
@@ -42,14 +49,22 @@
               class="btn-secondary btn-sm">
         Discard
       </button>
-      <button hx-post="/v2/partials/proactive/prepared/{{ p.id }}/send"
-              hx-target="#main-content"
-              hx-confirm="Email this offer to {{ p.company_name | e }} ({{ p.recipient_emails | join(', ') | e }})?"
-              data-loading-disable
-              {% if not p.recipient_emails %}disabled title="No contact on file — open Prepare to pick or add one"{% endif %}
-              class="btn-primary btn-sm disabled:opacity-40 disabled:cursor-not-allowed">
-        Send
-      </button>
+      <form hx-post="/v2/partials/proactive/prepared/{{ p.id }}/send"
+            hx-target="#main-content"
+            {% if p.has_ai_variants %}
+            hx-confirm="This offer includes AI-matched variant part numbers — verify before sending. Email {{ p.company_name | e }} ({{ p.recipient_emails | join(', ') | e }})?"
+            {% else %}
+            hx-confirm="Email this offer to {{ p.company_name | e }} ({{ p.recipient_emails | join(', ') | e }})?"
+            {% endif %}
+            class="inline">
+        {% if p.has_ai_variants %}<input type="hidden" name="confirm_ai_variants" value="1">{% endif %}
+        <button type="submit"
+                data-loading-disable
+                {% if not p.recipient_emails %}disabled title="No contact on file — open Prepare to pick or add one"{% endif %}
+                class="btn-primary btn-sm disabled:opacity-40 disabled:cursor-not-allowed">
+          Send
+        </button>
+      </form>
     </div>
     <div x-show="open" x-cloak class="border-t border-line-base px-4 py-3 text-sm bg-gray-50">
       <p class="text-xs text-gray-500 mb-2">Subject: {{ p.subject }}</p>

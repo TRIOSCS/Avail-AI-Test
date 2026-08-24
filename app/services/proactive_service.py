@@ -764,12 +764,22 @@ def list_draft_offers(db: Session, user: User, *, allow_all: bool = False) -> li
     return out
 
 
-async def send_draft_offer(db: Session, user: User, token: str, po_id: int, *, allow_all: bool = False) -> dict:
+async def send_draft_offer(
+    db: Session,
+    user: User,
+    token: str,
+    po_id: int,
+    *,
+    allow_all: bool = False,
+    confirm_ai_variants: bool = False,
+) -> dict:
     """Send one staged draft to its customer with the ACTOR's mailbox.
 
     Marks the offer SENT, flips its matches to SENT, and writes the same throttle
     entries as the prepare-page send. Raises ValueError on wrong status / no recipients
-    / no permission.
+    / no permission / an AI-variant offer sent without the explicit confirm (the flag is
+    re-derived from the live rollup at send time — the staged per-line stamps are
+    display hints only, and legacy drafts without them re-derive, never assume clean).
     """
     from ..utils.graph_client import GraphAPIError, GraphClient, build_sendmail_payload
 
@@ -781,6 +791,18 @@ async def send_draft_offer(db: Session, user: User, token: str, po_id: int, *, a
     recipient_emails = po.recipient_emails or []
     if not recipient_emails:
         raise ValueError("No contact on file — open Prepare to pick or add one")
+
+    # AI-variant send gate (2026-08-24): re-derive at send time — authoritative
+    # over the staged ai_variant stamps. Runs BEFORE the DRAFT→SENT claim so a
+    # blocked send never strands a draft in SENT.
+    from .proactive_matching import compute_offer_rollups
+
+    line_parts = {
+        (li.get("mpn") or "").strip().upper() for li in (po.line_items or []) if (li.get("mpn") or "").strip()
+    }
+    rollups = compute_offer_rollups(db, parts=line_parts)
+    if any(r["has_ai_variants"] for r in rollups.values()) and not confirm_ai_variants:
+        raise ValueError("This offer includes AI-matched variant part numbers — verify before sending")
 
     # Atomic claim (QC 2026-08-14): flip DRAFT→SENT in ONE conditional UPDATE BEFORE the
     # Graph send. A concurrent send_draft_offer — or the digest-draft "supersede" sweep —
