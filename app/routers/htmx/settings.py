@@ -1009,8 +1009,9 @@ async def _dedup_bulk(request, user, db, entity: str) -> HTMLResponse:
     """Shared body for vendor/company bulk dedup actions (merge | delete | dismiss).
 
     ``merge`` keeps the FIRST id of each pair (the template emits keeper-first tokens);
-    ``delete`` removes both; ``dismiss`` is a view-only clear (no durable state yet — the
-    rows just drop from this render and reappear on the next scan). Per-pair failures don't
+    ``delete`` removes both; ``dismiss`` persists DedupDecision rows (canonical (min,max),
+    attributed to the session user) so the pairs stay hidden and the nightly job skips
+    them. Per-pair failures don't
     abort the batch, but each is logged at error level and the failing pair tokens are
     surfaced in the toast — any failure makes the toast an ``error`` (never green success).
     """
@@ -1028,12 +1029,29 @@ async def _dedup_bulk(request, user, db, entity: str) -> HTMLResponse:
     if len(pairs) > _MAX_DEDUP_PAIRS:
         raise HTTPException(400, f"Maximum {_MAX_DEDUP_PAIRS} pairs per bulk action")
 
-    if not pairs or action == "dismiss":
-        # Dismiss is purely client-side (the row was already hidden); just re-render.
-        resp = _render_data_ops(request, user, db)
+    if action == "dismiss":
+        # Persist the dismissals so the pairs stay hidden across renders and are
+        # skipped by the nightly auto-dedup. Tokens are keeper-first; the service
+        # canonicalizes to (min, max).
+        from ...services.dedup_decision_service import record_dismissals
+
+        message, kind = "", "success"
         if pairs:
-            set_toast(resp, f"Dismissed {len(pairs)} pair(s) for now.", kind="success")
+            try:
+                record_dismissals(db, entity, pairs, user.id)
+                db.commit()
+                message = f"Dismissed {len(pairs)} pair(s) — hidden until un-dismissed."
+            except Exception as e:
+                db.rollback()
+                message, kind = f"Dismiss failed: {e}", "error"
+                logger.error("Bulk {} dismiss failed: {}", entity, e)
+        resp = _render_data_ops(request, user, db)
+        if message:
+            set_toast(resp, message, kind=kind)
         return resp
+
+    if not pairs:
+        return _render_data_ops(request, user, db)
 
     if entity == "vendor":
         from ...services.vendor_merge_service import delete_vendor_cards, merge_vendor_cards

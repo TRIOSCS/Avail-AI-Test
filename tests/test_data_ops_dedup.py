@@ -251,14 +251,44 @@ class TestBulkActions:
         assert resp.status_code == 200, resp.text[:1500]
         assert db_session.get(Company, c2.id) is None
 
-    def test_bulk_dismiss_is_noop_render(self, admin_client, db_session):
-        """Dismiss is view-only — records are untouched, render still 200."""
+    def test_bulk_dismiss_persists_canonical_rows(self, admin_client, db_session, admin_user):
+        """Dismiss now persists: the keeper-first token (keeper id may be the HIGHER
+        id) is canonicalized to (min, max) and attributed to the session user; the
+        vendor records themselves are untouched."""
+        from app.models import DedupDecision
+
         v1, v2 = _vendors(db_session, "Dis A", "Dis A Inc")
-        token = f"{v1.id}-{v2.id}"
+        lo, hi = sorted((v1.id, v2.id))
+        token = f"{hi}-{lo}"  # deliberately NOT sorted — simulates keeper-first
         resp = admin_client.post("/v2/partials/admin/vendor-bulk", data={"action": "dismiss", "pairs": token})
         assert resp.status_code == 200
+        # Records untouched (dismiss is never destructive).
         assert db_session.get(VendorCard, v1.id) is not None
         assert db_session.get(VendorCard, v2.id) is not None
+        # Decision persisted canonically, attributed to the admin.
+        row = db_session.query(DedupDecision).one()
+        assert (row.entity_type, row.id_a, row.id_b) == ("vendor", lo, hi)
+        assert row.decided_by_id == admin_user.id
+
+    def test_bulk_dismiss_idempotent_across_orders(self, admin_client, db_session):
+        """Dismissing the same pair in both token orders stores exactly ONE row."""
+        from app.models import DedupDecision
+
+        v1, v2 = _vendors(db_session, "Dis B", "Dis B Inc")
+        for token in (f"{v1.id}-{v2.id}", f"{v2.id}-{v1.id}"):
+            resp = admin_client.post("/v2/partials/admin/vendor-bulk", data={"action": "dismiss", "pairs": token})
+            assert resp.status_code == 200
+        assert db_session.query(DedupDecision).count() == 1
+
+    def test_bulk_dismiss_company_persists(self, admin_client, db_session):
+        from app.models import DedupDecision
+
+        c1, c2 = _companies(db_session, "DisCo", "DisCo Inc")
+        token = f"{c1.id}-{c2.id}"
+        resp = admin_client.post("/v2/partials/admin/company-bulk", data={"action": "dismiss", "pairs": token})
+        assert resp.status_code == 200
+        row = db_session.query(DedupDecision).one()
+        assert (row.entity_type, row.id_a, row.id_b) == ("company", min(c1.id, c2.id), max(c1.id, c2.id))
 
     def test_bulk_invalid_action_rejected(self, admin_client, db_session):
         resp = admin_client.post("/v2/partials/admin/vendor-bulk", data={"action": "nuke", "pairs": "1-2"})
