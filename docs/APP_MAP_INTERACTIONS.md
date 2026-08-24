@@ -5980,19 +5980,39 @@ SpecCoverage(with_specs=N, total=M) NamedTuple; two cheap aggregates, no N+1):
     |     specs" so thin parametric results are explained before filtering.
     +---> Zero results + active parametric sub_filters + N < M → list.html renders the
     |     "not yet spec-enriched" nudge instead of the generic empty state.
-Result-row upgrades (list.html, server-side in materials_faceted_partial):
-    +---> Condensed 7-column layout (was 9): MPN · Description · Manufacturer · Status ·
-    |     Vendors · Best Price · Last Seen. Category is folded as a muted sub-line under the
-    |     manufacturer (no standalone column); Lifecycle + Condition are merged into the
-    |     Status cell alongside the enrichment-trust badge (one wrapping badge group). Best
-    |     Price renders 2 decimals at/above $1, 4 below (passive precision). Table carries
-    |     the scoped .compact-table--dense modifier (4px row padding; shared .compact-table
-    |     untouched). No data dropped — only regrouped.
+Result rendering (list.html, server-side in materials_faceted_partial) — HYBRID:
+    +---> Desktop (lg+): condensed 8-column table — MPN · Description · Manufacturer ·
+    |     Specs · Status · Vendors · Best Price · Searched (header renamed from "Last
+    |     Seen"; the column shows last_searched_at). Category is folded as a muted
+    |     sub-line under the manufacturer; Lifecycle + Condition merge into the Status
+    |     cell alongside the enrichment-trust badge (one wrapping badge group). Best
+    |     Price renders 2 decimals at/above $1, 4 below (passive precision). Table
+    |     carries the scoped .compact-table--dense modifier.
+    +---> Phone/tablet (<lg): stacked tappable cards (same hx-get/hx-push-url contract
+    |     as the rows) — MPN header, brand·maker·category sub-line, description, a
+    |     2-column labelled spec grid, then badges + "N vendors · price · date" footer.
+    |     Both renderings share one set of Jinja macros (card_link_attrs / mpn_header /
+    |     brand_maker / status_badges / spec_line / spec_grid / best_price) so the
+    |     navigation contract, identity line, badges, and specs cannot drift.
+    +---> Specs column mirrors the FILTER sidebar's field LABELS: commodity-scoped rows
+    |     show ALL of that commodity's populated is_filterable fields — primary first,
+    |     then sort_order — capped at 6 with a "+N more" overflow; scoped spec-less
+    |     cards get a muted "No specs recorded" placeholder (the majority case).
+    |     Chip assembly + caps live in services/spec_format.py (build_card_specs,
+    |     _CARD_SPECS_MAX / _FALLBACK_SPECS_MAX); the router just calls it. Values are
+    |     formatted by format_spec_value: SI-prefix promotion from canonical-unit
+    |     magnitudes (4700000000 pF → "4.7 mF"; W never kilo-promotes, V/A stop at
+    |     kilo), verbatim units otherwise, Yes/No booleans. The SAME formatter feeds
+    |     the part dossier (format_specs_for_display → dossier_specs.html: schema
+    |     labels + human units + provenance badges) and the sidebar's numeric facets
+    |     (common-value chips show human labels like "100 nF" while submitting the
+    |     canonical magnitude; range inputs carry a "spans X – Y · enter values in
+    |     <unit>" hint — typed min/max are still canonical magnitudes by design).
+    |     tests/test_spec_format.py pins every seed canonical unit as either scalable
+    |     or deliberately verbatim.
     +---> Spec chips also render WITHOUT a commodity: each card's own category's
     |     is_primary schema keys (one batched CommoditySpecSchema query), else the first
-    |     3 scalar specs_structured entries, formatted "label: value". Every chip carries
-    |     title="label: value" so the value-only commodity rendering keeps its label
-    |     on hover.
+    |     3 scalar specs_structured entries. Every chip carries title="label: value".
     +---> Datasheet icon-link (new tab, rel=noopener) when datasheet_url is set;
     |     "N alternates" chip when cross_references is non-empty (neutral gray — count
     |     metadata, not a status; indigo is reserved for OEM-SOURCED); condition badge

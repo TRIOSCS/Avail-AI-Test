@@ -16,27 +16,25 @@
 </div>
 {% else %}
 
-{# Structured specs (each value carries {value, source, confidence}). #}
-{% set structured = card.specs_structured or {} %}
-{% if structured or card.package_type or card.rohs_status or card.lifecycle_status or card.pin_count or card.specs_summary %}
+{# Structured specs — pre-formatted by spec_format.format_specs_for_display (schema
+   labels + human units, same formatter as the materials list; provenance kept for
+   the evidence badges). #}
+{% if specs_display or card.package_type or card.rohs_status or card.lifecycle_status or card.pin_count or card.specs_summary %}
 <dl class="grid grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-3 text-sm">
-  {% for key, field in structured.items() %}
-  {% set val = field.value if field is mapping else field %}
-  {% if val is not none and val != '' %}
+  {% for item in specs_display %}
   <div>
-    <dt class="text-xs uppercase tracking-wide text-gray-400">{{ key|replace('_', ' ') }}</dt>
+    <dt class="text-xs uppercase tracking-wide text-gray-400">{{ item.label }}</dt>
     <dd class="text-gray-900">
-      <span class="font-mono">{{ val }}</span>
-      {% if field is mapping and field.source %}
-      {% set conf = field.confidence|default(0)|float %}
+      <span class="font-mono">{{ item.value }}</span>
+      {% if item.source %}
+      {% set conf = (item.confidence or 0)|float %}
       <span class="ml-1 align-middle badge-mini {{ 'bg-brand-50 text-brand-600' if conf >= 0.9 else 'bg-gray-50 text-gray-500' }}"
-            title="source: {{ field.source }}{% if field.confidence is not none %} · conf {{ field.confidence }}{% endif %}">
+            title="source: {{ item.source }}{% if item.confidence is not none %} · conf {{ item.confidence }}{% endif %}">
         {{ 'Direct' if conf >= 0.9 else 'Sourced' }}
       </span>
       {% endif %}
     </dd>
   </div>
-  {% endif %}
   {% endfor %}
 
   {% if card.package_type %}

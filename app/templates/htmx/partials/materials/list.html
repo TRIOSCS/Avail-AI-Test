@@ -1,5 +1,5 @@
 {#
-  materials/list.html — Material card results table (rendered inside workspace).
+  materials/list.html — Material card results (rendered inside workspace).
   Receives: materials (list of MaterialCard), q (str), commodity (str),
             commodity_display (str), total (int), limit (int), offset (int);
             fru_view / fru_usages / fru_usages_total / fru_query (FRU crosswalk
@@ -7,10 +7,190 @@
   Called by: htmx_views.py materials_faceted_partial endpoint.
   Depends on: HTMX, Tailwind CSS with brand palette, Alpine.js materialsFilter().
 
-  Layout: 7-column condensed table — MPN · Description · Manufacturer (category folded
-  in as a muted sub-line) · Status (enrichment-trust + lifecycle + condition badges,
-  merged) · Vendors · Best Price · Last Seen. Density via .compact-table--dense (scoped).
+  Layout: HYBRID — one loop per rendering, shared macros so they can't drift.
+  · lg+  : 8-column condensed table — MPN · Description · Manufacturer (category
+           folded in as a muted sub-line) · Specs (labelled per-commodity fields,
+           human units) · Status (trust + lifecycle + condition badges, merged) ·
+           Vendors · Best Price · Searched. Density via .compact-table--dense.
+  · <lg  : stacked tappable cards (MPN header, brand/category sub-line,
+           description, 2-column labelled spec grid, badges + sourcing footer).
+  Spec chips arrive pre-formatted from the router (m._card_specs [{label, value}],
+  m._specs_more overflow count); labels match the filter sidebar's display names.
 #}
+
+{# ── Shared palettes (hoisted: built once per render, referenced by the macros) ── #}
+{% set lc_colors = {
+  'active': 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  'eol': 'bg-amber-50 text-amber-700 border-amber-200',
+  'obsolete': 'bg-rose-50 text-rose-700 border-rose-200',
+  'nrfnd': 'bg-gray-100 text-gray-600 border-gray-200',
+  'ltb': 'bg-amber-50 text-amber-600 border-amber-200',
+} %}
+{# Stock-condition palette — Refurbished/Used share violet (second-life stock
+   family) so amber stays exclusively "caution / reconfirm". #}
+{% set cond_colors = {
+  'New': 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  'Recertified': 'bg-sky-50 text-sky-700 border-sky-200',
+  'Refurbished': 'bg-violet-50 text-violet-700 border-violet-200',
+  'Used': 'bg-violet-50 text-violet-700 border-violet-200',
+  'Pulled': 'bg-rose-50 text-rose-700 border-rose-200',
+  'Unknown': 'bg-gray-100 text-gray-600 border-gray-200',
+} %}
+{# Non-link trust badges: class, label, title. web/oem stay explicit in the macro —
+   they are source ANCHORS, structurally different from these spans. #}
+{% set trust_spans = {
+  'ai_inferred': ('bg-amber-50 text-amber-700 border-amber-200', 'AI GUESS · RECONFIRM',
+                  'AI guess (≥95% confidence) — RECONFIRM NEEDED before trusting; not verified'),
+  'not_found': ('bg-gray-100 text-gray-500 border-gray-200', 'NOT FOUND',
+                'No authoritative source found this part'),
+  'not_catalogued': ('bg-slate-100 text-slate-600 border-slate-300', 'NOT CATALOGUED',
+                     'Recognised OEM service/FRU part; no public specs published'),
+} %}
+
+{# ── Shared macros ─────────────────────────────────────────────────────────── #}
+
+{# The card→detail navigation contract, identical for the desktop row and the
+   mobile card (classes stay per-rendering). Change it HERE, once. #}
+{% macro card_link_attrs(m) %}
+  role="button" tabindex="0"
+  hx-get="/v2/partials/materials/{{ m.id }}"
+  hx-target="#main-content"
+  hx-push-url="/v2/materials/{{ m.id }}"
+  hx-disinherit="hx-push-url"
+  hx-trigger="click, keyup[key=='Enter']"
+  preload="mouseover"
+{%- endmacro %}
+
+{# Dual-brand text: "IBM · Seagate Technology" when brand (OEM label) and
+   manufacturer (actual maker) are DIFFERENT COMPANIES (m._show_maker_suffix —
+   the view compares NORMALIZED forms, so an alias pair like "Hewlett Packard
+   Enterprise"/"HP" renders once); one value when equal or single; "--" when
+   neither. "·" is the existing codebase idiom. #}
+{% macro brand_maker(m) %}{{ m.brand or m.manufacturer or "--" }}{% if m._show_maker_suffix %} · {{ m.manufacturer }}{% endif %}{% endmacro %}
+
+{# MPN + datasheet link + alternates pill — the identity block of both renderings.
+   target=_blank anchor inside an hx-get row/card — @click.stop keeps the click from
+   bubbling to the container's htmx handler, so opening the datasheet in a new tab
+   doesn't ALSO swap #main-content to this part's detail. #}
+{% macro mpn_header(m) %}
+  <span class="font-data font-semibold text-accent-600">{{ m.display_mpn or m.normalized_mpn or "--" }}</span>
+  {% if m.datasheet_url %}
+  <a href="{{ m.datasheet_url }}" target="_blank" rel="noopener" @click.stop
+     class="text-gray-400 hover:text-brand-600" title="Open datasheet"
+     aria-label="Open datasheet for {{ m.display_mpn or m.normalized_mpn }}">
+    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+    </svg>
+  </a>
+  {% endif %}
+  {% if m.cross_references %}
+  {# Neutral gray — count metadata, not a status; indigo means exactly "OEM-official". #}
+  <span class="inline-flex px-1.5 py-0.5 text-xs font-medium rounded-full border bg-gray-100 text-gray-600 border-gray-200"
+        title="Known cross-references / substitutes">
+    {{ m.cross_references|length }} alternate{{ '' if m.cross_references|length == 1 else 's' }}
+  </span>
+  {% endif %}
+{% endmacro %}
+
+{# Trust + lifecycle + condition badges, merged into one wrapping group.
+   show_empty=true (desktop Status cell) renders "--" when nothing applies;
+   the mobile card just omits the group. #}
+{% macro status_badges(m, show_empty=false) %}
+  {% set es = m.enrichment_status %}
+  {# ONE derived flag instead of re-enumerating the trust states in the empty
+     guard below — keep it in sync with nothing; it reads the same structures
+     the badge chain does. #}
+  {% set has_trust_badge = es in ('verified', 'web_sourced', 'oem_sourced') or es in trust_spans %}
+  <div class="flex flex-wrap items-center gap-1">
+    {% if es == "verified" %}
+    <span class="badge bg-emerald-50 text-emerald-700 border-emerald-200"
+          title="Verified from {{ (m.enrichment_provenance or {}).get('description', {}).get('source', 'catalog') }}">
+      VERIFIED
+    </span>
+    {% elif es == "web_sourced" %}
+    {% set _u = (m.enrichment_provenance or {}).get('source_urls', [None])[0] %}
+    {# @click.stop — opening the source in a new tab must not bubble to the
+       container's htmx click handler. #}
+    <a href="{{ _u or '#' }}" target="_blank" rel="noopener" @click.stop
+       class="badge bg-sky-50 text-sky-700 border-sky-200"
+       title="Web-sourced from {{ (m.enrichment_provenance or {}).get('source_domains', ['authoritative page'])|join(', ') }} — below API-verified">
+      WEB-SOURCED
+    </a>
+    {% elif es == "oem_sourced" %}
+    {% set _ou = (m.enrichment_provenance or {}).get('source_urls', [None])[0] %}
+    <a href="{{ _ou or '#' }}" target="_blank" rel="noopener" @click.stop
+       class="badge bg-indigo-50 text-indigo-700 border-indigo-200"
+       title="OEM-official source: {{ (m.enrichment_provenance or {}).get('source_domains', ['vendor page'])|join(', ') }} — description from the OEM; specs not distributor-verified">
+      OEM-SOURCED
+    </a>
+    {% elif es in trust_spans %}
+    {% set _cls, _label, _title = trust_spans[es] %}
+    <span class="badge {{ _cls }}" title="{{ _title }}">{{ _label }}</span>
+    {% endif %}
+    {% if m.lifecycle_status %}
+    <span class="badge {{ lc_colors.get(m.lifecycle_status, 'bg-gray-100 text-gray-600 border-gray-200') }}">
+      {{ m.lifecycle_status|upper }}
+    </span>
+    {% endif %}
+    {% if m.condition %}
+    <span class="badge {{ cond_colors.get(m.condition, 'bg-gray-100 text-gray-600 border-gray-200') }}"
+          title="Stock condition">
+      {{ m.condition|upper }}
+    </span>
+    {% endif %}
+    {% if show_empty and not has_trust_badge and not m.lifecycle_status and not m.condition %}
+    <span class="text-xs text-gray-400">--</span>
+    {% endif %}
+  </div>
+{% endmacro %}
+
+{# Desktop Specs cell — labelled "Label value" pairs on one wrapping line.
+   Commodity-scoped + no specs → honest muted placeholder (the majority case:
+   most cards aren't spec-enriched yet); unscoped empty → the table's "--" idiom. #}
+{% macro spec_line(m, commodity) %}
+  {% if m._card_specs %}
+  <div class="flex flex-wrap gap-x-2 gap-y-0.5 items-baseline max-w-[280px]">
+    {% for spec in m._card_specs %}
+    <span class="whitespace-nowrap text-xs" title="{{ spec.label }}: {{ spec.value }}">
+      <span class="text-gray-400">{{ spec.label }}</span>
+      <span class="font-data text-gray-700">{{ spec.value }}</span>
+    </span>
+    {% endfor %}
+    {% if m._specs_more %}<span class="text-xs text-gray-400">+{{ m._specs_more }} more</span>{% endif %}
+  </div>
+  {% elif commodity %}
+  <span class="text-xs text-gray-400 italic">No specs recorded</span>
+  {% else %}
+  <span class="text-xs text-gray-400">--</span>
+  {% endif %}
+{% endmacro %}
+
+{# Mobile spec grid — 2-column labelled grid, label over value. #}
+{% macro spec_grid(m, commodity) %}
+  {% if m._card_specs %}
+  <div class="grid grid-cols-2 gap-x-3 gap-y-1 mt-2">
+    {% for spec in m._card_specs %}
+    <div class="min-w-0">
+      <div class="text-[11px] text-gray-400 truncate">{{ spec.label }}</div>
+      <div class="font-data text-xs text-gray-700 truncate" title="{{ spec.label }}: {{ spec.value }}">{{ spec.value }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% if m._specs_more %}<div class="text-[11px] text-gray-400 mt-1">+{{ m._specs_more }} more</div>{% endif %}
+  {% elif commodity %}
+  <div class="text-xs text-gray-400 italic mt-2">No specs recorded</div>
+  {% endif %}
+{% endmacro %}
+
+{# Best price — 2 decimals at/above $1; 4 for sub-dollar parts (passives) so they
+   don't collapse to $0.00. Matches _vendor_row.html "best price seen". #}
+{% macro best_price(m) %}
+  {% if m._best_price is not none %}
+  <span class="text-emerald-700 font-medium">{{ '$' if (m._best_currency or 'USD') == 'USD' else m._best_currency ~ ' ' }}{{ ("%.2f" if m._best_price >= 1 else "%.4f")|format(m._best_price) }}</span>
+  {% else %}
+  <span class="text-gray-400 text-xs">--</span>
+  {% endif %}
+{% endmacro %}
 
 {# FRU crosswalk — renders only when q hits fru_links (forward matrix and/or
    "Used in FRUs" usages). Every "/v2/materials?q=<pn>" FRU deep link (the search
@@ -44,180 +224,75 @@
 {# Screen-reader announcement of the new count on each swap. #}
 <div class="sr-only" role="status" aria-live="polite">{{ "{:,}".format(total) }} result{{ '' if total == 1 else 's' }}{% if commodity_display %} in {{ commodity_display }}{% endif %}{% if q %} matching {{ q }}{% endif %}</div>
 
-{# Table #}
+{# Results #}
 <div class="bg-white rounded-lg border border-line-base overflow-hidden">
-  {% set lc_colors = {
-    'active': 'bg-emerald-50 text-emerald-700 border-emerald-200',
-    'eol': 'bg-amber-50 text-amber-700 border-amber-200',
-    'obsolete': 'bg-rose-50 text-rose-700 border-rose-200',
-    'nrfnd': 'bg-gray-100 text-gray-600 border-gray-200',
-    'ltb': 'bg-amber-50 text-amber-600 border-amber-200',
-  } %}
-  {# Stock-condition badge palette — same shape as the lifecycle badges.
-     Refurbished/Used share violet (second-life stock family) so amber stays
-     exclusively "caution / reconfirm" (lifecycle EOL/LTB, AI-guess). #}
-  {% set cond_colors = {
-    'New': 'bg-emerald-50 text-emerald-700 border-emerald-200',
-    'Recertified': 'bg-sky-50 text-sky-700 border-sky-200',
-    'Refurbished': 'bg-violet-50 text-violet-700 border-violet-200',
-    'Used': 'bg-violet-50 text-violet-700 border-violet-200',
-    'Pulled': 'bg-rose-50 text-rose-700 border-rose-200',
-    'Unknown': 'bg-gray-100 text-gray-600 border-gray-200',
-  } %}
-  {# Enrichment-status values that render a trust badge (everything else → no badge). #}
-  {% set trust_states = ['verified', 'web_sourced', 'oem_sourced', 'ai_inferred', 'not_found', 'not_catalogued'] %}
   {% if materials %}
-  <div class="overflow-x-auto">
+  {# ── Desktop: condensed 8-column table ──────────────────────────────────── #}
+  <div class="overflow-x-auto hidden lg:block">
     <table class="compact-table compact-table--dense">
       <thead>
         <tr>
           <th class="text-left">MPN</th>
           <th class="text-left">Description</th>
           <th class="text-left">Manufacturer</th>
+          <th class="text-left">Specs</th>
           <th class="text-left">Status</th>
           <th class="text-right">Vendors</th>
           <th class="text-right">Best Price</th>
-          <th class="text-left">Last Seen</th>
+          <th class="text-left">Searched</th>
         </tr>
       </thead>
       <tbody>
         {% for m in materials %}
         <tr class="cursor-pointer focus:outline-none focus:ring-2 focus:ring-inset focus:ring-accent-500"
-            role="button" tabindex="0"
-            hx-get="/v2/partials/materials/{{ m.id }}"
-            hx-target="#main-content"
-            hx-push-url="/v2/materials/{{ m.id }}"
-            hx-disinherit="hx-push-url"
-            hx-trigger="click, keyup[key=='Enter']"
-            preload="mouseover">
+            {{ card_link_attrs(m) }}>
           <td>
-            <div class="flex items-center gap-1.5">
-              <span class="font-data font-semibold text-accent-600">{{ m.display_mpn or m.normalized_mpn or "--" }}</span>
-              {% if m.datasheet_url %}
-              {# target=_blank anchor inside the hx-get row — @click.stop keeps the click
-                 from bubbling to the row's htmx handler, so opening the datasheet in a new
-                 tab doesn't ALSO swap #main-content to this part's detail. Same pattern as
-                 the web-sourced/OEM status links below. #}
-              <a href="{{ m.datasheet_url }}" target="_blank" rel="noopener" @click.stop
-                 class="text-gray-400 hover:text-brand-600" title="Open datasheet"
-                 aria-label="Open datasheet for {{ m.display_mpn or m.normalized_mpn }}">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-                </svg>
-              </a>
-              {% endif %}
-              {% if m.cross_references %}
-              {# Neutral gray — count metadata, not a status; indigo means exactly
-                 "OEM-official" (the OEM-SOURCED badge below). #}
-              <span class="inline-flex px-1.5 py-0.5 text-xs font-medium rounded-full border bg-gray-100 text-gray-600 border-gray-200"
-                    title="Known cross-references / substitutes">
-                {{ m.cross_references|length }} alternate{{ '' if m.cross_references|length == 1 else 's' }}
-              </span>
-              {% endif %}
-            </div>
-            {% if m._primary_specs %}
-            <div class="flex flex-wrap gap-1 mt-0.5">
-              {% for spec in m._primary_specs[:3] %}
-              {# title keeps the label visible on hover when the commodity-scoped
-                 rendering shows the value only. leading-none trims pill height. #}
-              <span class="inline-block px-1.5 py-0.5 bg-gray-50 text-xs leading-none text-gray-600 rounded font-data"
-                    title="{{ spec.label }}: {{ spec.value }}">
-                {%- if not commodity and spec.label %}{{ spec.label }}: {% endif %}{{ spec.value }}
-              </span>
-              {% endfor %}
-            </div>
-            {% endif %}
+            <div class="flex items-center gap-1.5">{{ mpn_header(m) }}</div>
           </td>
           <td class="td-label text-gray-600 truncate max-w-[200px]" title="{{ m.description or '' }}">{{ m.description or "--" }}</td>
-          {# Dual-brand cell with category folded in as a muted sub-line (no standalone
-             Category column). Dual-brand: "IBM · Seagate Technology" when brand (OEM
-             label) and manufacturer (actual maker) are both set and DIFFERENT COMPANIES
-             (m._show_maker_suffix — the view compares NORMALIZED forms, so an alias pair
-             like "Hewlett Packard Enterprise"/"HP" renders once, never a tautological
-             "label · maker"); one value when equal or single; "--" when neither. "·" is
-             the existing codebase idiom (workspace.html, sourcing/results.html). #}
+          {# Dual-brand cell (brand_maker macro) with category folded in as a muted
+             sub-line — no standalone Category column. #}
           <td class="td-label text-gray-600 max-w-[160px]">
-            <div class="truncate" title="{{ m.brand or m.manufacturer or '' }}{% if m._show_maker_suffix %} · {{ m.manufacturer }}{% endif %}">
-              {{ m.brand or m.manufacturer or "--" }}{% if m._show_maker_suffix %} · {{ m.manufacturer }}{% endif %}</div>
+            <div class="truncate" title="{{ brand_maker(m) }}">{{ brand_maker(m) }}</div>
             {% if m.category %}
             <div class="text-[11px] text-gray-400 truncate" title="Category: {{ m.category }}">{{ m.category }}</div>
             {% endif %}
           </td>
-          {# Status: enrichment-trust badge + lifecycle + condition, merged into one
-             wrapping badge group (was two separate columns). #}
-          <td>
-            <div class="flex flex-wrap items-center gap-1">
-              {% set es = m.enrichment_status %}
-              {% if es == "verified" %}
-              <span class="badge bg-emerald-50 text-emerald-700 border-emerald-200"
-                    title="Verified from {{ (m.enrichment_provenance or {}).get('description', {}).get('source', 'catalog') }}">
-                VERIFIED
-              </span>
-              {% elif es == "web_sourced" %}
-              {% set _u = (m.enrichment_provenance or {}).get('source_urls', [None])[0] %}
-              {# @click.stop — opening the source in a new tab must not bubble to the row's
-                 htmx click handler (which would swap #main-content to this part's detail). #}
-              <a href="{{ _u or '#' }}" target="_blank" rel="noopener" @click.stop
-                 class="badge bg-sky-50 text-sky-700 border-sky-200"
-                 title="Web-sourced from {{ (m.enrichment_provenance or {}).get('source_domains', ['authoritative page'])|join(', ') }} — below API-verified">
-                WEB-SOURCED
-              </a>
-              {% elif es == "oem_sourced" %}
-              {% set _ou = (m.enrichment_provenance or {}).get('source_urls', [None])[0] %}
-              {# @click.stop — see WEB-SOURCED above: keep the new-tab open from bubbling
-                 to the row's htmx click handler. #}
-              <a href="{{ _ou or '#' }}" target="_blank" rel="noopener" @click.stop
-                 class="badge bg-indigo-50 text-indigo-700 border-indigo-200"
-                 title="OEM-official source: {{ (m.enrichment_provenance or {}).get('source_domains', ['vendor page'])|join(', ') }} — description from the OEM; specs not distributor-verified">
-                OEM-SOURCED
-              </a>
-              {% elif es == "ai_inferred" %}
-              <span class="badge bg-amber-50 text-amber-700 border-amber-200"
-                    title="AI guess (&ge;95% confidence) — RECONFIRM NEEDED before trusting; not verified">
-                AI GUESS · RECONFIRM
-              </span>
-              {% elif es == "not_found" %}
-              <span class="badge bg-gray-100 text-gray-500 border-gray-200"
-                    title="No authoritative source found this part">
-                NOT FOUND
-              </span>
-              {% elif es == "not_catalogued" %}
-              <span class="badge bg-slate-100 text-slate-600 border-slate-300"
-                    title="Recognised OEM service/FRU part; no public specs published">
-                NOT CATALOGUED
-              </span>
-              {% endif %}
-              {% if m.lifecycle_status %}
-              <span class="badge {{ lc_colors.get(m.lifecycle_status, 'bg-gray-100 text-gray-600 border-gray-200') }}">
-                {{ m.lifecycle_status|upper }}
-              </span>
-              {% endif %}
-              {% if m.condition %}
-              <span class="badge {{ cond_colors.get(m.condition, 'bg-gray-100 text-gray-600 border-gray-200') }}"
-                    title="Stock condition">
-                {{ m.condition|upper }}
-              </span>
-              {% endif %}
-              {% if es not in trust_states and not m.lifecycle_status and not m.condition %}
-              <span class="text-xs text-gray-400">--</span>
-              {% endif %}
-            </div>
-          </td>
+          <td>{{ spec_line(m, commodity) }}</td>
+          <td>{{ status_badges(m, show_empty=true) }}</td>
           <td class="text-right font-medium">{{ m._vendor_count or 0 }}</td>
-          <td class="text-right">
-            {% if m._best_price is not none %}
-            {# 2 decimals at/above $1; keep 4 for sub-dollar parts (passives) so they
-               don't collapse to $0.00. Matches _vendor_row.html "best price seen". #}
-            <span class="text-emerald-700 font-medium">{{ '$' if (m._best_currency or 'USD') == 'USD' else m._best_currency ~ ' ' }}{{ ("%.2f" if m._best_price >= 1 else "%.4f")|format(m._best_price) }}</span>
-            {% else %}
-            <span class="text-gray-400 text-xs">--</span>
-            {% endif %}
-          </td>
+          <td class="text-right">{{ best_price(m) }}</td>
           <td class="td-label text-gray-600">{{ m.last_searched_at|localdate('%b %d') if m.last_searched_at else "--" }}</td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
+  </div>
+  {# ── Phone/tablet: stacked tappable cards ───────────────────────────────── #}
+  <div class="lg:hidden divide-y divide-gray-100">
+    {% for m in materials %}
+    <div class="p-3 cursor-pointer active:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-accent-500"
+         {{ card_link_attrs(m) }}>
+      <div class="flex items-center gap-1.5 flex-wrap">{{ mpn_header(m) }}</div>
+      {% if m.brand or m.manufacturer or m.category %}
+      <div class="text-[11px] text-gray-500 truncate mt-0.5">
+        {% if m.brand or m.manufacturer %}{{ brand_maker(m) }}{% endif %}{% if m.category %}{% if m.brand or m.manufacturer %} · {% endif %}{{ m.category }}{% endif %}
+      </div>
+      {% endif %}
+      {% if m.description %}
+      <div class="text-xs text-gray-600 truncate mt-0.5">{{ m.description }}</div>
+      {% endif %}
+      {{ spec_grid(m, commodity) }}
+      <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 mt-2">
+        {{ status_badges(m) }}
+        <div class="text-xs text-gray-500 whitespace-nowrap ml-auto">
+          {{ m._vendor_count or 0 }} vendor{{ '' if m._vendor_count == 1 else 's' }}
+          &middot; {{ best_price(m) }}
+          {% if m.last_searched_at %}&middot; {{ m.last_searched_at|localdate('%b %d') }}{% endif %}
+        </div>
+      </div>
+    </div>
+    {% endfor %}
   </div>
   {% else %}
   <div class="text-center py-6 sm:py-8 text-gray-400">

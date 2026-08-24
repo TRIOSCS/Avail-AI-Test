@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.constants import MaterialEnrichmentStatus
 from app.models import CommoditySpecSchema, FruLink, MaterialCard, MaterialSpecFacet, MaterialVendorHistory
+from app.services.spec_format import format_spec_value
 from app.utils.search_builder import SearchBuilder
 
 # Max distinct values rendered for an open-vocabulary (no enum_values) enum facet.
@@ -706,7 +707,15 @@ def get_subfilter_options(db: Session, commodity: str) -> list[dict]:
                 option["widget"] = "typeahead"
                 option["total_distinct"] = len(observed_counts)
         elif schema.data_type == "numeric":
+            # Values are stored/filtered as canonical-unit magnitudes; labels give the
+            # buyer the human reading ("100 nF") while the submitted value stays canonical.
+            canonical = schema.canonical_unit or schema.unit
             option["range"] = numeric_map.get(schema.spec_key)
+            if option["range"] and option["range"].get("min") is not None:
+                option["range"]["label"] = (
+                    f"{format_spec_value(option['range']['min'], 'numeric', canonical)}"
+                    f" – {format_spec_value(option['range']['max'], 'numeric', canonical)}"
+                )
             option["widget"] = "range"
             # Common-value chips: the NUMERIC_CHIP_N most common discrete values
             # (by distinct-card count), then displayed ascending by value. A numeric
@@ -716,7 +725,9 @@ def get_subfilter_options(db: Session, commodity: str) -> list[dict]:
                 key=lambda kv: kv[1],
                 reverse=True,
             )[:NUMERIC_CHIP_N]
-            option["chips"] = [{"value": v, "count": c} for v, c in sorted(top)]
+            option["chips"] = [
+                {"value": v, "count": c, "label": format_spec_value(v, "numeric", canonical)} for v, c in sorted(top)
+            ]
         elif schema.data_type == "boolean":
             # Always offer Yes/No (with counts incl. 0) so the toggle renders consistently
             # regardless of whether data currently backs it.

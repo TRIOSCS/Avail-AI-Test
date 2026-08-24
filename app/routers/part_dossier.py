@@ -171,9 +171,14 @@ async def dossier_specs(
     db: Session = Depends(get_db),
 ):
     """Spec grid from MaterialCard enrichment fields (graceful when card is None)."""
+    from ..services.spec_format import format_specs_for_display
+
     card = _resolve_card(db, normalize_mpn_key(mpn))
+    # Human-formatted specs (schema labels + units) — same formatter as the
+    # materials list, so the dossier and the cards can never show a spec two ways.
+    specs_display = format_specs_for_display(db, card.category, card.specs_structured) if card else []
     ctx = _ctx(request, user)
-    ctx.update({"mpn": mpn.strip().upper(), "card": card})
+    ctx.update({"mpn": mpn.strip().upper(), "card": card, "specs_display": specs_display})
     return template_response("htmx/partials/search/dossier_specs.html", ctx)
 
 
