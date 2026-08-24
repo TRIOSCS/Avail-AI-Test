@@ -386,7 +386,7 @@ def _render_data_ops(request: Request, user: User, db: Session) -> Response:
     Dismissed pairs (DedupDecision) are post-filtered out here at the router — never
     inside the six finder backends.
     """
-    from ...services.dedup_decision_service import filter_dismissed_pairs, load_dismissed_pairs
+    from ...services.dedup_decision_service import filter_dismissed_pairs, list_dismissals, load_dismissed_pairs
 
     # ONE query for all three entity types; each list is overfetched by the number
     # of dismissed pairs of its type so post-filtering can't starve the 30-row page.
@@ -431,6 +431,7 @@ def _render_data_ops(request: Request, user: User, db: Session) -> Response:
     ctx["vendor_scan_failed"] = vendor_scan_failed
     ctx["company_scan_failed"] = company_scan_failed
     ctx["contact_scan_failed"] = contact_scan_failed
+    ctx["ignored_pairs"] = list_dismissals(db)
     return template_response("htmx/partials/settings/data_ops.html", ctx)
 
 
@@ -969,6 +970,33 @@ async def admin_contact_dismiss(
         action_fn=lambda: record_dismissals(db, "contact", [(id_a, id_b)], user.id),
         success_msg_fn=lambda result: "Pair dismissed — hidden until un-dismissed.",
         error_prefix="Dismiss failed",
+    )
+
+
+@router.post("/v2/partials/admin/dedup-undismiss", response_class=HTMLResponse)
+async def admin_dedup_undismiss(
+    request: Request,
+    entity_type: str = Form(...),
+    id_a: int = Form(...),
+    id_b: int = Form(...),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Delete a persisted dismissal so the pair returns to the dedup candidate lists
+    (and the nightly job's skip set).
+
+    entity_type is validated by the service; a bad value surfaces as an error toast,
+    never a 500.
+    """
+    from ...services.dedup_decision_service import remove_dismissal
+
+    return _dedup_single_action(
+        request,
+        user,
+        db,
+        action_fn=lambda: remove_dismissal(db, entity_type, id_a, id_b),
+        success_msg_fn=lambda result: "Pair restored to the duplicate candidates.",
+        error_prefix="Un-dismiss failed",
     )
 
 

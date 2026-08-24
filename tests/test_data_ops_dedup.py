@@ -585,3 +585,59 @@ class TestMergeAudit:
         audit = db_session.query(DedupMergeAudit).one()
         assert (audit.entity_type, audit.action) == ("contact", "merge")
         assert audit.removed_id == cb.id
+
+
+# ── PART 8: "Ignored pairs" section + un-dismiss ────────────────────────────
+
+
+class TestIgnoredPairs:
+    def test_section_hidden_when_no_dismissals(self, admin_client, db_session):
+        html = admin_client.get("/v2/partials/settings/data-ops").text
+        assert "Ignored pairs" not in html
+
+    def test_section_lists_dismissal_with_names_and_undismiss(self, admin_client, db_session, admin_user):
+        v1, v2 = _vendors(db_session, "Ign A", "Ign A Inc")
+        admin_client.post("/v2/partials/admin/vendor-dismiss", data={"id_a": str(v1.id), "id_b": str(v2.id)})
+        html = admin_client.get("/v2/partials/settings/data-ops").text
+        assert "Ignored pairs" in html
+        assert "Ign A" in html and "Ign A Inc" in html  # names resolved live
+        assert "Test Admin" in html  # decided-by (conftest admin_user.name)
+        assert "/v2/partials/admin/dedup-undismiss" in html
+
+    def test_deleted_id_renders_fallback_and_stays_undismissable(self, admin_client, db_session):
+        from app.models import DedupDecision
+
+        db_session.add(DedupDecision(entity_type="vendor", id_a=424242, id_b=424243))
+        db_session.commit()
+        html = admin_client.get("/v2/partials/settings/data-ops").text
+        assert "deleted #424242" in html
+        assert "deleted #424243" in html
+        assert "/v2/partials/admin/dedup-undismiss" in html  # self-cleanup still offered
+
+    def test_undismiss_restores_pair_to_candidates(self, admin_client, db_session):
+        from app.models import DedupDecision
+
+        # Names must score ≥85 on token_sort_ratio so the pair RENDERS again after
+        # un-dismiss (the brief's "Und A"/"Und A Inc" seeds score below threshold).
+        v1, v2 = _vendors(db_session, "Und Components", "Und Components Inc")
+        admin_client.post("/v2/partials/admin/vendor-dismiss", data={"id_a": str(v1.id), "id_b": str(v2.id)})
+        assert f'data-pair="{v1.id}-{v2.id}"' not in admin_client.get("/v2/partials/settings/data-ops").text
+        resp = admin_client.post(
+            "/v2/partials/admin/dedup-undismiss",
+            data={"entity_type": "vendor", "id_a": str(v2.id), "id_b": str(v1.id)},  # reversed ok
+        )
+        assert resp.status_code == 200, resp.text[:1500]
+        assert db_session.query(DedupDecision).count() == 0
+        # The re-render in the response already shows the pair again.
+        assert f'data-pair="{v1.id}-{v2.id}"' in resp.text
+
+    def test_undismiss_unknown_entity_type_is_error_toast(self, admin_client, db_session):
+        import json
+
+        resp = admin_client.post(
+            "/v2/partials/admin/dedup-undismiss",
+            data={"entity_type": "nuke", "id_a": "1", "id_b": "2"},
+        )
+        assert resp.status_code == 200  # toast, not a 500
+        toast = json.loads(resp.headers["HX-Trigger"])["showToast"]
+        assert toast["type"] == "error"

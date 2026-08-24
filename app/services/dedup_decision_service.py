@@ -12,13 +12,13 @@ services — they never re-implement a merge.
 Called by: routers/htmx/settings.py (Data Ops pane), services/auto_dedup_service.py
     (nightly dismissed-pair skip)
 Depends on: app.models (DedupDecision, DedupMergeAudit, VendorCard, Company,
-    SiteContact); vendor/company/contact merge services (lazy imports)
+    SiteContact, User); vendor/company/contact merge services (lazy imports)
 """
 
 from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
-from ..models import Company, DedupDecision, DedupMergeAudit, SiteContact, VendorCard
+from ..models import Company, DedupDecision, DedupMergeAudit, SiteContact, User, VendorCard
 
 ENTITY_TYPES: tuple[str, ...] = ("vendor", "company", "contact")
 
@@ -197,3 +197,59 @@ def audited_delete_both(db: Session, entity_type: str, id_a: int, id_b: int, act
         )
     _prune_decisions(db, entity_type, [id_a, id_b])
     return result
+
+
+def list_dismissals(db: Session) -> list[dict]:
+    """All persisted dismissals for the Ignored-pairs section, newest first.
+
+    Display names resolve LIVE per entity type; ids that no longer resolve render as
+    "deleted #<id>" (the row still offers Un-dismiss, so stale rows are self-cleaning).
+    decided_by falls back to "unknown" (deleted user → SET NULL).
+    """
+    rows = (
+        db.execute(select(DedupDecision).order_by(DedupDecision.created_at.desc(), DedupDecision.id.desc()))
+        .scalars()
+        .all()
+    )
+    if not rows:
+        return []
+
+    ids: dict[str, set[int]] = {t: set() for t in ENTITY_TYPES}
+    for r in rows:
+        if r.entity_type in ids:
+            ids[r.entity_type].update((r.id_a, r.id_b))
+    # NOTE: .all() before dict() — a raw Result has .keys(), so dict(result) would
+    # treat it as a mapping and crash; a list of 2-tuple Rows builds the map cleanly.
+    names: dict[str, dict[int, str]] = {t: {} for t in ENTITY_TYPES}
+    if ids["vendor"]:
+        names["vendor"] = dict(
+            db.execute(select(VendorCard.id, VendorCard.display_name).where(VendorCard.id.in_(ids["vendor"]))).all()
+        )
+    if ids["company"]:
+        names["company"] = dict(
+            db.execute(select(Company.id, Company.name).where(Company.id.in_(ids["company"]))).all()
+        )
+    if ids["contact"]:
+        names["contact"] = dict(
+            db.execute(select(SiteContact.id, SiteContact.full_name).where(SiteContact.id.in_(ids["contact"]))).all()
+        )
+
+    user_ids = {r.decided_by_id for r in rows if r.decided_by_id}
+    users = {u.id: u for u in db.execute(select(User).where(User.id.in_(user_ids))).scalars()} if user_ids else {}
+
+    out: list[dict] = []
+    for r in rows:
+        entity_names = names.get(r.entity_type, {})
+        decider = users.get(r.decided_by_id)
+        out.append(
+            {
+                "entity_type": r.entity_type,
+                "id_a": r.id_a,
+                "id_b": r.id_b,
+                "name_a": entity_names.get(r.id_a) or f"deleted #{r.id_a}",
+                "name_b": entity_names.get(r.id_b) or f"deleted #{r.id_b}",
+                "decided_by": decider.display_name if decider else "unknown",
+                "created_at": r.created_at,
+            }
+        )
+    return out
