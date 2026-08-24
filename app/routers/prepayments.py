@@ -336,3 +336,38 @@ async def prepayment_unmark_paid(
     resp = _render_prepayment_tab(request, current_user, db, scope)
     set_toast(resp, "Payment reversed — prepayment returned to approved.", "success", merge=True)
     return resp
+
+
+@router.post("/v2/partials/prepayments/{prepayment_id}/resend-pay-link", response_class=HTMLResponse)
+async def prepayment_resend_pay_link(
+    request: Request,
+    prepayment_id: int,
+    scope: str = Form("all"),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_user),
+):
+    """Re-send the OK-TO-WIRE accounting email for an APPROVED prepayment (the pay link
+    got lost or accounting never saw it).
+
+    Same access gate as mark-paid (manager/admin or the plan owner). The live single-use
+    ``pay_token`` is NOT re-minted — the originally-emailed link keeps working; the notice
+    simply embeds it again (notify_prepayment_approved reads the token live via
+    _confirm_url). Approved-only, hard 400 otherwise: a requested prepayment is not yet
+    authorized, and a paid/void one has a SPENT token — resending would email a link-less
+    OK-TO-WIRE. Router-thin: no service function, only the existing fire-and-forget
+    notifier runner.
+    """
+    pp = db.get(Prepayment, prepayment_id)
+    if pp is None:
+        raise HTTPException(status_code=404, detail="Prepayment not found")
+    _require_mark_paid_access(db, current_user, pp)
+    if pp.status != PrepaymentStatus.APPROVED.value:
+        raise HTTPException(status_code=400, detail="Only an approved prepayment's pay link can be resent.")
+
+    from ..services.prepayment_notifications import notify_prepayment_approved, run_prepayment_notify_bg
+
+    await run_prepayment_notify_bg(notify_prepayment_approved, pp.id)
+
+    resp = _render_prepayment_tab(request, current_user, db, scope)
+    set_toast(resp, "OK-to-wire email resent to accounting.", "success", merge=True)
+    return resp
