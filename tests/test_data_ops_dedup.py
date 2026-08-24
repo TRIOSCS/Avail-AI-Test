@@ -475,3 +475,113 @@ class TestPerRowDismiss:
     def test_dismiss_requires_admin(self, client, db_session):
         resp = client.post("/v2/partials/admin/vendor-dismiss", data={"id_a": "1", "id_b": "2"})
         assert resp.status_code == 403
+
+
+# ── PART 7: merge/delete audit rows + decision pruning ──────────────────────
+
+
+class TestMergeAudit:
+    def test_vendor_merge_writes_audit_row_and_prunes_decisions(self, admin_client, db_session, admin_user):
+        from app.models import DedupDecision, DedupMergeAudit
+
+        v1, v2 = _vendors(db_session, "Aud A", "Aud A Inc")
+        lo, hi = sorted((v1.id, v2.id))
+        # A stale dismissal referencing the pair, plus an unrelated one that must survive.
+        db_session.add_all(
+            [
+                DedupDecision(entity_type="vendor", id_a=lo, id_b=hi),
+                DedupDecision(entity_type="vendor", id_a=888881, id_b=888882),
+            ]
+        )
+        db_session.commit()
+
+        resp = admin_client.post(
+            "/v2/partials/admin/vendor-merge", data={"keep_id": str(v1.id), "remove_id": str(v2.id)}
+        )
+        assert resp.status_code == 200, resp.text[:1500]
+
+        audit = db_session.query(DedupMergeAudit).one()
+        assert audit.actor_id == admin_user.id
+        assert audit.entity_type == "vendor"
+        assert audit.action == "merge"
+        assert (audit.kept_id, audit.kept_name) == (v1.id, "Aud A")
+        assert (audit.removed_id, audit.removed_name) == (v2.id, "Aud A Inc")
+        # Rows referencing either involved id are pruned; unrelated rows survive.
+        remaining = db_session.query(DedupDecision).all()
+        assert [(r.id_a, r.id_b) for r in remaining] == [(888881, 888882)]
+
+    def test_company_merge_writes_audit_row(self, admin_client, db_session, admin_user):
+        from app.models import DedupMergeAudit
+
+        c1, c2 = _companies(db_session, "AudCo", "AudCo Inc")
+        resp = admin_client.post(
+            "/v2/partials/admin/company-merge", data={"keep_id": str(c1.id), "remove_id": str(c2.id)}
+        )
+        assert resp.status_code == 200, resp.text[:1500]
+        audit = db_session.query(DedupMergeAudit).one()
+        assert (audit.entity_type, audit.action) == ("company", "merge")
+        assert (audit.kept_name, audit.removed_name) == ("AudCo", "AudCo Inc")
+
+    def test_vendor_delete_both_writes_two_audit_rows(self, admin_client, db_session, admin_user):
+        from app.models import DedupDecision, DedupMergeAudit
+
+        v1, v2 = _vendors(db_session, "AudDel A", "AudDel A Inc")
+        lo, hi = sorted((v1.id, v2.id))
+        db_session.add(DedupDecision(entity_type="vendor", id_a=lo, id_b=hi))
+        db_session.commit()
+
+        resp = admin_client.post("/v2/partials/admin/vendor-delete-both", data={"id_a": str(v1.id), "id_b": str(v2.id)})
+        assert resp.status_code == 200, resp.text[:1500]
+
+        rows = db_session.query(DedupMergeAudit).order_by(DedupMergeAudit.removed_id).all()
+        assert len(rows) == 2
+        assert all(r.action == "delete_both" and r.kept_id is None for r in rows)
+        # Names were captured BEFORE deletion.
+        assert {(r.removed_id, r.removed_name) for r in rows} == {
+            (v1.id, "AudDel A"),
+            (v2.id, "AudDel A Inc"),
+        }
+        assert db_session.query(DedupDecision).count() == 0
+
+    def test_bulk_merge_writes_audit_and_prunes(self, admin_client, db_session, admin_user):
+        from app.models import DedupDecision, DedupMergeAudit
+
+        v1, v2 = _vendors(db_session, "AudBulk A", "AudBulk A Inc")
+        lo, hi = sorted((v1.id, v2.id))
+        db_session.add(DedupDecision(entity_type="vendor", id_a=lo, id_b=hi))
+        db_session.commit()
+
+        resp = admin_client.post(
+            "/v2/partials/admin/vendor-bulk", data={"action": "merge", "pairs": f"{v1.id}-{v2.id}"}
+        )
+        assert resp.status_code == 200, resp.text[:1500]
+        assert db_session.get(VendorCard, v2.id) is None  # real merge still ran
+        audit = db_session.query(DedupMergeAudit).one()
+        assert (audit.action, audit.kept_id, audit.removed_id) == ("merge", v1.id, v2.id)
+        assert db_session.query(DedupDecision).count() == 0
+
+    def test_contact_merge_writes_audit_row(self, admin_client, db_session, admin_user):
+        from app.models import DedupMergeAudit
+        from app.models.crm import Company as CrmCompany
+        from app.models.crm import CustomerSite, SiteContact
+
+        co_a = CrmCompany(name="Aud Acme")
+        co_b = CrmCompany(name="Aud Beta")
+        db_session.add_all([co_a, co_b])
+        db_session.flush()
+        site_a = CustomerSite(company_id=co_a.id, site_name="HQ")
+        site_b = CustomerSite(company_id=co_b.id, site_name="HQ")
+        db_session.add_all([site_a, site_b])
+        db_session.flush()
+        ca = SiteContact(customer_site_id=site_a.id, full_name="Jane Doe", email="jane@aud.com")
+        cb = SiteContact(customer_site_id=site_b.id, full_name="Jane Doe", email="JANE@aud.com")
+        db_session.add_all([ca, cb])
+        db_session.commit()
+
+        resp = admin_client.post(
+            "/v2/partials/admin/contact-merge", data={"keep_id": str(ca.id), "remove_id": str(cb.id)}
+        )
+        assert resp.status_code == 200, resp.text[:1500]
+        audit = db_session.query(DedupMergeAudit).one()
+        assert (audit.entity_type, audit.action) == ("contact", "merge")
+        assert audit.removed_id == cb.id

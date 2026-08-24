@@ -6,19 +6,19 @@ which are NOT sorted — every function here canonicalizes to (min, max) on writ
 lookup so one pair can never store under two keys. All functions are commit-free:
 the router owns the transaction (via _dedup_single_action / _dedup_bulk).
 
-audited_merge / audited_delete_both (added in a later task of the same workstream)
-REUSE the existing hand-maintained merge services — they never re-implement a merge.
+audited_merge / audited_delete_both REUSE the existing hand-maintained merge
+services — they never re-implement a merge.
 
 Called by: routers/htmx/settings.py (Data Ops pane), services/auto_dedup_service.py
     (nightly dismissed-pair skip)
 Depends on: app.models (DedupDecision, DedupMergeAudit, VendorCard, Company,
-    SiteContact, User); vendor/company/contact merge services (lazy imports)
+    SiteContact); vendor/company/contact merge services (lazy imports)
 """
 
-from sqlalchemy import delete, or_, select  # noqa: F401
+from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
-from ..models import Company, DedupDecision, DedupMergeAudit, SiteContact, User, VendorCard  # noqa: F401
+from ..models import Company, DedupDecision, DedupMergeAudit, SiteContact, VendorCard
 
 ENTITY_TYPES: tuple[str, ...] = ("vendor", "company", "contact")
 
@@ -100,3 +100,100 @@ def filter_dismissed_pairs(pairs: list[dict], dismissed: set[tuple[int, int]], k
     if not dismissed:
         return pairs
     return [p for p in pairs if canonical_pair(p[f"{key}_a"]["id"], p[f"{key}_b"]["id"]) not in dismissed]
+
+
+def _display_name(db: Session, entity_type: str, entity_id: int) -> str | None:
+    """Live display name for an entity id (None if the row no longer exists)."""
+    if entity_type == "vendor":
+        row = db.get(VendorCard, entity_id)
+        val = row.display_name if row else None
+    elif entity_type == "company":
+        row = db.get(Company, entity_id)
+        val = row.name if row else None
+    else:
+        row = db.get(SiteContact, entity_id)
+        val = row.full_name if row else None
+    return val[:255] if val else None
+
+
+def _prune_decisions(db: Session, entity_type: str, ids: list[int]) -> None:
+    """Delete DedupDecision rows referencing ANY of the given ids (stale after a
+    merge/delete removed the entity).
+
+    Bulk delete — audit_listeners never fire on bulk ops, which is exactly why the
+    caller writes an explicit audit row.
+    """
+    db.execute(
+        delete(DedupDecision)
+        .where(
+            DedupDecision.entity_type == entity_type,
+            or_(DedupDecision.id_a.in_(ids), DedupDecision.id_b.in_(ids)),
+        )
+        .execution_options(synchronize_session=False)
+    )
+
+
+def audited_merge(db: Session, entity_type: str, keep_id: int, remove_id: int, actor_id: int | None) -> dict:
+    """Run the entity's EXISTING merge service + append a DedupMergeAudit row + prune
+    stale DedupDecision rows.
+
+    Commit-free; returns the service's result dict unchanged so the router's
+    success_msg_fn keeps working. Names are captured BEFORE the merge because the merge
+    deletes the loser row.
+    """
+    _require_entity_type(entity_type)
+    if entity_type == "vendor":
+        from .vendor_merge_service import merge_vendor_cards as merge_fn
+    elif entity_type == "company":
+        from .company_merge_service import merge_companies as merge_fn
+    else:
+        from .contact_merge_service import merge_contacts as merge_fn
+
+    kept_name = _display_name(db, entity_type, keep_id)
+    removed_name = _display_name(db, entity_type, remove_id)
+    result = merge_fn(keep_id, remove_id, db)
+    db.add(
+        DedupMergeAudit(
+            actor_id=actor_id,
+            entity_type=entity_type,
+            action="merge",
+            kept_id=keep_id,
+            kept_name=kept_name,
+            removed_id=remove_id,
+            removed_name=removed_name,
+        )
+    )
+    _prune_decisions(db, entity_type, [keep_id, remove_id])
+    return result
+
+
+def audited_delete_both(db: Session, entity_type: str, id_a: int, id_b: int, actor_id: int | None) -> dict:
+    """Run the entity's EXISTING delete-both service + append TWO delete_both audit rows
+    (one per removed entity, kept_id NULL) + prune stale decisions.
+
+    Vendor and company only — there is no contact delete-both.
+    """
+    if entity_type == "vendor":
+        from .vendor_merge_service import delete_vendor_cards as delete_fn
+    elif entity_type == "company":
+        from .company_merge_service import delete_companies as delete_fn
+    else:
+        raise ValueError(f"delete-both is not supported for entity type {entity_type!r}")
+
+    name_a = _display_name(db, entity_type, id_a)
+    name_b = _display_name(db, entity_type, id_b)
+    result = delete_fn(id_a, id_b, db)
+    for removed_id, removed_name in ((id_a, name_a), (id_b, name_b)):
+        db.add(
+            DedupMergeAudit(
+                actor_id=actor_id,
+                entity_type=entity_type,
+                action="delete_both",
+                kept_id=None,
+                kept_name=None,
+                removed_id=removed_id,
+                removed_name=removed_name,
+            )
+        )
+    _prune_decisions(db, entity_type, [id_a, id_b])
+    return result

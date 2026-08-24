@@ -837,7 +837,7 @@ async def admin_vendor_merge(
     db: Session = Depends(get_db),
 ):
     """Merge two vendor cards via HTMX."""
-    from ...services.vendor_merge_service import merge_vendor_cards as _merge
+    from ...services.dedup_decision_service import audited_merge
 
     def _msg(result: dict) -> str:
         kept = db.get(VendorCard, result.get("kept", keep_id))
@@ -848,7 +848,7 @@ async def admin_vendor_merge(
         request,
         user,
         db,
-        action_fn=lambda: _merge(keep_id, remove_id, db),
+        action_fn=lambda: audited_merge(db, "vendor", keep_id, remove_id, user.id),
         success_msg_fn=_msg,
         error_prefix="Vendor merge failed",
     )
@@ -863,7 +863,7 @@ async def admin_company_merge(
     db: Session = Depends(get_db),
 ):
     """Merge two companies via HTMX."""
-    from ...services.company_merge_service import merge_companies
+    from ...services.dedup_decision_service import audited_merge
 
     def _msg(result: dict) -> str:
         kept = db.get(Company, result.get("kept", keep_id))
@@ -874,7 +874,7 @@ async def admin_company_merge(
         request,
         user,
         db,
-        action_fn=lambda: merge_companies(keep_id, remove_id, db),
+        action_fn=lambda: audited_merge(db, "company", keep_id, remove_id, user.id),
         success_msg_fn=_msg,
         error_prefix="Company merge failed",
     )
@@ -891,7 +891,7 @@ async def admin_contact_merge(
     """Merge two cross-site contacts via HTMX (suggest-then-confirm; never
     automatic)."""
     from ...models.crm import SiteContact
-    from ...services.contact_merge_service import merge_contacts
+    from ...services.dedup_decision_service import audited_merge
 
     def _msg(result: dict) -> str:
         kept = db.get(SiteContact, result.get("kept", keep_id))
@@ -902,7 +902,7 @@ async def admin_contact_merge(
         request,
         user,
         db,
-        action_fn=lambda: merge_contacts(keep_id, remove_id, db),
+        action_fn=lambda: audited_merge(db, "contact", keep_id, remove_id, user.id),
         success_msg_fn=_msg,
         error_prefix="Contact merge failed",
     )
@@ -1027,13 +1027,13 @@ async def admin_vendor_delete_both(
     db: Session = Depends(get_db),
 ):
     """Delete BOTH vendor cards in a dedup pair (neither is worth keeping)."""
-    from ...services.vendor_merge_service import delete_vendor_cards
+    from ...services.dedup_decision_service import audited_delete_both
 
     return _dedup_single_action(
         request,
         user,
         db,
-        action_fn=lambda: delete_vendor_cards(id_a, id_b, db),
+        action_fn=lambda: audited_delete_both(db, "vendor", id_a, id_b, user.id),
         success_msg_fn=lambda result: f"Deleted both vendors. {result.get('detached', 0)} records detached.",
         error_prefix="Vendor delete failed",
     )
@@ -1048,13 +1048,13 @@ async def admin_company_delete_both(
     db: Session = Depends(get_db),
 ):
     """Delete BOTH companies in a dedup pair (neither is worth keeping)."""
-    from ...services.company_merge_service import delete_companies
+    from ...services.dedup_decision_service import audited_delete_both
 
     return _dedup_single_action(
         request,
         user,
         db,
-        action_fn=lambda: delete_companies(id_a, id_b, db),
+        action_fn=lambda: audited_delete_both(db, "company", id_a, id_b, user.id),
         success_msg_fn=lambda result: f"Deleted both companies. {result.get('detached', 0)} records detached.",
         error_prefix="Company delete failed",
     )
@@ -1128,23 +1128,18 @@ async def _dedup_bulk(request, user, db, entity: str) -> HTMLResponse:
     if not pairs:
         return _render_data_ops(request, user, db)
 
-    if entity == "vendor":
-        from ...services.vendor_merge_service import delete_vendor_cards, merge_vendor_cards
+    from ...services.dedup_decision_service import audited_delete_both, audited_merge
 
-        merge_fn, delete_fn, noun = merge_vendor_cards, delete_vendor_cards, "vendor"
-    else:
-        from ...services.company_merge_service import delete_companies, merge_companies
-
-        merge_fn, delete_fn, noun = merge_companies, delete_companies, "company"
+    noun = "vendor" if entity == "vendor" else "company"
 
     done = 0
     failed_tokens: list[str] = []
     for a, b in pairs:
         try:
             if action == "merge":
-                merge_fn(a, b, db)
+                audited_merge(db, entity, a, b, user.id)
             else:
-                delete_fn(a, b, db)
+                audited_delete_both(db, entity, a, b, user.id)
             db.commit()
             done += 1
         except Exception as e:
