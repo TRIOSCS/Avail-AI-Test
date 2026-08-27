@@ -268,6 +268,36 @@ def find_company_dup_match(db, company_id: int, normalized_name: str | None, thr
     return {"id": best_row.id, "name": best_row.name, "score": round(best_score)}
 
 
+def find_sibling_companies(db, company, cap: int = 5) -> list:
+    """Active companies sharing this company's exact normalized_name.
+
+    These are the policy-allowed duplicates auto-dedup deliberately skips
+    (different owners keep separate accounts). Read-only; callers must never
+    merge based on this. Returns at most ``cap`` rows, ordered by id.
+
+    Called by: services.account_summary_service.generate_account_summary
+    (customer-360 sibling pooling).
+    """
+    if not company.normalized_name:
+        return []
+
+    from sqlalchemy import select
+
+    from .models import Company
+
+    stmt = (
+        select(Company)
+        .where(
+            Company.normalized_name == company.normalized_name,
+            Company.id != company.id,
+            Company.is_active.is_(True),
+        )
+        .order_by(Company.id.asc())
+        .limit(cap)
+    )
+    return list(db.scalars(stmt).all())
+
+
 def find_company_dedup_candidates(db, threshold: int = 85, limit: int = 50) -> list[dict]:
     """Find potential duplicate companies using fuzzy name matching.
 
