@@ -1085,6 +1085,7 @@ class DigestEntityType(StrEnum):
 
     REQUISITION = "requisition"
     COMPANY = "company"
+    BUY_PLAN = "buy_plan"
 
 
 class DigestStatusSignal(StrEnum):
