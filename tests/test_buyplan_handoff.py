@@ -7,9 +7,13 @@ activity_digest_service.get_or_build_digest.
 
 from datetime import UTC, datetime
 
-from app.constants import DigestEntityType
+from app.constants import ApprovalGateType, ApprovalSubjectType, DigestEntityType
+from app.models.approvals import ApprovalEvent, ApprovalRequest
+from app.models.buy_plan import BuyPlanLine
 from app.models.intelligence import ActivityLog
+from app.models.quality_plan import Prepayment, QualityPlan
 from app.services.activity_service import get_buy_plan_activities
+from app.services.buyplan_handoff import build_handoff_facts
 
 
 def _mk_plan_activity(
@@ -52,3 +56,80 @@ class TestBuyPlanActivities:
         _mk_plan_activity(db_session, test_buy_plan.id, subject="mine")
         rows = get_buy_plan_activities(test_buy_plan.id + 999, db_session)
         assert rows == []
+
+
+class TestHandoffFacts:
+    def test_header_and_empty_sections(self, db_session, test_buy_plan):
+        facts = build_handoff_facts(db_session, test_buy_plan)
+        assert f"Buy plan #{test_buy_plan.id}" in facts
+        assert "status: draft" in facts
+        assert "Lines: none yet" in facts
+        assert "Quality plan: not created" in facts
+        assert "Prepayments: none" in facts
+        assert "Approval history: none" in facts
+
+    def test_line_facts_and_status_counts(self, db_session, test_buy_plan, test_offer):
+        line = BuyPlanLine(
+            buy_plan_id=test_buy_plan.id,
+            requirement_id=test_offer.requirement_id,
+            offer_id=test_offer.id,
+            quantity=25,
+            unit_cost=4.10,
+            unit_sell=6.00,
+            status="awaiting_po",
+            issue_type=None,
+        )
+        db_session.add(line)
+        db_session.commit()
+        facts = build_handoff_facts(db_session, test_buy_plan)
+        assert "Lines (1): awaiting_po: 1" in facts
+        assert "×25" in facts
+        assert test_offer.vendor_name in facts
+
+    def test_line_issue_surfaces_as_blocker(self, db_session, test_buy_plan, test_offer):
+        # NOTE: brief's sample used issue_type="price_up", which is not a member of
+        # LineIssueType (sold_out | price_changed | lead_time_changed | other — see
+        # app/constants.py) and BuyPlanLine._validate_issue_type raises ValueError on
+        # assignment. Adapted to "price_changed", the real vocabulary's closest match.
+        line = BuyPlanLine(
+            buy_plan_id=test_buy_plan.id,
+            offer_id=test_offer.id,
+            quantity=5,
+            status="issue",
+            issue_type="price_changed",
+            issue_note="vendor repriced +12%",
+        )
+        db_session.add(line)
+        db_session.commit()
+        facts = build_handoff_facts(db_session, test_buy_plan)
+        assert "ISSUE price_changed: vendor repriced +12%" in facts
+
+    def test_qp_section_stamps(self, db_session, test_buy_plan, test_user):
+        qp = QualityPlan(buy_plan_id=test_buy_plan.id)
+        qp.sales_section_reviewed_at = datetime(2026, 8, 20, tzinfo=UTC)
+        qp.sales_section_reviewed_by_id = test_user.id
+        db_session.add(qp)
+        db_session.commit()
+        facts = build_handoff_facts(db_session, test_buy_plan)
+        assert "Sales section reviewed 2026-08-20" in facts
+        assert "Purchasing section not reviewed" in facts
+
+    def test_prepayment_and_approval_timeline(self, db_session, test_buy_plan, test_user):
+        db_session.add(
+            Prepayment(buy_plan_id=test_buy_plan.id, total_incl_fees=1200, vendor_name="Arrow", status="approved")
+        )
+        req = ApprovalRequest(
+            gate_type=ApprovalGateType.BUY_PLAN.value,
+            subject_type=ApprovalSubjectType.BUY_PLAN.value,
+            subject_id=test_buy_plan.id,
+            status="approved",
+            requested_by_id=test_user.id,
+        )
+        db_session.add(req)
+        db_session.flush()
+        db_session.add(ApprovalEvent(request_id=req.id, actor_id=test_user.id, event_type="approved"))
+        db_session.commit()
+        facts = build_handoff_facts(db_session, test_buy_plan)
+        assert "approved" in facts
+        assert "Prepayments (1): approved: 1" in facts
+        assert "$1,200" in facts
