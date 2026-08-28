@@ -1,8 +1,9 @@
 """services/account_summary_service.py -- AI-generated account summary.
 
 Gathers context from company data, requisitions, activities, and contacts
-to produce a strategic account summary via Claude. Called from the companies
-router and rendered on the account overview tab.
+to produce a strategic account summary via Claude. Rendered by the
+account-summary panel on the customer detail page
+(routers/htmx/insights_views.py) and the JSON API (routers/crm/companies.py).
 """
 
 from collections import Counter
@@ -25,7 +26,11 @@ from ..models import (
 async def generate_account_summary(company_id: int, db: Session) -> dict:
     """Build context and ask Claude for a strategic account summary.
 
-    Returns dict with keys: situation, development, next_steps.
+    Returns dict with keys: situation, development, next_steps, sibling_accounts
+    (empty list when the company has no siblings). Context (sites, contacts,
+    requisitions, activities, commercial stats) is pooled across sibling companies
+    (see company_utils.find_sibling_companies) sharing the same normalized_name —
+    read-only; sibling rows are never merged.
     """
     from ..utils.claude_client import claude_json
 
@@ -33,10 +38,26 @@ async def generate_account_summary(company_id: int, db: Session) -> dict:
     if not company:
         return {}
 
+    from ..company_utils import find_sibling_companies
+
+    siblings = find_sibling_companies(db, company)
+    company_ids = [company_id] + [s.id for s in siblings]
+
+    sibling_accounts = [
+        {
+            "id": s.id,
+            "name": s.name,
+            "owner": (s.account_owner.name or s.account_owner.email) if s.account_owner else "Unassigned",
+        }
+        for s in siblings
+    ]
+
     # ── Gather context ───────────────────────────────────────────────
 
-    # Sites
-    sites = db.query(CustomerSite).filter(CustomerSite.company_id == company_id, CustomerSite.is_active.is_(True)).all()
+    # Sites (pooled across siblings)
+    sites = (
+        db.query(CustomerSite).filter(CustomerSite.company_id.in_(company_ids), CustomerSite.is_active.is_(True)).all()
+    )
     site_ids = [s.id for s in sites]
 
     # Contacts across all sites
@@ -71,10 +92,10 @@ async def generate_account_summary(company_id: int, db: Session) -> dict:
         )
         req_counts = {row[0]: row[1] for row in count_rows}
 
-    # Recent activities
+    # Recent activities (pooled across siblings)
     activities = (
         db.query(ActivityLog)
-        .filter(ActivityLog.company_id == company_id)
+        .filter(ActivityLog.company_id.in_(company_ids))
         .order_by(ActivityLog.created_at.desc())
         .limit(20)
         .all()
@@ -104,6 +125,18 @@ async def generate_account_summary(company_id: int, db: Session) -> dict:
 
     owner_name = company.account_owner.name if company.account_owner else "Unassigned"
     ctx_parts.append(f"Account owner: {owner_name}")
+
+    if siblings:
+        sib_bits = []
+        for s in siblings:
+            owner = (s.account_owner.name or s.account_owner.email) if s.account_owner else "Unassigned"
+            sib_bits.append(f"{s.name} (owner: {owner})")
+        ctx_parts.append(
+            f"Sibling accounts pooled ({len(siblings)}): "
+            + "; ".join(sib_bits)
+            + " — same customer under multiple account rows; data below is pooled across all of them."
+        )
+
     ctx_parts.append(f"Sites: {len(sites)}")
     ctx_parts.append(f"Contacts: {len(contacts)}")
 
@@ -144,6 +177,19 @@ async def generate_account_summary(company_id: int, db: Session) -> dict:
             age_days = (now - r.created_at).days if r.created_at else "?"
             recent_lines.append(f"  - REQ-{r.id} '{r.name}' ({r.status}, {mpn_count} MPNs, {age_days}d ago)")
         ctx_parts.append("Recent requisitions:\n" + "\n".join(recent_lines))
+
+    # Commercial stats (pooled across siblings)
+    from .crm_service import company_commercial_stats
+
+    stats = company_commercial_stats(db, company_ids)
+    won_rev = sum((s.get("revenue_90d") or 0) for s in stats.values())
+    rates = [s["win_rate"] for s in stats.values() if s.get("win_rate") is not None]
+    if rates or won_rev:
+        bits = [f"won revenue last 90d: ${won_rev:,.0f}"]
+        if rates:
+            # win_rate is already a 0-100 percentage (company_commercial_stats), not a fraction.
+            bits.append(f"win rate: {sum(rates) / len(rates):.0f}%")
+        ctx_parts.append("Commercial (pooled): " + ", ".join(bits))
 
     # Activity summary
     if activities:
@@ -196,4 +242,5 @@ async def generate_account_summary(company_id: int, db: Session) -> dict:
         "situation": str(result.get("situation", "")),
         "development": str(result.get("development", "")),
         "next_steps": result.get("next_steps", []),
+        "sibling_accounts": sibling_accounts,
     }
