@@ -77,6 +77,27 @@ async def customer_activity_digest(
     return template_response("htmx/partials/shared/activity_digest_card.html", ctx)
 
 
+@router.get("/v2/partials/buy-plans/{plan_id}/handoff-brief", response_class=HTMLResponse)
+async def buyplan_handoff_brief(
+    request: Request,
+    plan_id: int,
+    force: int = 0,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """AI handoff brief card for a buy plan (one-tap load from the deal pane)."""
+    from ...constants import DigestEntityType
+    from ...dependencies import get_buyplan_for_user
+    from ...services.activity_digest_service import get_or_build_digest
+
+    get_buyplan_for_user(db, user, plan_id)  # 404s missing plans and restricted non-owners
+    digest = await get_or_build_digest(DigestEntityType.BUY_PLAN, plan_id, db, force=bool(force))
+    ctx = _base_ctx(request, user, "buy-plans")
+    ctx["digest"] = digest
+    ctx["refresh_url"] = f"/v2/partials/buy-plans/{plan_id}/handoff-brief"
+    return template_response("htmx/partials/shared/activity_digest_card.html", ctx)
+
+
 # ── Dashboard partial ───────────────────────────────────────────────────
 
 

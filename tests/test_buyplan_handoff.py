@@ -201,3 +201,44 @@ class TestBuyPlanDigest:
             second = await digest_svc.get_or_build_digest(DigestEntityType.BUY_PLAN, test_buy_plan.id, db_session)
         assert second["state"] == digest_svc.DigestState.READY
         assert mock_ai2.called  # non-meaningful row still regenerated the brief
+
+
+class TestHandoffEndpoint:
+    """GET /v2/partials/buy-plans/{plan_id}/handoff-brief.
+
+    No ready-made restricted-role TestClient fixture exists in tests/conftest.py (only
+    `client` bound to the buyer `test_user`, plus `manager_client`; `sales_user` and
+    `trader_user` have no matching client override) — so the restricted-non-owner 404
+    path of get_buyplan_for_user is not separately exercised here. test_missing_plan_404
+    covers get_buyplan_for_user's 404 behavior (same HTTPException(404) raised for both
+    a missing plan and a restricted non-owner).
+    """
+
+    def test_renders_card(self, client, db_session, test_buy_plan):
+        with patch(
+            "app.services.activity_digest_service.get_or_build_digest",
+            new_callable=AsyncMock,
+            return_value={
+                "state": digest_svc.DigestState.READY,
+                "headline": "Deal ready",
+                "narrative": None,
+                "highlights": [],
+                "next_step": None,
+                "status_signal": "on_track",
+                "generated_at": None,
+            },
+        ):
+            resp = client.get(
+                f"/v2/partials/buy-plans/{test_buy_plan.id}/handoff-brief",
+                headers={"HX-Request": "true"},
+            )
+        assert resp.status_code == 200
+        assert "Deal ready" in resp.text
+        assert f"/v2/partials/buy-plans/{test_buy_plan.id}/handoff-brief" in resp.text
+
+    def test_missing_plan_404(self, client, db_session):
+        resp = client.get(
+            "/v2/partials/buy-plans/999999/handoff-brief",
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 404
