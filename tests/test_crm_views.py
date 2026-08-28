@@ -4757,6 +4757,13 @@ class TestCustomerTabDeepLink:
         assert tab_content_block, "company-tab-content div not found"
         assert "hx-trigger" not in tab_content_block.group(0)
 
+    def test_detail_mounts_account_summary_panel(self, client: TestClient, db_session: Session, test_user: User):
+        """The customer detail page lazily mounts the account-summary panel (c360)."""
+        co = self._make_company(db_session)
+        resp = client.get(f"/v2/partials/customers/{co.id}")
+        assert resp.status_code == 200
+        assert f"/v2/partials/customers/{co.id}/account-summary" in resp.text
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TestDispositionFilter — P0-C disposition and has_open_reqs filters

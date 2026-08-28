@@ -22,6 +22,7 @@ from ...constants import RequisitionStatus
 from ...database import get_db
 from ...dependencies import require_user
 from ...models import Company, Requisition, User, VendorCard
+from ...rate_limit import check_rate_limit
 from ...template_env import template_response
 from ...utils.search_builder import SearchBuilder
 from .._lookup_helpers import get_requisition_or_404
@@ -75,6 +76,67 @@ async def customer_activity_digest(
     ctx["digest"] = digest
     ctx["refresh_url"] = f"/v2/partials/customers/{company_id}/activity-digest"
     return template_response("htmx/partials/shared/activity_digest_card.html", ctx)
+
+
+def _account_summary_ctx(request, user, company, mode, summary=None):
+    ctx = _base_ctx(request, user, "customers")
+    ctx["company"] = company
+    ctx["mode"] = mode
+    ctx["summary"] = summary or {}
+    ctx["sibling_accounts"] = (summary or {}).get("sibling_accounts", [])
+    return ctx
+
+
+@router.get("/v2/partials/customers/{company_id}/account-summary", response_class=HTMLResponse)
+async def account_summary_panel(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Idle account-summary card: one-tap Generate, no AI call on page load."""
+    from ...dependencies import can_manage_account
+
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    mode = "idle" if can_manage_account(user, company, db) else "forbidden"
+    return template_response(
+        "htmx/partials/customers/_account_summary_card.html",
+        _account_summary_ctx(request, user, company, mode),
+    )
+
+
+@router.post("/v2/partials/customers/{company_id}/account-summary", response_class=HTMLResponse)
+async def account_summary_generate(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Generate the AI account summary (sibling-pooled) and render the card."""
+    from ...dependencies import can_manage_account
+    from ...services.account_summary_service import generate_account_summary
+
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    if not can_manage_account(user, company, db):
+        return template_response(
+            "htmx/partials/customers/_account_summary_card.html",
+            _account_summary_ctx(request, user, company, "forbidden"),
+        )
+    if not check_rate_limit(user.id, "account_summary", limit=5, window_seconds=60):
+        return template_response(
+            "htmx/partials/customers/_account_summary_card.html",
+            _account_summary_ctx(request, user, company, "throttled"),
+        )
+    summary = await generate_account_summary(company_id, db)
+    mode = "ready" if summary.get("situation") or summary.get("development") else "unavailable"
+    return template_response(
+        "htmx/partials/customers/_account_summary_card.html",
+        _account_summary_ctx(request, user, company, mode, summary),
+    )
 
 
 # ── Dashboard partial ───────────────────────────────────────────────────
