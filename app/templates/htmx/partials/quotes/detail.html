@@ -241,12 +241,35 @@
         }
       });
       navigator.clipboard.writeText(text).then(() => {
-        window.dispatchEvent(new CustomEvent('toast', {detail: {message: 'Table copied to clipboard', type: 'success'}}));
+        showToast('Table copied to clipboard', 'success');
       });
     "
             class="btn btn-secondary btn-lg inline-flex items-center gap-1.5">
       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"/></svg>
       Copy Table
+    </button>
+
+    {# Customer-safe copy (B5, Decision E): copies ONLY cells 0,1,2,3,5 — MPN,
+       Description, Manufacturer, Qty, and Sell (relabeled "Price" here so nothing
+       in the header hints at cost/margin). Cell 4 (Cost) and cell 6 (Margin %) are
+       never touched. Guarded by tests/test_quote_copy_table_header.py. #}
+    <button @click="
+      const rows = document.querySelectorAll('#quote-lines-body tr:not(#empty-lines-row)');
+      let text = 'MPN\tDescription\tManufacturer\tQty\tPrice\n';
+      rows.forEach(r => {
+        const cells = r.querySelectorAll('td');
+        if (cells.length >= 6) {
+          const cols = Array.from(cells);
+          text += [cols[0], cols[1], cols[2], cols[3], cols[5]].map(cell => cell.textContent.trim()).join('\t') + '\n';
+        }
+      });
+      navigator.clipboard.writeText(text).then(() => {
+        showToast('Customer table copied to clipboard', 'success');
+      });
+    "
+            class="btn btn-secondary btn-lg inline-flex items-center gap-1.5">
+      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"/></svg>
+      Copy for customer
     </button>
 
     <a href="/api/quotes/{{ quote.id }}/pdf" target="_blank" rel="noopener noreferrer"
