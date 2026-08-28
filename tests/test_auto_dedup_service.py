@@ -706,3 +706,78 @@ class TestUsesSharedFuzzyScorer:
 
         merged = _dedup_vendors(db_session)
         assert merged == 0
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Dismissed pairs are never auto-merged
+# ══════════════════════════════════════════════════════════════════════
+
+
+class TestDismissedPairsSkipped:
+    """The module's autouse fixture flips auto_dedup_merge_enabled ON — the point:
+
+    even with the merge gate open, a human dismissal is final for the nightly job.
+    """
+
+    def test_vendor_dismissed_pair_never_merges(self, db_session):
+        from app.models import DedupDecision
+        from app.services.auto_dedup_service import _dedup_vendors
+
+        # >=98 auto-merge band (same shape as TestDedupVendors.test_auto_merge_high_score).
+        keep = _make_vendor(
+            db_session,
+            "Dismissed Electronics Distribution",
+            normalized_name="dismissed electronics distribution",
+            sighting_count=20,
+        )
+        drop = _make_vendor(
+            db_session,
+            "Dismissed Electronics Distributio",
+            normalized_name="dismissed electronics distributio",
+            sighting_count=5,
+        )
+        lo, hi = sorted((keep.id, drop.id))
+        db_session.add(DedupDecision(entity_type="vendor", id_a=lo, id_b=hi))
+        db_session.commit()
+
+        merged = _dedup_vendors(db_session)
+
+        assert merged == 0
+        assert db_session.get(VendorCard, keep.id) is not None
+        assert db_session.get(VendorCard, drop.id) is not None
+
+    def test_company_dismissed_pair_never_merges(self, db_session):
+        from app.models import DedupDecision
+        from app.services.auto_dedup_service import _dedup_companies
+
+        keep = _make_company(db_session, "Dismiss Co")
+        remove = _make_company(db_session, "Dismiss Co Dup")
+        lo, hi = sorted((keep.id, remove.id))
+        db_session.add(DedupDecision(entity_type="company", id_a=lo, id_b=hi))
+        db_session.commit()
+
+        candidates = [_candidate(keep.id, remove.id, score=99)]
+        with patch("app.company_utils.find_company_dedup_candidates", return_value=candidates):
+            with patch("app.services.company_merge_service.merge_companies") as mock_merge:
+                merged = _dedup_companies(db_session)
+
+        assert merged == 0
+        mock_merge.assert_not_called()
+
+    def test_undismissed_pair_still_merges(self, db_session):
+        """The skip is per-pair: an unrelated dismissal must not disable the job."""
+        from app.models import DedupDecision
+        from app.services.auto_dedup_service import _dedup_companies
+
+        keep = _make_company(db_session, "Live Co")
+        remove = _make_company(db_session, "Live Co Dup")
+        db_session.add(DedupDecision(entity_type="company", id_a=888881, id_b=888882))
+        db_session.commit()
+
+        candidates = [_candidate(keep.id, remove.id, score=99)]
+        with patch("app.company_utils.find_company_dedup_candidates", return_value=candidates):
+            with patch("app.services.company_merge_service.merge_companies") as mock_merge:
+                merged = _dedup_companies(db_session)
+
+        assert merged == 1
+        mock_merge.assert_called_once_with(keep.id, remove.id, db_session)

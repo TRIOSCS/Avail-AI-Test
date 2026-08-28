@@ -251,14 +251,44 @@ class TestBulkActions:
         assert resp.status_code == 200, resp.text[:1500]
         assert db_session.get(Company, c2.id) is None
 
-    def test_bulk_dismiss_is_noop_render(self, admin_client, db_session):
-        """Dismiss is view-only — records are untouched, render still 200."""
+    def test_bulk_dismiss_persists_canonical_rows(self, admin_client, db_session, admin_user):
+        """Dismiss now persists: the keeper-first token (keeper id may be the HIGHER
+        id) is canonicalized to (min, max) and attributed to the session user; the
+        vendor records themselves are untouched."""
+        from app.models import DedupDecision
+
         v1, v2 = _vendors(db_session, "Dis A", "Dis A Inc")
-        token = f"{v1.id}-{v2.id}"
+        lo, hi = sorted((v1.id, v2.id))
+        token = f"{hi}-{lo}"  # deliberately NOT sorted — simulates keeper-first
         resp = admin_client.post("/v2/partials/admin/vendor-bulk", data={"action": "dismiss", "pairs": token})
         assert resp.status_code == 200
+        # Records untouched (dismiss is never destructive).
         assert db_session.get(VendorCard, v1.id) is not None
         assert db_session.get(VendorCard, v2.id) is not None
+        # Decision persisted canonically, attributed to the admin.
+        row = db_session.query(DedupDecision).one()
+        assert (row.entity_type, row.id_a, row.id_b) == ("vendor", lo, hi)
+        assert row.decided_by_id == admin_user.id
+
+    def test_bulk_dismiss_idempotent_across_orders(self, admin_client, db_session):
+        """Dismissing the same pair in both token orders stores exactly ONE row."""
+        from app.models import DedupDecision
+
+        v1, v2 = _vendors(db_session, "Dis B", "Dis B Inc")
+        for token in (f"{v1.id}-{v2.id}", f"{v2.id}-{v1.id}"):
+            resp = admin_client.post("/v2/partials/admin/vendor-bulk", data={"action": "dismiss", "pairs": token})
+            assert resp.status_code == 200
+        assert db_session.query(DedupDecision).count() == 1
+
+    def test_bulk_dismiss_company_persists(self, admin_client, db_session):
+        from app.models import DedupDecision
+
+        c1, c2 = _companies(db_session, "DisCo", "DisCo Inc")
+        token = f"{c1.id}-{c2.id}"
+        resp = admin_client.post("/v2/partials/admin/company-bulk", data={"action": "dismiss", "pairs": token})
+        assert resp.status_code == 200
+        row = db_session.query(DedupDecision).one()
+        assert (row.entity_type, row.id_a, row.id_b) == ("company", min(c1.id, c2.id), max(c1.id, c2.id))
 
     def test_bulk_invalid_action_rejected(self, admin_client, db_session):
         resp = admin_client.post("/v2/partials/admin/vendor-bulk", data={"action": "nuke", "pairs": "1-2"})
@@ -290,4 +320,324 @@ class TestBulkActions:
         assert "99991-99992" in toast["message"]
         # Any failure → not green success.
         assert toast["type"] != "success"
+        assert toast["type"] == "error"
+
+
+# ── PART 5: persisted dedup decisions ───────────────────────────────────────
+
+
+class TestDedupDecisionModel:
+    def test_models_importable_and_persist(self, db_session, admin_user):
+        from app.models import DedupDecision, DedupMergeAudit
+
+        db_session.add(DedupDecision(entity_type="vendor", id_a=1, id_b=2, decided_by_id=admin_user.id))
+        db_session.add(
+            DedupMergeAudit(
+                actor_id=admin_user.id,
+                entity_type="vendor",
+                action="merge",
+                kept_id=1,
+                kept_name="Keeper",
+                removed_id=2,
+                removed_name="Loser",
+            )
+        )
+        db_session.commit()
+        row = db_session.query(DedupDecision).one()
+        assert (row.entity_type, row.id_a, row.id_b) == ("vendor", 1, 2)
+        assert row.created_at is not None
+        audit = db_session.query(DedupMergeAudit).one()
+        assert audit.action == "merge"
+        assert audit.created_at is not None
+
+    def test_unique_pair_constraint(self, db_session):
+        from sqlalchemy.exc import IntegrityError
+
+        from app.models import DedupDecision
+
+        db_session.add(DedupDecision(entity_type="vendor", id_a=1, id_b=2))
+        db_session.commit()
+        # Same entity_type + same canonical pair → rejected.
+        db_session.add(DedupDecision(entity_type="vendor", id_a=1, id_b=2))
+        with pytest.raises(IntegrityError):
+            db_session.commit()
+        db_session.rollback()
+        # Same ids under a DIFFERENT entity_type is a different pair → allowed.
+        db_session.add(DedupDecision(entity_type="company", id_a=1, id_b=2))
+        db_session.commit()
+        from app.models import DedupDecision as DD
+
+        assert db_session.query(DD).count() == 2
+
+
+class TestDismissedFiltering:
+    def test_dismissed_vendor_pair_absent_from_next_render(self, admin_client, db_session):
+        # Names must clear the finder's token_sort_ratio threshold (85) or the pair
+        # never surfaces and the test would pass vacuously ("Hidden V" scores 80).
+        v1, v2 = _vendors(db_session, "Hidden Components", "Hidden Components Inc")
+        admin_client.post("/v2/partials/admin/vendor-bulk", data={"action": "dismiss", "pairs": f"{v1.id}-{v2.id}"})
+        html = admin_client.get("/v2/partials/settings/data-ops").text
+        assert f'data-pair="{v1.id}-{v2.id}"' not in html
+        assert f'data-pair="{v2.id}-{v1.id}"' not in html
+        assert "No duplicate vendors found at the current threshold." in html
+
+    def test_dismissed_company_pair_absent_from_next_render(self, admin_client, db_session):
+        c1, c2 = _companies(db_session, "Hidden Co", "Hidden Co Inc")
+        admin_client.post("/v2/partials/admin/company-bulk", data={"action": "dismiss", "pairs": f"{c1.id}-{c2.id}"})
+        html = admin_client.get("/v2/partials/settings/data-ops").text
+        assert f'data-pair="{c1.id}-{c2.id}"' not in html
+        assert f'data-pair="{c2.id}-{c1.id}"' not in html
+        assert "No duplicate companies found at the current threshold." in html
+
+    def test_undismissed_pair_still_renders(self, admin_client, db_session):
+        """Filtering is per-pair — dismissing one pair must not hide another."""
+        v1, v2 = _vendors(db_session, "Keep Components", "Keep Components Inc")
+        v3, v4 = _vendors(db_session, "Gone Components", "Gone Components Inc")
+        admin_client.post("/v2/partials/admin/vendor-bulk", data={"action": "dismiss", "pairs": f"{v3.id}-{v4.id}"})
+        html = admin_client.get("/v2/partials/settings/data-ops").text
+        assert f'data-pair="{v1.id}-{v2.id}"' in html
+        assert f'data-pair="{v3.id}-{v4.id}"' not in html
+
+    def test_overfetch_keeps_page_populated(self, admin_client, db_session):
+        """With 2 dismissed pairs, the finder is asked for 30+2 candidates and the page
+        still shows a full 30 rows after post-filtering (no starvation)."""
+        from unittest.mock import patch
+
+        from app.models import DedupDecision
+
+        calls: list[int] = []
+
+        def fake_finder(db, threshold=85, limit=50):
+            calls.append(limit)
+            return [
+                {
+                    "vendor_a": {"id": 10000 + i, "name": f"Fake {i}", "sightings": 5},
+                    "vendor_b": {"id": 20000 + i, "name": f"Fake {i} Inc", "sightings": 2},
+                    "score": 90,
+                }
+                for i in range(limit)
+            ]
+
+        db_session.add_all(
+            [
+                DedupDecision(entity_type="vendor", id_a=10000, id_b=20000),
+                DedupDecision(entity_type="vendor", id_a=10001, id_b=20001),
+            ]
+        )
+        db_session.commit()
+
+        with patch("app.vendor_utils.find_vendor_dedup_candidates", side_effect=fake_finder):
+            html = admin_client.get("/v2/partials/settings/data-ops").text
+
+        assert calls == [32]  # 30-row page + 2 dismissed = overfetch
+        # Company/contact sections are empty (empty DB), so every data-pair row is
+        # a vendor row: the page is still FULL after post-filtering.
+        assert html.count('data-pair="') == 30
+        assert 'data-pair="10000-20000"' not in html
+        assert 'data-pair="10001-20001"' not in html
+
+
+# ── PART 6: per-row Dismiss endpoints ───────────────────────────────────────
+
+
+class TestPerRowDismiss:
+    def test_vendor_dismiss_persists_and_hides(self, admin_client, db_session, admin_user):
+        from app.models import DedupDecision
+
+        # Names must score ≥85 on token_sort_ratio so the pair WOULD render
+        # absent the dismissal — otherwise the "hidden" asserts pass trivially.
+        v1, v2 = _vendors(db_session, "Row Components", "Row Components Inc")
+        resp = admin_client.post("/v2/partials/admin/vendor-dismiss", data={"id_a": str(v2.id), "id_b": str(v1.id)})
+        assert resp.status_code == 200, resp.text[:1500]
+        row = db_session.query(DedupDecision).one()
+        assert (row.entity_type, row.id_a, row.id_b) == ("vendor", min(v1.id, v2.id), max(v1.id, v2.id))
+        assert row.decided_by_id == admin_user.id
+        # The re-rendered pane (the response body) no longer shows the pair.
+        assert f'data-pair="{v1.id}-{v2.id}"' not in resp.text
+        assert f'data-pair="{v2.id}-{v1.id}"' not in resp.text
+
+    def test_company_dismiss_persists(self, admin_client, db_session):
+        from app.models import DedupDecision
+
+        c1, c2 = _companies(db_session, "Row Co", "Row Co Inc")
+        resp = admin_client.post("/v2/partials/admin/company-dismiss", data={"id_a": str(c1.id), "id_b": str(c2.id)})
+        assert resp.status_code == 200, resp.text[:1500]
+        row = db_session.query(DedupDecision).one()
+        assert row.entity_type == "company"
+
+    def test_render_has_per_row_dismiss_buttons(self, admin_client, db_session):
+        _vendors(db_session)
+        _companies(db_session)
+        html = admin_client.get("/v2/partials/settings/data-ops").text
+        assert "/v2/partials/admin/vendor-dismiss" in html
+        assert "/v2/partials/admin/company-dismiss" in html
+
+    def test_dismiss_requires_admin(self, client, db_session):
+        resp = client.post("/v2/partials/admin/vendor-dismiss", data={"id_a": "1", "id_b": "2"})
+        assert resp.status_code == 403
+
+
+# ── PART 7: merge/delete audit rows + decision pruning ──────────────────────
+
+
+class TestMergeAudit:
+    def test_vendor_merge_writes_audit_row_and_prunes_decisions(self, admin_client, db_session, admin_user):
+        from app.models import DedupDecision, DedupMergeAudit
+
+        v1, v2 = _vendors(db_session, "Aud A", "Aud A Inc")
+        lo, hi = sorted((v1.id, v2.id))
+        # A stale dismissal referencing the pair, plus an unrelated one that must survive.
+        db_session.add_all(
+            [
+                DedupDecision(entity_type="vendor", id_a=lo, id_b=hi),
+                DedupDecision(entity_type="vendor", id_a=888881, id_b=888882),
+            ]
+        )
+        db_session.commit()
+
+        resp = admin_client.post(
+            "/v2/partials/admin/vendor-merge", data={"keep_id": str(v1.id), "remove_id": str(v2.id)}
+        )
+        assert resp.status_code == 200, resp.text[:1500]
+
+        audit = db_session.query(DedupMergeAudit).one()
+        assert audit.actor_id == admin_user.id
+        assert audit.entity_type == "vendor"
+        assert audit.action == "merge"
+        assert (audit.kept_id, audit.kept_name) == (v1.id, "Aud A")
+        assert (audit.removed_id, audit.removed_name) == (v2.id, "Aud A Inc")
+        # Rows referencing either involved id are pruned; unrelated rows survive.
+        remaining = db_session.query(DedupDecision).all()
+        assert [(r.id_a, r.id_b) for r in remaining] == [(888881, 888882)]
+
+    def test_company_merge_writes_audit_row(self, admin_client, db_session, admin_user):
+        from app.models import DedupMergeAudit
+
+        c1, c2 = _companies(db_session, "AudCo", "AudCo Inc")
+        resp = admin_client.post(
+            "/v2/partials/admin/company-merge", data={"keep_id": str(c1.id), "remove_id": str(c2.id)}
+        )
+        assert resp.status_code == 200, resp.text[:1500]
+        audit = db_session.query(DedupMergeAudit).one()
+        assert (audit.entity_type, audit.action) == ("company", "merge")
+        assert (audit.kept_name, audit.removed_name) == ("AudCo", "AudCo Inc")
+
+    def test_vendor_delete_both_writes_two_audit_rows(self, admin_client, db_session, admin_user):
+        from app.models import DedupDecision, DedupMergeAudit
+
+        v1, v2 = _vendors(db_session, "AudDel A", "AudDel A Inc")
+        lo, hi = sorted((v1.id, v2.id))
+        db_session.add(DedupDecision(entity_type="vendor", id_a=lo, id_b=hi))
+        db_session.commit()
+
+        resp = admin_client.post("/v2/partials/admin/vendor-delete-both", data={"id_a": str(v1.id), "id_b": str(v2.id)})
+        assert resp.status_code == 200, resp.text[:1500]
+
+        rows = db_session.query(DedupMergeAudit).order_by(DedupMergeAudit.removed_id).all()
+        assert len(rows) == 2
+        assert all(r.action == "delete_both" and r.kept_id is None for r in rows)
+        # Names were captured BEFORE deletion.
+        assert {(r.removed_id, r.removed_name) for r in rows} == {
+            (v1.id, "AudDel A"),
+            (v2.id, "AudDel A Inc"),
+        }
+        assert db_session.query(DedupDecision).count() == 0
+
+    def test_bulk_merge_writes_audit_and_prunes(self, admin_client, db_session, admin_user):
+        from app.models import DedupDecision, DedupMergeAudit
+
+        v1, v2 = _vendors(db_session, "AudBulk A", "AudBulk A Inc")
+        lo, hi = sorted((v1.id, v2.id))
+        db_session.add(DedupDecision(entity_type="vendor", id_a=lo, id_b=hi))
+        db_session.commit()
+
+        resp = admin_client.post(
+            "/v2/partials/admin/vendor-bulk", data={"action": "merge", "pairs": f"{v1.id}-{v2.id}"}
+        )
+        assert resp.status_code == 200, resp.text[:1500]
+        assert db_session.get(VendorCard, v2.id) is None  # real merge still ran
+        audit = db_session.query(DedupMergeAudit).one()
+        assert (audit.action, audit.kept_id, audit.removed_id) == ("merge", v1.id, v2.id)
+        assert db_session.query(DedupDecision).count() == 0
+
+    def test_contact_merge_writes_audit_row(self, admin_client, db_session, admin_user):
+        from app.models import DedupMergeAudit
+        from app.models.crm import Company as CrmCompany
+        from app.models.crm import CustomerSite, SiteContact
+
+        co_a = CrmCompany(name="Aud Acme")
+        co_b = CrmCompany(name="Aud Beta")
+        db_session.add_all([co_a, co_b])
+        db_session.flush()
+        site_a = CustomerSite(company_id=co_a.id, site_name="HQ")
+        site_b = CustomerSite(company_id=co_b.id, site_name="HQ")
+        db_session.add_all([site_a, site_b])
+        db_session.flush()
+        ca = SiteContact(customer_site_id=site_a.id, full_name="Jane Doe", email="jane@aud.com")
+        cb = SiteContact(customer_site_id=site_b.id, full_name="Jane Doe", email="JANE@aud.com")
+        db_session.add_all([ca, cb])
+        db_session.commit()
+
+        resp = admin_client.post(
+            "/v2/partials/admin/contact-merge", data={"keep_id": str(ca.id), "remove_id": str(cb.id)}
+        )
+        assert resp.status_code == 200, resp.text[:1500]
+        audit = db_session.query(DedupMergeAudit).one()
+        assert (audit.entity_type, audit.action) == ("contact", "merge")
+        assert audit.removed_id == cb.id
+
+
+# ── PART 8: "Ignored pairs" section + un-dismiss ────────────────────────────
+
+
+class TestIgnoredPairs:
+    def test_section_hidden_when_no_dismissals(self, admin_client, db_session):
+        html = admin_client.get("/v2/partials/settings/data-ops").text
+        assert "Ignored pairs" not in html
+
+    def test_section_lists_dismissal_with_names_and_undismiss(self, admin_client, db_session, admin_user):
+        v1, v2 = _vendors(db_session, "Ign A", "Ign A Inc")
+        admin_client.post("/v2/partials/admin/vendor-dismiss", data={"id_a": str(v1.id), "id_b": str(v2.id)})
+        html = admin_client.get("/v2/partials/settings/data-ops").text
+        assert "Ignored pairs" in html
+        assert "Ign A" in html and "Ign A Inc" in html  # names resolved live
+        assert "Test Admin" in html  # decided-by (conftest admin_user.name)
+        assert "/v2/partials/admin/dedup-undismiss" in html
+
+    def test_deleted_id_renders_fallback_and_stays_undismissable(self, admin_client, db_session):
+        from app.models import DedupDecision
+
+        db_session.add(DedupDecision(entity_type="vendor", id_a=424242, id_b=424243))
+        db_session.commit()
+        html = admin_client.get("/v2/partials/settings/data-ops").text
+        assert "deleted #424242" in html
+        assert "deleted #424243" in html
+        assert "/v2/partials/admin/dedup-undismiss" in html  # self-cleanup still offered
+
+    def test_undismiss_restores_pair_to_candidates(self, admin_client, db_session):
+        from app.models import DedupDecision
+
+        # Names must score ≥85 on token_sort_ratio so the pair RENDERS again after
+        # un-dismiss (the brief's "Und A"/"Und A Inc" seeds score below threshold).
+        v1, v2 = _vendors(db_session, "Und Components", "Und Components Inc")
+        admin_client.post("/v2/partials/admin/vendor-dismiss", data={"id_a": str(v1.id), "id_b": str(v2.id)})
+        assert f'data-pair="{v1.id}-{v2.id}"' not in admin_client.get("/v2/partials/settings/data-ops").text
+        resp = admin_client.post(
+            "/v2/partials/admin/dedup-undismiss",
+            data={"entity_type": "vendor", "id_a": str(v2.id), "id_b": str(v1.id)},  # reversed ok
+        )
+        assert resp.status_code == 200, resp.text[:1500]
+        assert db_session.query(DedupDecision).count() == 0
+        # The re-render in the response already shows the pair again.
+        assert f'data-pair="{v1.id}-{v2.id}"' in resp.text
+
+    def test_undismiss_unknown_entity_type_is_error_toast(self, admin_client, db_session):
+        import json
+
+        resp = admin_client.post(
+            "/v2/partials/admin/dedup-undismiss",
+            data={"entity_type": "nuke", "id_a": "1", "id_b": "2"},
+        )
+        assert resp.status_code == 200  # toast, not a 500
+        toast = json.loads(resp.headers["HX-Trigger"])["showToast"]
         assert toast["type"] == "error"

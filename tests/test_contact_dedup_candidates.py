@@ -317,3 +317,38 @@ class TestDataOpsRoutes:
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 403
+
+    def test_dismissed_contact_pair_excluded_from_render(self, admin_client, db_session):
+        """A persisted contact dismissal removes the pair from the candidates list."""
+        from app.models import DedupDecision
+
+        a, b = _email_pair(db_session)
+        lo, hi = sorted((a.id, b.id))
+        db_session.add(DedupDecision(entity_type="contact", id_a=lo, id_b=hi))
+        db_session.commit()
+        resp = admin_client.get("/v2/partials/settings/data-ops", headers={"HX-Request": "true"})
+        assert resp.status_code == 200
+        assert "No cross-company contact duplicates found." in resp.text
+
+    def test_contact_dismiss_endpoint_persists_canonical_row(self, admin_client, db_session):
+        from app.models import DedupDecision
+
+        a, b = _email_pair(db_session)
+        resp = admin_client.post(
+            "/v2/partials/admin/contact-dismiss",
+            data={"id_a": str(b.id), "id_b": str(a.id)},  # deliberately reversed
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        row = db_session.query(DedupDecision).one()
+        assert (row.entity_type, row.id_a, row.id_b) == ("contact", min(a.id, b.id), max(a.id, b.id))
+        # Re-render (the response) already excludes the dismissed pair.
+        assert "No cross-company contact duplicates found." in resp.text
+
+    def test_contact_dismiss_button_is_server_backed(self, admin_client, db_session):
+        """The Dismiss button POSTs to the server — the old Alpine-only client hide
+        (x-data dismissed flag) is gone."""
+        _email_pair(db_session)
+        html = admin_client.get("/v2/partials/settings/data-ops", headers={"HX-Request": "true"}).text
+        assert "/v2/partials/admin/contact-dismiss" in html
+        assert 'x-data="{ dismissed: false }"' not in html

@@ -383,7 +383,15 @@ def _render_data_ops(request: Request, user: User, db: Session) -> Response:
     (a crashed scan must never look like a clean dataset). Reused by the merge
     endpoints so a successful merge re-renders the surrounding list and stale pairs
     drop without a manual refresh.
+    Dismissed pairs (DedupDecision) are post-filtered out here at the router — never
+    inside the six finder backends.
     """
+    from ...services.dedup_decision_service import filter_dismissed_pairs, list_dismissals, load_dismissed_pairs
+
+    # ONE query for all three entity types; each list is overfetched by the number
+    # of dismissed pairs of its type so post-filtering can't starve the 30-row page.
+    dismissed = load_dismissed_pairs(db)
+
     vendor_dupes: list = []
     company_dupes: list = []
     vendor_scan_failed = False
@@ -391,14 +399,16 @@ def _render_data_ops(request: Request, user: User, db: Session) -> Response:
     try:
         from ...vendor_utils import find_vendor_dedup_candidates
 
-        vendor_dupes = find_vendor_dedup_candidates(db, threshold=85, limit=30)
+        vendor_dupes = find_vendor_dedup_candidates(db, threshold=85, limit=30 + len(dismissed["vendor"]))
+        vendor_dupes = filter_dismissed_pairs(vendor_dupes, dismissed["vendor"], "vendor")[:30]
     except Exception as e:
         vendor_scan_failed = True
         logger.warning(f"Vendor dedup scan failed: {e}")
     try:
         from ...company_utils import find_company_dedup_candidates
 
-        company_dupes = find_company_dedup_candidates(db, threshold=85, limit=30)
+        company_dupes = find_company_dedup_candidates(db, threshold=85, limit=30 + len(dismissed["company"]))
+        company_dupes = filter_dismissed_pairs(company_dupes, dismissed["company"], "company")[:30]
     except Exception as e:
         company_scan_failed = True
         logger.warning(f"Company dedup scan failed: {e}")
@@ -408,7 +418,8 @@ def _render_data_ops(request: Request, user: User, db: Session) -> Response:
     try:
         from ...services.contact_dedup_candidates import find_contact_dedup_candidates
 
-        contact_dupes = find_contact_dedup_candidates(db, limit=30)
+        contact_dupes = find_contact_dedup_candidates(db, limit=30 + len(dismissed["contact"]))
+        contact_dupes = filter_dismissed_pairs(contact_dupes, dismissed["contact"], "contact")[:30]
     except Exception as e:
         contact_scan_failed = True
         logger.warning(f"Contact dedup scan failed: {e}")
@@ -420,6 +431,7 @@ def _render_data_ops(request: Request, user: User, db: Session) -> Response:
     ctx["vendor_scan_failed"] = vendor_scan_failed
     ctx["company_scan_failed"] = company_scan_failed
     ctx["contact_scan_failed"] = contact_scan_failed
+    ctx["ignored_pairs"] = list_dismissals(db)
     return template_response("htmx/partials/settings/data_ops.html", ctx)
 
 
@@ -826,7 +838,7 @@ async def admin_vendor_merge(
     db: Session = Depends(get_db),
 ):
     """Merge two vendor cards via HTMX."""
-    from ...services.vendor_merge_service import merge_vendor_cards as _merge
+    from ...services.dedup_decision_service import audited_merge
 
     def _msg(result: dict) -> str:
         kept = db.get(VendorCard, result.get("kept", keep_id))
@@ -837,7 +849,7 @@ async def admin_vendor_merge(
         request,
         user,
         db,
-        action_fn=lambda: _merge(keep_id, remove_id, db),
+        action_fn=lambda: audited_merge(db, "vendor", keep_id, remove_id, user.id),
         success_msg_fn=_msg,
         error_prefix="Vendor merge failed",
     )
@@ -852,7 +864,7 @@ async def admin_company_merge(
     db: Session = Depends(get_db),
 ):
     """Merge two companies via HTMX."""
-    from ...services.company_merge_service import merge_companies
+    from ...services.dedup_decision_service import audited_merge
 
     def _msg(result: dict) -> str:
         kept = db.get(Company, result.get("kept", keep_id))
@@ -863,7 +875,7 @@ async def admin_company_merge(
         request,
         user,
         db,
-        action_fn=lambda: merge_companies(keep_id, remove_id, db),
+        action_fn=lambda: audited_merge(db, "company", keep_id, remove_id, user.id),
         success_msg_fn=_msg,
         error_prefix="Company merge failed",
     )
@@ -880,7 +892,7 @@ async def admin_contact_merge(
     """Merge two cross-site contacts via HTMX (suggest-then-confirm; never
     automatic)."""
     from ...models.crm import SiteContact
-    from ...services.contact_merge_service import merge_contacts
+    from ...services.dedup_decision_service import audited_merge
 
     def _msg(result: dict) -> str:
         kept = db.get(SiteContact, result.get("kept", keep_id))
@@ -891,9 +903,100 @@ async def admin_contact_merge(
         request,
         user,
         db,
-        action_fn=lambda: merge_contacts(keep_id, remove_id, db),
+        action_fn=lambda: audited_merge(db, "contact", keep_id, remove_id, user.id),
         success_msg_fn=_msg,
         error_prefix="Contact merge failed",
+    )
+
+
+@router.post("/v2/partials/admin/vendor-dismiss", response_class=HTMLResponse)
+async def admin_vendor_dismiss(
+    request: Request,
+    id_a: int = Form(...),
+    id_b: int = Form(...),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Persist a single vendor-pair dismissal (hidden until un-dismissed)."""
+    from ...services.dedup_decision_service import record_dismissals
+
+    return _dedup_single_action(
+        request,
+        user,
+        db,
+        action_fn=lambda: record_dismissals(db, "vendor", [(id_a, id_b)], user.id),
+        success_msg_fn=lambda result: "Pair dismissed — hidden until un-dismissed.",
+        error_prefix="Dismiss failed",
+    )
+
+
+@router.post("/v2/partials/admin/company-dismiss", response_class=HTMLResponse)
+async def admin_company_dismiss(
+    request: Request,
+    id_a: int = Form(...),
+    id_b: int = Form(...),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Persist a single company-pair dismissal (hidden until un-dismissed)."""
+    from ...services.dedup_decision_service import record_dismissals
+
+    return _dedup_single_action(
+        request,
+        user,
+        db,
+        action_fn=lambda: record_dismissals(db, "company", [(id_a, id_b)], user.id),
+        success_msg_fn=lambda result: "Pair dismissed — hidden until un-dismissed.",
+        error_prefix="Dismiss failed",
+    )
+
+
+@router.post("/v2/partials/admin/contact-dismiss", response_class=HTMLResponse)
+async def admin_contact_dismiss(
+    request: Request,
+    id_a: int = Form(...),
+    id_b: int = Form(...),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Persist a single contact-pair dismissal (replaces the old Alpine-only client
+    hide, which lost the decision on every re-render)."""
+    from ...services.dedup_decision_service import record_dismissals
+
+    return _dedup_single_action(
+        request,
+        user,
+        db,
+        action_fn=lambda: record_dismissals(db, "contact", [(id_a, id_b)], user.id),
+        success_msg_fn=lambda result: "Pair dismissed — hidden until un-dismissed.",
+        error_prefix="Dismiss failed",
+    )
+
+
+@router.post("/v2/partials/admin/dedup-undismiss", response_class=HTMLResponse)
+async def admin_dedup_undismiss(
+    request: Request,
+    entity_type: str = Form(...),
+    id_a: int = Form(...),
+    id_b: int = Form(...),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Delete a persisted dismissal so the pair returns to the dedup candidate lists
+    (and the nightly job's skip set).
+
+    entity_type is validated by the service; a bad value surfaces as an error toast,
+    never a 500.
+    """
+    from ...services.dedup_decision_service import remove_dismissal
+
+    return _dedup_single_action(
+        request,
+        user,
+        db,
+        action_fn=lambda: remove_dismissal(db, entity_type, id_a, id_b),
+        success_msg_fn=lambda result: "Pair restored to the duplicate candidates.",
+        error_prefix="Un-dismiss failed",
     )
 
 
@@ -952,13 +1055,13 @@ async def admin_vendor_delete_both(
     db: Session = Depends(get_db),
 ):
     """Delete BOTH vendor cards in a dedup pair (neither is worth keeping)."""
-    from ...services.vendor_merge_service import delete_vendor_cards
+    from ...services.dedup_decision_service import audited_delete_both
 
     return _dedup_single_action(
         request,
         user,
         db,
-        action_fn=lambda: delete_vendor_cards(id_a, id_b, db),
+        action_fn=lambda: audited_delete_both(db, "vendor", id_a, id_b, user.id),
         success_msg_fn=lambda result: f"Deleted both vendors. {result.get('detached', 0)} records detached.",
         error_prefix="Vendor delete failed",
     )
@@ -973,13 +1076,13 @@ async def admin_company_delete_both(
     db: Session = Depends(get_db),
 ):
     """Delete BOTH companies in a dedup pair (neither is worth keeping)."""
-    from ...services.company_merge_service import delete_companies
+    from ...services.dedup_decision_service import audited_delete_both
 
     return _dedup_single_action(
         request,
         user,
         db,
-        action_fn=lambda: delete_companies(id_a, id_b, db),
+        action_fn=lambda: audited_delete_both(db, "company", id_a, id_b, user.id),
         success_msg_fn=lambda result: f"Deleted both companies. {result.get('detached', 0)} records detached.",
         error_prefix="Company delete failed",
     )
@@ -1009,8 +1112,9 @@ async def _dedup_bulk(request, user, db, entity: str) -> HTMLResponse:
     """Shared body for vendor/company bulk dedup actions (merge | delete | dismiss).
 
     ``merge`` keeps the FIRST id of each pair (the template emits keeper-first tokens);
-    ``delete`` removes both; ``dismiss`` is a view-only clear (no durable state yet — the
-    rows just drop from this render and reappear on the next scan). Per-pair failures don't
+    ``delete`` removes both; ``dismiss`` persists DedupDecision rows (canonical (min,max),
+    attributed to the session user) so the pairs stay hidden and the nightly job skips
+    them. Per-pair failures don't
     abort the batch, but each is logged at error level and the failing pair tokens are
     surfaced in the toast — any failure makes the toast an ``error`` (never green success).
     """
@@ -1028,30 +1132,42 @@ async def _dedup_bulk(request, user, db, entity: str) -> HTMLResponse:
     if len(pairs) > _MAX_DEDUP_PAIRS:
         raise HTTPException(400, f"Maximum {_MAX_DEDUP_PAIRS} pairs per bulk action")
 
-    if not pairs or action == "dismiss":
-        # Dismiss is purely client-side (the row was already hidden); just re-render.
-        resp = _render_data_ops(request, user, db)
+    if action == "dismiss":
+        # Persist the dismissals so the pairs stay hidden across renders and are
+        # skipped by the nightly auto-dedup. Tokens are keeper-first; the service
+        # canonicalizes to (min, max).
+        from ...services.dedup_decision_service import record_dismissals
+
+        message, kind = "", "success"
         if pairs:
-            set_toast(resp, f"Dismissed {len(pairs)} pair(s) for now.", kind="success")
+            try:
+                record_dismissals(db, entity, pairs, user.id)
+                db.commit()
+                message = f"Dismissed {len(pairs)} pair(s) — hidden until un-dismissed."
+            except Exception as e:
+                db.rollback()
+                message, kind = f"Dismiss failed: {e}", "error"
+                logger.error("Bulk {} dismiss failed: {}", entity, e)
+        resp = _render_data_ops(request, user, db)
+        if message:
+            set_toast(resp, message, kind=kind)
         return resp
 
-    if entity == "vendor":
-        from ...services.vendor_merge_service import delete_vendor_cards, merge_vendor_cards
+    if not pairs:
+        return _render_data_ops(request, user, db)
 
-        merge_fn, delete_fn, noun = merge_vendor_cards, delete_vendor_cards, "vendor"
-    else:
-        from ...services.company_merge_service import delete_companies, merge_companies
+    from ...services.dedup_decision_service import audited_delete_both, audited_merge
 
-        merge_fn, delete_fn, noun = merge_companies, delete_companies, "company"
+    noun = "vendor" if entity == "vendor" else "company"
 
     done = 0
     failed_tokens: list[str] = []
     for a, b in pairs:
         try:
             if action == "merge":
-                merge_fn(a, b, db)
+                audited_merge(db, entity, a, b, user.id)
             else:
-                delete_fn(a, b, db)
+                audited_delete_both(db, entity, a, b, user.id)
             db.commit()
             done += 1
         except Exception as e:

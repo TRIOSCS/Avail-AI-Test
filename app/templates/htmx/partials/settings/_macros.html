@@ -97,6 +97,21 @@
 </button>
 {%- endmacro %}
 
+{# Per-row "Dismiss" dedup action — persists a DedupDecision so the pair stays
+   hidden across renders (and the nightly auto-dedup skips it) until un-dismissed
+   from the Ignored-pairs section. Ids may arrive in either order; the server
+   canonicalizes. No hx-confirm: dismiss is non-destructive and reversible. #}
+{% macro dismiss_button(endpoint, target, a_id, b_id) -%}
+<button type="button" data-loading-disable
+        hx-post="{{ endpoint }}"
+        hx-vals='{"id_a": {{ a_id }}, "id_b": {{ b_id }}}'
+        hx-target="{{ target }}"
+        hx-swap="innerHTML"
+        class="px-2 py-1 text-xs rounded bg-white text-gray-500 border border-gray-300 hover:bg-gray-50">
+  Dismiss
+</button>
+{%- endmacro %}
+
 {# Sticky mass-action bar for a dedup section. Visible only when ≥1 pair is selected
    (count is the dedupSelect Alpine x-data). `endpoint` is the section's bulk URL,
    `target` the hx-target. Mirrors the requisitions2 / customers bulk bar: one hidden
