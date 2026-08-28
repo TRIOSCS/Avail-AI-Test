@@ -146,6 +146,10 @@ class WorkspaceRow:
     # 2.5: the plan is silently stalled — no configured approver can decide it
     # (plan_needs_approver_reason). Rendered as an amber warning on BP-tab rows.
     stalled: bool = False
+    # A8: this row is the viewer's own AWAITING_PO line (their confirm-PO buyer work,
+    # not an approval decision) — rendered in its own "Your POs to confirm" section
+    # instead of "Needs your approval". PO tab only; other tabs leave this False.
+    own_confirm: bool = False
 
 
 def _matches(q: str, *fields: str | None) -> bool:
@@ -222,6 +226,7 @@ def _viewer_badges(db: Session, user: User) -> dict[str, int]:
 async def approvals_hub_shell(
     request: Request,
     tab: str = "",
+    scope: str = "all",
     select: str = "",
     user: User = Depends(require_access(AccessKey.BUY_PLANS)),
     db: Session = Depends(get_db),
@@ -232,15 +237,20 @@ async def approvals_hub_shell(
     lazy body that loads the active tab's split view into ``#ap-hub-body``. ``?tab=``
     threads a deep-link / pushed tab URL; legacy 3-tab keys alias onto the new tabs.
     ``?select=<plan id>`` (the retired /v2/buy-plans/{id} deep-link redirect) threads
-    into the tab body so the SO/BP list preselects that plan's pane.
+    into the tab body so the SO/BP list preselects that plan's pane. ``?scope=`` (A10)
+    threads the same way, so a hard reload or a shared/bookmarked URL restores the
+    Mine/All the viewer had — the tab-switcher pills also carry it in their
+    ``hx-replace-url`` so navigating tabs never drops back to a bare ``?tab=`` URL.
     """
     active_tab = _resolve_tab(tab) or DEFAULT_TAB
+    scope = "mine" if scope == "mine" else "all"
     ctx = _base_ctx(request, user, "buy-plans")
     ctx.update(
         {
             "active_tab": active_tab,
             "tabs": [(key, _TAB_LABELS[key]) for key in _TABS],
             "badges": _viewer_badges(db, user),
+            "scope": scope,
             "select": select,
         }
     )
@@ -725,6 +735,10 @@ def render_po_pane(
             "can_verify": can_verify_po_line(user, line),
             "can_resource": _can_resource(user),
             "is_assigned_buyer": line.buyer_id == user.id,
+            # A9: the non-assigned pane's read-only card ("Awaiting PO — assigned to
+            # {buyer}") + the manager/admin "Act for the buyer" expander gate.
+            "assigned_buyer": line.buyer,
+            "is_manager_or_admin": is_manager_or_admin(user),
             "line_index": line_index,
             "line_total": len(sibling_ids),
             "partial_ship": (qp.sales_authorized_ship_partial if qp is not None else None),
@@ -804,11 +818,12 @@ async def approvals_po_parse_confirmation(
     filled (advisory mismatch warnings included).
 
     No DB write — the buyer reviews every field and still submits Confirm PO themselves.
-    Ownership, line-status, and a per-user throttle all gate BEFORE the paid AI call.
-    Failure paths return a small #po-paste-result fragment (the pasted text and any
-    typed values stay untouched); success retargets the full #aw-pane.
+    Ownership, the assigned-buyer/manager gate, line-status, and a per-user throttle all
+    gate BEFORE the paid AI call. Failure paths return a small #po-paste-result fragment
+    (the pasted text and any typed values stay untouched); success retargets the full
+    #aw-pane.
     """
-    from ...dependencies import get_buyplan_for_user
+    from ...dependencies import get_buyplan_for_user, is_manager_or_admin
 
     line = db.get(BuyPlanLine, line_id, options=[joinedload(BuyPlanLine.offer), joinedload(BuyPlanLine.requirement)])
     if line is None:
@@ -816,6 +831,11 @@ async def approvals_po_parse_confirmation(
     # Ownership BEFORE any AI work (mirrors approvals_po_sent_check): a restricted
     # non-owner 404s here, never burning a Claude call on a line they can't view.
     get_buyplan_for_user(db, user, line.buy_plan_id)
+    # A9: this route never calls confirm_po (no DB write — it only pre-fills the form),
+    # so it needs its own copy of the same buyer-or-manager gate, or a non-assigned
+    # viewer with plan access could burn a paid AI call on someone else's line.
+    if not (line.buyer_id == user.id or is_manager_or_admin(user)):
+        raise HTTPException(403, "Only the line's buyer or a manager can confirm its PO.")
     if line.status != BuyPlanLineStatus.AWAITING_PO.value:
         # The line moved on (e.g. confirmed in another tab) — the pane's current
         # state IS the feedback; no AI call for a form that no longer renders.
@@ -1364,10 +1384,13 @@ async def approvals_workspace_list(
     """Render one tab's left work list (search + Mine/All + live/closed + age rows).
 
     Rows group "Needs your approval" first (oldest first — decision queues surface the
-    stalest work); the rest render newest-first. The oldest needs-your-approval row is
-    the default selection (dispatched to the pane on first load only). ``select`` (a
-    plan id from a retired /v2/buy-plans/{id} deep link, SO/BP tabs only) overrides
-    that default with the selected plan's pane when the viewer may see the plan.
+    stalest work), then "Your POs to confirm" (A8: the viewer's own AWAITING_PO lines —
+    buyer work, not a decision — PO tab only), then the rest render newest-first (the
+    template further carves a "Stalled — no approver" group out of that rest, A7). The
+    oldest needs-your-approval row is the default selection (dispatched to the pane on
+    first load only). ``select`` (a plan id from a retired /v2/buy-plans/{id} deep
+    link, SO/BP tabs only) overrides that default with the selected plan's pane when
+    the viewer may see the plan.
     """
     resolved = _resolve_tab(tab)
     if resolved is None:
@@ -1381,9 +1404,18 @@ async def approvals_workspace_list(
     else:
         rows = _prepayment_rows(db, user, q=q, scope=scope, show_closed=show_closed)
 
+    # A8: own-confirm rows carve out BEFORE the generic rest, same idiom stalled uses
+    # (carved out of rest, in the template) — needs is never guaranteed disjoint from
+    # stalled (Task 2 caution), so own_confirm is carved the same defensive way: by its
+    # own flag, not by exclusion from needs.
     needs = [r for r in rows if r.needs_approval]
-    rest = [r for r in rows if not r.needs_approval]
-    default_row = needs[0] if needs else None
+    own_confirm = [r for r in rows if r.own_confirm]
+    rest = [r for r in rows if not r.needs_approval and not r.own_confirm]
+    # A8 follow-up: before the split, own-confirm rows were part of `needs`, so a buyer
+    # with nothing to decide but their own PO to confirm still landed on that row on
+    # first load. Preserve that landing: fall back to the oldest own-confirm row when
+    # there's nothing to decide.
+    default_row = needs[0] if needs else (own_confirm[0] if own_confirm else None)
     select_key = _normalize_select(select, resolved)
     if select_key:
         default_row = _selected_row(db, user, rows, resolved, select_key) or default_row
@@ -1396,6 +1428,7 @@ async def approvals_workspace_list(
             "scope": scope,
             "show_closed": show_closed,
             "needs_rows": needs,
+            "own_confirm_rows": own_confirm,
             "other_rows": rest,
             "default_row": default_row,
             "list_url": f"/v2/partials/approvals/{resolved}/list",
@@ -1426,17 +1459,17 @@ def _plan_rows(db: Session, user: User, *, lens: str, q: str, scope: str, show_c
         ).all():
             ages[pid] = submitted_at or created_at
 
-    # Stall detection (2.5, Buy Plans lens): a PENDING plan with no configured
-    # approver sits invisibly — surface plan_needs_approver_reason on its row.
+    # Stall detection (2.5, A7: both plan lenses): a PENDING plan with no configured
+    # approver sits invisibly — surface plan_needs_approver_reason on its row regardless
+    # of which lens (Sales Orders / Buy Plans) is viewing it; both read the same rows.
     stalled_ids: set[int] = set()
-    if lens == "buy-plans":
-        from ...services.buyplan_workflow import plan_needs_approver_reason
+    from ...services.buyplan_workflow import plan_needs_approver_reason
 
-        pending_ids = [t.plan_id for t in tracking if t.status == BuyPlanStatus.PENDING.value]
-        if pending_ids:
-            for plan in db.execute(select(BuyPlan).where(BuyPlan.id.in_(pending_ids))).scalars():
-                if plan_needs_approver_reason(plan, db):
-                    stalled_ids.add(plan.id)
+    pending_ids = [t.plan_id for t in tracking if t.status == BuyPlanStatus.PENDING.value]
+    if pending_ids:
+        for plan in db.execute(select(BuyPlan).where(BuyPlan.id.in_(pending_ids))).scalars():
+            if plan_needs_approver_reason(plan, db):
+                stalled_ids.add(plan.id)
 
     rows = [
         WorkspaceRow(
@@ -1462,7 +1495,9 @@ def _plan_rows(db: Session, user: User, *, lens: str, q: str, scope: str, show_c
     return needs + rest
 
 
-def _po_line_row(line: BuyPlanLine, plan, *, needs: bool, closed: bool = False) -> WorkspaceRow:
+def _po_line_row(
+    line: BuyPlanLine, plan, *, needs: bool, closed: bool = False, own_confirm: bool = False
+) -> WorkspaceRow:
     """Build one PO-tab row from an ORM line (+ its plan)."""
     mpn = None
     if line.requirement is not None:
@@ -1493,6 +1528,7 @@ def _po_line_row(line: BuyPlanLine, plan, *, needs: bool, closed: bool = False) 
         age_at=line.po_confirmed_at or line.created_at,
         copy_number=line.po_number,
         closed=closed,
+        own_confirm=own_confirm,
     )
 
 
@@ -1562,8 +1598,12 @@ def _po_rows(db: Session, user: User, *, q: str, scope: str, show_closed: bool) 
             if ln.buyer_id == user.id or (ln.buy_plan is not None and ln.buy_plan.submitted_by_id == user.id)
         ]
     for line in others:
-        needs = line.status == BuyPlanLineStatus.AWAITING_PO.value and line.buyer_id == user.id
-        rows.append(_po_line_row(line, line.buy_plan, needs=needs))
+        # A8: the viewer's own AWAITING_PO line is buyer work ("confirm the PO"), not
+        # an approval decision — it renders under "Your POs to confirm", never "Needs
+        # your approval" (needs stays False here; the PO-tab badge math at
+        # _po_waiting_on_viewer is untouched and still counts it).
+        own_confirm = line.status == BuyPlanLineStatus.AWAITING_PO.value and line.buyer_id == user.id
+        rows.append(_po_line_row(line, line.buy_plan, needs=False, own_confirm=own_confirm))
 
     return [r for r in rows if _matches(q, r.title, r.subtitle, r.copy_number)]
 
@@ -1633,16 +1673,24 @@ def _fmt_dt(dt: datetime | None) -> str:
 async def approvals_hub_export(
     tab: str,
     scope: str = "all",
+    q: str = "",
+    show_closed: bool = False,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
     """Stream one workspace list as a CSV download (attachment).
 
-    Same auth (require_user) and Mine/All scope as the tab list, reusing each tab's
-    exact read model so the download can never drift from what the console shows:
-      - sales-orders / buy-plans → the plan tracking list (buy_plan_tracking_rows);
-      - prepayments → the resolved audit feed (resolved_rows_for_gate);
-      - purchase-orders → the resolved PO decision feed (build_po_queue_view.history).
+    Same auth (require_user), Mine/All scope, search, and live/closed filter as the
+    tab list, reusing each tab's exact read model so the download can never drift from
+    what the console shows (A6 — export honesty):
+      - sales-orders / buy-plans → the plan tracking list (buy_plan_tracking_rows),
+        unfiltered by q/show_closed (unchanged);
+      - prepayments / purchase-orders, ``show_closed=false`` (default) → the SAME live
+        row builders the list renders (``_prepayment_rows`` / ``_po_rows``) — a manager
+        who exports without opening Closed gets the open work in front of them, not a
+        surprise history dump;
+      - prepayments / purchase-orders, ``show_closed=true`` → the resolved audit feed
+        (resolved_rows_for_gate / build_po_queue_view.history), unchanged.
     Legacy 3-tab keys alias; anything else 404s.
     """
     resolved = _resolve_tab(tab)
@@ -1657,6 +1705,22 @@ async def approvals_hub_export(
             for r in buy_plan_tracking_rows(db, user, scope=scope)
         )
         return stream_csv(f"approvals_sales_orders_{scope}.csv", header, rows)
+
+    if resolved == "prepayments" and not show_closed:
+        header = ["Prepayment", "Title", "Detail", "Status", "Amount", "PO Number"]
+        rows = (
+            [r.key, r.title, r.subtitle, r.status_label, r.amount, r.copy_number]
+            for r in _prepayment_rows(db, user, q=q, scope=scope, show_closed=False)
+        )
+        return stream_csv(f"approvals_prepayments_{scope}.csv", header, rows)
+
+    if resolved == "purchase-orders" and not show_closed:
+        header = ["Line", "Title", "Detail", "Status", "Amount", "PO Number"]
+        rows = (
+            [r.key, r.title, r.subtitle, r.status_label, r.amount, r.copy_number]
+            for r in _po_rows(db, user, q=q, scope=scope, show_closed=False)
+        )
+        return stream_csv(f"approvals_purchase_orders_{scope}.csv", header, rows)
 
     if resolved == "prepayments":
         header = [

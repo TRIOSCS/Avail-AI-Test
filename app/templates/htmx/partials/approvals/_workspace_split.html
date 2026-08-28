@@ -25,9 +25,16 @@
          // Back into the workspace restores that snapshot from cache INSTANTLY — the
          // right tab and deal — instead of a full reload (nav audit #3/#6). Still REPLACE,
          // so the workspace stays ONE history entry and Back exits it in one press.
+         // A10 follow-up: every row click (and the near-immediate aw-default
+         // auto-select) replaces this URL, so it must carry the LIVE scope too — read
+         // it off the filter form's own hidden input (the same source #aw-list's
+         // refetch already trusts via hx-include), not the tab's baked-at-render
+         // value, so Mine never gets silently dropped a moment after a reload restores
+         // it. Defaults to 'all' — unchanged behavior when the form hasn't rendered yet.
+         const liveScope = this.$root.querySelector('#aw-filters [name=scope]')?.value || 'all';
          htmx.ajax('GET', url, {
            target: '#aw-pane', swap: 'innerHTML', indicator: '#aw-pane-ind',
-           replace: '/v2/approvals?tab={{ tab }}&select=' + encodeURIComponent(key),
+           replace: '/v2/approvals?tab={{ tab }}&select=' + encodeURIComponent(key) + '&scope=' + encodeURIComponent(liveScope),
          });
          // Auto-selection (aw-default) must not yank the phone viewport mid-pane
          // (nav audit #8) — scroll only on an explicit row tap.

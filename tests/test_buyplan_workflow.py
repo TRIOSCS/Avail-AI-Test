@@ -498,7 +498,9 @@ class TestConfirmPO:
         self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
     ):
         plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.ACTIVE.value)
-        line = _make_line(db_session, plan, status=BuyPlanLineStatus.AWAITING_PO.value)
+        # A9: confirm_po now gates to the line's assigned buyer or a manager/admin —
+        # test_user is the actor here, so it must also be the line's buyer.
+        line = _make_line(db_session, plan, status=BuyPlanLineStatus.AWAITING_PO.value, buyer_id=test_user.id)
         db_session.refresh(plan)
 
         ship_date = datetime.now(UTC) + timedelta(days=7)
@@ -532,7 +534,9 @@ class TestConfirmPO:
         self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
     ):
         plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.ACTIVE.value)
-        line = _make_line(db_session, plan, status=BuyPlanLineStatus.VERIFIED.value)
+        # A9: the actor gate runs before the state check, so test_user must be the
+        # line's buyer to reach the "must be awaiting PO" ValueError this test targets.
+        line = _make_line(db_session, plan, status=BuyPlanLineStatus.VERIFIED.value, buyer_id=test_user.id)
         with pytest.raises(ValueError, match="Line must be awaiting PO"):
             confirm_po(plan.id, line.id, "PO-X", datetime.now(UTC), test_user, db_session, payment_method="wire")
 

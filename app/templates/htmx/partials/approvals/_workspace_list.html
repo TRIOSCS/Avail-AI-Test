@@ -2,20 +2,27 @@
   approvals/_workspace_list.html — the Approvals Workspace left work list (any tab).
   Search (300ms debounce) + Mine/All toggle + live/closed filter, then the rows:
   "Needs your approval" grouped FIRST (oldest first — decision queues surface the
-  stalest work), everything else below. Every row shows its age; Acctivate numbers
-  (SO#/PO#) render as one-tap copy chips (spec §5). Rows dispatch aw-select to fill
-  the right pane; the oldest needs-your-approval row dispatches aw-default once so
-  opening the tab lands the approver on a decision, never a hunt.
-  Receives: tab, q, scope, show_closed, needs_rows / other_rows (list[WorkspaceRow]),
-            default_row (WorkspaceRow|None — the oldest needs-approval row, or the
-            ?select=-deep-linked plan's row/pane stand-in), list_url.
+  stalest work), then (A8, PO tab only) "Your POs to confirm" — the viewer's own
+  AWAITING_PO lines, buyer work rather than a decision — then everything else below
+  (which the "Stalled — no approver" group, A7, is further carved out of). Every row
+  shows its age; Acctivate numbers (SO#/PO#) render as one-tap copy chips (spec §5).
+  Rows dispatch aw-select to fill the right pane; the oldest needs-your-approval row
+  dispatches aw-default once so opening the tab lands the approver on a decision,
+  never a hunt.
+  Receives: tab, q, scope, show_closed, needs_rows / own_confirm_rows / other_rows
+            (list[WorkspaceRow]), default_row (WorkspaceRow|None — the oldest
+            needs-approval row, or the ?select=-deep-linked plan's row/pane stand-in),
+            list_url.
   Called by: htmx/approvals_hub.py approvals_workspace_list (GET /{tab}/list).
   Depends on: HTMX, Alpine.js, Tailwind; shared copy_chip + age_chip macros.
 #}
 {% from "htmx/partials/shared/_macros.html" import copy_chip, age_chip %}
 
 {# Badge tone keyed on the RAW backend status; text is the DISPLAY label (spec §5
-   vocabulary — e.g. pending_verify renders "Pending approval"). #}
+   vocabulary — e.g. pending_verify renders "Pending approval"). A3: 'approved' here is
+   prepay_status=approved — signed off but NOT wired yet, so it gets the amber "still
+   open work" tone, never the emerald "done" tone; this status value is Prepayment-only
+   (Prepayment.status), no other tab's row status collides with it. #}
 {% set _STATUS_TONES = {
   'draft': 'bg-slate-50 text-slate-500 border-slate-200',
   'pending': 'bg-amber-50 text-amber-600 border-amber-200',
@@ -30,20 +37,25 @@
   'issue': 'bg-rose-50 text-rose-500 border-rose-200',
   'resourcing': 'bg-orange-50 text-orange-600 border-orange-200',
   'requested': 'bg-amber-50 text-amber-600 border-amber-200',
-  'approved': 'bg-emerald-50 text-emerald-600 border-emerald-200',
+  'approved': 'bg-amber-50 text-amber-600 border-amber-200',
   'paid': 'bg-emerald-50 text-emerald-700 border-emerald-300',
   'void': 'bg-gray-50 text-gray-400 border-gray-200',
   'rejected': 'bg-rose-50 text-rose-500 border-rose-200',
   'expired': 'bg-gray-50 text-gray-400 border-gray-200'
 } %}
+{# Label overrides paired with the tone map above — same A3 case: the default
+   capitalize()'d "Approved" reads as done, so spell out what's actually pending. #}
+{% set _STATUS_LABEL_OVERRIDES = {
+  'approved': 'Approved — awaiting wire'
+} %}
 {% macro aw_badge(row) -%}
-<span class="badge {{ _STATUS_TONES.get(row.status, 'bg-gray-50 text-gray-600 border-gray-200') }}">{{ row.status_label }}</span>
+<span class="badge {{ _STATUS_TONES.get(row.status, 'bg-gray-50 text-gray-600 border-gray-200') }}">{{ _STATUS_LABEL_OVERRIDES.get(row.status, row.status_label) }}</span>
 {%- endmacro %}
 
 {# ── Filters — every control targets #aw-list EXPLICITLY (never inherit). #}
 <form id="aw-filters" class="flex items-center gap-2 p-2 border-b border-line-base bg-gray-50 flex-shrink-0"
       @submit.prevent>
-  <input type="text" name="q" value="{{ q }}" placeholder="Search customer, SO#, part…"
+  <input type="text" id="aw-q" name="q" value="{{ q }}" placeholder="Search customer, SO#, part…"
          aria-label="Search {{ tab }}"
          class="input input-sm flex-1 min-w-0"
          hx-get="{{ list_url }}"
@@ -83,9 +95,17 @@
     New buy plan
   </a>
   {% endif %}
-  {# Export CSV — a REAL browser download (hx-boost=false opts out of nav-boost). #}
-  <a hx-boost="false" href="/v2/partials/approvals/{{ tab }}/export?scope={{ scope }}"
-     class="btn-secondary btn-sm flex-shrink-0 whitespace-nowrap" title="Download this list as a CSV file">Export CSV</a>
+  {# Export CSV — a REAL browser download (hx-boost=false opts out of nav-boost). A6:
+     q/show_closed ride along so the CSV can never drift from what's on screen — on
+     prepayments/purchase-orders, Live streams the same live rows the list renders and
+     Closed streams the resolved history, so the tooltip there says which one this click
+     downloads. Sales Orders / Buy Plans export ignores show_closed by design (still the
+     full plan tracking list, live+closed together) — its tooltip stays generic so it
+     never promises a closed-only download it doesn't deliver. #}
+  <a hx-boost="false"
+     href="/v2/partials/approvals/{{ tab }}/export?scope={{ scope }}&show_closed={{ 'true' if show_closed else 'false' }}{% if q %}&q={{ q|urlencode }}{% endif %}"
+     class="btn-secondary btn-sm flex-shrink-0 whitespace-nowrap"
+     title="{% if tab in ('sales-orders', 'buy-plans') %}Download this list as a CSV file{% elif show_closed %}Download the resolved/closed history shown below as a CSV file{% else %}Download the live rows shown below as a CSV file{% endif %}">Export CSV</a>
 </form>
 
 {# Row wrapper is a role="button" DIV, not a <button>: the copy chip inside it is a
@@ -133,6 +153,10 @@
 {% endmacro %}
 
 <div class="flex-1 min-h-0 md:overflow-y-auto">
+  {# A7: stalled rows (no configured approver) get their own group, carved out of
+     other_rows, between "Needs your approval" and "Everything else". #}
+  {% set stalled_rows = other_rows | selectattr('stalled') | list %}
+  {% set rest_rows = other_rows | rejectattr('stalled') | list %}
   {% if needs_rows %}
   <div class="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-accent-600">Needs your approval</div>
   {# data-aw-needs: the auto-advance hook — after a decide, the split selects the
@@ -141,13 +165,25 @@
     {% for row in needs_rows %}{{ list_row(row) }}{% endfor %}
   </div>
   {% endif %}
-  {% if other_rows %}
-  {% if needs_rows %}<div class="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Everything else</div>{% endif %}
-  <div class="divide-y divide-line-subtle">
-    {% for row in other_rows %}{{ list_row(row) }}{% endfor %}
+  {% if own_confirm_rows %}
+  <div class="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-sky-600">Your POs to confirm</div>
+  <div class="divide-y divide-line-subtle border-b border-line-base">
+    {% for row in own_confirm_rows %}{{ list_row(row) }}{% endfor %}
   </div>
   {% endif %}
-  {% if not needs_rows and not other_rows %}
+  {% if stalled_rows %}
+  <div class="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-amber-600">Stalled — no approver</div>
+  <div class="divide-y divide-line-subtle border-b border-line-base">
+    {% for row in stalled_rows %}{{ list_row(row) }}{% endfor %}
+  </div>
+  {% endif %}
+  {% if rest_rows %}
+  {% if needs_rows or own_confirm_rows or stalled_rows %}<div class="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Everything else</div>{% endif %}
+  <div class="divide-y divide-line-subtle">
+    {% for row in rest_rows %}{{ list_row(row) }}{% endfor %}
+  </div>
+  {% endif %}
+  {% if not needs_rows and not own_confirm_rows and not other_rows %}
   <div class="px-4 py-10 text-center text-sm text-brand-400">
     {% if q %}Nothing matches “{{ q }}”.{% elif show_closed %}No closed items{% if scope == 'mine' %} of yours{% endif %}.{% else %}Nothing here{% if scope == 'mine' %} for you{% endif %} — all clear.{% endif %}
   </div>

@@ -54,6 +54,14 @@ def confirm_po(
     records the terms on the Acctivate PO — REQUIRED, one of
     ``PO_LINE_PAYMENT_METHODS`` (wire / PayPal / credit card / ACH / COD); missing,
     blank, or any other value is a ValueError.
+
+    Actor gate (service-side, mirrors ``mark_line_received``): the line's assigned
+    buyer, or a manager/admin acting for them. A9 — the confirm form previously had no
+    ownership check, so any viewer with plan access (e.g. a co-owner sales/trader on
+    the same requisition) could submit someone else's line.
+
+    Raises:
+        PermissionError: actor is neither the line's buyer nor a manager/admin.
     """
     from ...constants import PO_LINE_PAYMENT_METHODS
 
@@ -75,6 +83,12 @@ def confirm_po(
     line = db.get(BuyPlanLine, line_id)
     if not line or line.buy_plan_id != plan_id:
         raise ValueError(f"Line {line_id} not found in plan {plan_id}")
+
+    from ...dependencies import is_manager_or_admin
+
+    if not (line.buyer_id == user.id or is_manager_or_admin(user)):
+        raise PermissionError("Only the line's buyer or a manager can confirm its PO.")
+
     if line.status != BuyPlanLineStatus.AWAITING_PO.value:
         raise ValueError(f"Line must be awaiting PO (current: {line.status})")
 

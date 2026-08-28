@@ -350,6 +350,16 @@ def test_select_drives_url_through_htmx_not_raw_pushstate():
     assert "history.replaceState(history.state" not in src
 
 
+def test_select_replace_url_carries_live_scope():
+    # A10 follow-up: a row click (and the near-immediate aw-default auto-select) must
+    # NOT strip Mine back to All in the address bar — select() reads the LIVE scope off
+    # the filter form's own hidden input (not a value baked at the tab body's render)
+    # and appends it to the same replace: URL.
+    src = (_T / "approvals/_workspace_split.html").read_text()
+    assert "#aw-filters [name=scope]" in src
+    assert "&scope=' + encodeURIComponent(liveScope)" in src
+
+
 def test_hub_tab_seeds_from_url():
     # The tab-pill highlight (Alpine `tab`) must seed from the URL, so a history restore
     # shows the restored tab active instead of the first-rendered tab.

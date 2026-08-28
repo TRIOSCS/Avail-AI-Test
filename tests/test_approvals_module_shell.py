@@ -87,6 +87,18 @@ def test_approvals_page_threads_select(nonadmin_client: TestClient):
     assert "select=abc" not in bad.text
 
 
+def test_approvals_page_threads_scope(nonadmin_client: TestClient):
+    """A10: a hard reload of the pushed /v2/approvals?tab=...&scope=mine URL threads
+    scope into the lazy partial URL so the workspace lands back on Mine, not All."""
+    r = nonadmin_client.get("/v2/approvals?tab=buy-plans&scope=mine")
+    assert r.status_code == 200
+    # Jinja autoescapes the & inside hx-get="{{ partial_url }}".
+    assert "/v2/partials/approvals?tab=buy-plans&amp;scope=mine" in r.text
+    # scope=all is the unchanged default — never carried, keeping bare URLs bare.
+    default = nonadmin_client.get("/v2/approvals?tab=buy-plans&scope=all")
+    assert 'hx-get="/v2/partials/approvals?tab=buy-plans"' in default.text
+
+
 def test_approvals_shell_renders_four_tabs(nonadmin_client: TestClient):
     """The Approvals Workspace shell renders all four tab URLs + the lazy-body guard."""
     r = nonadmin_client.get("/v2/partials/approvals")

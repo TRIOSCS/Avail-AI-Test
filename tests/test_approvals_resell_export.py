@@ -255,7 +255,9 @@ def test_prepayment_resolved_export_row(client: TestClient, db_session: Session,
     pp = _resolved_prepay(db_session, bp, test_user, beneficiary="Northwind Components LLC")
     db_session.commit()
 
-    resp = client.get("/v2/partials/approvals/prepayment/export")
+    # A6: the resolved audit feed lives behind show_closed=true (default now streams the
+    # SAME live rows the list renders — see test_approvals_hub_tabs.py for that case).
+    resp = client.get("/v2/partials/approvals/prepayment/export?show_closed=true")
     _assert_attachment(resp, filename_contains="approvals_prepayments_resolved_all.csv")
     rows = _parse_csv(resp.text)
 
@@ -277,10 +279,10 @@ def test_prepayment_export_scope_mine_filters_to_own(client: TestClient, db_sess
     theirs = _resolved_prepay(db_session, bp, other, beneficiary="Their Payee LLC")
     db_session.commit()
 
-    all_body = client.get("/v2/partials/approvals/prepayment/export?scope=all").text
+    all_body = client.get("/v2/partials/approvals/prepayment/export?scope=all&show_closed=true").text
     assert str(mine.id) in all_body and str(theirs.id) in all_body
 
-    mine_body = client.get("/v2/partials/approvals/prepayment/export?scope=mine").text
+    mine_body = client.get("/v2/partials/approvals/prepayment/export?scope=mine&show_closed=true").text
     assert "Mine Payee LLC" in mine_body
     assert "Their Payee LLC" not in mine_body
 
@@ -294,7 +296,9 @@ def test_po_approval_history_export_row(client: TestClient, db_session: Session,
     _po_history(db_session, bp, test_user)
     db_session.commit()
 
-    resp = client.get("/v2/partials/approvals/po-approval/export")
+    # A6: the resolved PO decision feed lives behind show_closed=true (default now
+    # streams the SAME live rows the list renders).
+    resp = client.get("/v2/partials/approvals/po-approval/export?show_closed=true")
     _assert_attachment(resp, filename_contains="approvals_po_resolved.csv")
     rows = _parse_csv(resp.text)
 

@@ -2221,6 +2221,34 @@ warnings. The route re-renders the SAME pane via `render_po_pane(po_prefill=…)
 buyer reviews and still clicks Confirm PO. Empty paste / AI failure render
 `po_paste_note` instead. ERP stays untouched: the human transports the text.
 
+**Workspace polish (Tranche G).** Five fixes closed gaps found in a pass over the
+workspace. (A4) The search input got a stable `id="aw-q"` so a list refresh no longer
+steals focus mid-keystroke. (A7) The no-configured-approver stall flag (
+`plan_needs_approver_reason`) now surfaces on BOTH plan lenses — Sales Orders as well
+as Buy Plans, previously Buy-Plans-only — as its own "Stalled — no approver" row
+group, carved out of "Everything else" the same way "Needs your approval" is. (A8) A
+buyer's own AWAITING_PO lines get a dedicated "Your POs to confirm" group instead of
+being folded into "Needs your approval" (`own_confirm` on `WorkspaceRow`, carved out
+by its own flag rather than by exclusion, since `needs` and `own_confirm` aren't
+guaranteed disjoint); `default_row` falls back to the oldest own-confirm row when
+there's nothing to decide, so a buyer with no approvals still lands on their PO work
+on first load. **(A9) authorization tightening on Confirm PO** —
+`confirm_po` (`services/buyplan_workflow/buyplan_po.py`) previously had no ownership
+check; it now raises `PermissionError` unless the actor is the line's assigned buyer
+or a manager/admin, closing a gap where any viewer with plan access (e.g. a co-owner
+sales/trader on the same requisition) could submit someone else's line. The tokenized
+no-login page (`routers/po_confirm.py`) catches `PermissionError` and renders the same
+graceful "inactive" panel — never a raw 500 on a public page — when a token's line was
+reassigned to a different buyer after the link was minted, and the AI paste-prefill
+route carries its own copy of the same gate since it never calls `confirm_po` (no DB
+write) and would otherwise burn a paid AI call on someone else's line. (A6/A3/A10)
+Prepayments/Purchase-Orders exports now stream the SAME live rows the list renders
+(not a surprise history dump) when Closed isn't checked, with `q`/`show_closed` riding
+along so the CSV can never drift from what's on screen; prepayment status `approved`
+reads as amber "Approved — awaiting wire" rather than emerald, since signed-off is not
+yet paid; and `?scope=mine` now threads end-to-end — `v2_page` → the shell route →
+each tab pill's `hx-replace-url` → each row's pushed URL — so a hard reload or a
+shared/bookmarked link restores the viewer's Mine instead of snapping back to All.
 
 **Resell workspace — resell/excess split-panel (Chunk F, ADDITIVE).** `/v2/resell` is
 its own primary-nav tab (9th item in `mobile_nav.html`) served by the `v2_page` shell →

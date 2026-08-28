@@ -20,6 +20,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -125,6 +126,40 @@ def test_resourcing_line_renders_inactive_panel(client: TestClient, db_session, 
     r = client.get(f"/po/confirm/{token}")
     assert r.status_code == 200
     assert "isn't awaiting a PO" in r.text
+
+
+def test_reassigned_buyer_renders_inactive_panel_not_500(client: TestClient, db_session, test_user: User):
+    """A9 follow-up: the line's buyer was reassigned after the confirm email (and its
+    token) went out. confirm_po's actor gate now raises PermissionError for the stale
+    token's buyer — the route must never surface that as a raw 500 on this public,
+    no-login page; it renders the same graceful inactive panel other stale-link cases
+    use, and the line stays untouched."""
+    _bp, line = _active_line(db_session, test_user)
+    token = mint_po_confirm_token(line.id, test_user.id)
+
+    other_buyer = User(
+        email="reassigned-buyer@trioscs.com",
+        name="Reassigned Buyer",
+        role="buyer",
+        azure_id="test-azure-id-reassigned-buyer",
+        created_at=datetime.now(UTC),
+    )
+    db_session.add(other_buyer)
+    db_session.commit()
+    line.buyer_id = other_buyer.id  # reassigned AFTER the token above was minted
+    db_session.commit()
+
+    r = client.post(
+        f"/po/confirm/{token}",
+        data={"po_number": "PO-STALE", "estimated_ship_date": "2026-09-01", "payment_method": "wire"},
+    )
+    assert r.status_code == 200
+    assert "isn't awaiting a PO" in r.text  # the SAME inactive-panel copy, not a 500
+
+    db_session.expire_all()
+    fresh = db_session.get(BuyPlanLine, line.id)
+    assert fresh.status == BuyPlanLineStatus.AWAITING_PO.value  # unchanged
+    assert fresh.po_number is None
 
 
 # ── The approval notification carries the relay links ─────────────────────
