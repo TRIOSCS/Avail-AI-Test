@@ -298,13 +298,15 @@ jobs:
         # ships. Uses INTEGRATION_REDIS_URL because conftest.py blanks REDIS_URL
         # for test isolation; -o addopts="" drops the suite-wide xdist/ignore opts.
         # Shard 0 only — this is a fixed, single-file integration check, not
-        # part of the sharded unit-test split.
+        # part of the sharded unit-test split. test_sse_broker_redis.py's
+        # two-instance test (two SSEBroker()s, one real Redis) is skipif-gated
+        # on this same var everywhere else, so it only actually runs here.
         if: matrix.shard == 0
         env:
           INTEGRATION_REDIS_URL: redis://localhost:6379/0
           PYTHONPATH: ${{ github.workspace }}
         run: |
-          pytest tests/integration/test_redis_integration.py -v -o addopts=""
+          pytest tests/integration/test_redis_integration.py tests/test_sse_broker_redis.py -v -o addopts=""
 
       - name: Upload test results (shard ${{ matrix.shard }})
         if: always()
