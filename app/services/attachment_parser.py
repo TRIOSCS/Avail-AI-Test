@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from ..models import Requirement, Sighting, VendorResponse
 from ..services.vendor_unavailability import apply_to_fresh_sightings
+from ..utils.text_utils import UNTRUSTED_EMAIL_NOTICE, wrap_untrusted
 from ..vendor_utils import normalize_vendor_name
 
 # Standard column header patterns (deterministic, no AI needed)
@@ -111,13 +112,15 @@ async def _ai_detect_columns(
         "required": ["mappings"],
     }
 
+    # F10: headers and sample row cells come straight from a vendor-supplied
+    # attachment, so the whole block is delimited as one untrusted unit.
+    spreadsheet_block = (
+        f"Headers: {headers}\n\nSample rows (first 5):\n{chr(10).join(str(row) for row in sample_rows[:5])}"
+    )
     prompt = f"""Analyze this spreadsheet from vendor domain "{vendor_domain}".
 Map each column to the correct electronic component field.
 
-Headers: {headers}
-
-Sample rows (first 5):
-{chr(10).join(str(row) for row in sample_rows[:5])}
+{wrap_untrusted(spreadsheet_block, tag="spreadsheet")}
 
 Rules:
 - Map "mpn" to the column containing electronic part numbers (alphanumeric codes like LM7805, SN74HC595N)
@@ -130,6 +133,7 @@ Rules:
         result = await claude_structured(
             prompt=prompt,
             schema=COLUMN_SCHEMA,
+            system=UNTRUSTED_EMAIL_NOTICE,
             model_tier="fast",
         )
         if not result or "mappings" not in result:

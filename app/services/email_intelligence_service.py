@@ -391,7 +391,8 @@ async def detect_specialties_ai(texts: list[str]) -> list[dict | None]:
     return normalized
 
 
-THREAD_SUMMARY_SYSTEM = """\
+THREAD_SUMMARY_SYSTEM = (
+    """\
 You are summarizing an email thread between an electronic component broker \
 and a vendor. Extract:
 
@@ -407,6 +408,9 @@ Return ONLY valid JSON:
   "action_items": ["action1"],
   "thread_status": "active|quoted|negotiating|closed|stale"
 }"""
+    + "\n\n"
+    + UNTRUSTED_EMAIL_NOTICE
+)
 
 
 async def summarize_thread(token: str, conversation_id: str, db: Session, user_id: int) -> dict | None:
@@ -471,9 +475,14 @@ async def summarize_thread(token: str, conversation_id: str, db: Session, user_i
         sender_addr = sender.get("address", "unknown")
         body_text = (msg.get("body", {}).get("content") or "")[:1000]
         received = msg.get("receivedDateTime", "")
-        thread_text += f"\n--- {sender_addr} ({received}) ---\n{body_text}\n"
+        thread_text += f"\n--- {sender_addr} ({received}) ---\n{wrap_untrusted(body_text)}\n"
 
-    # Truncate for token limits
+    # Truncate for token limits. This truncates AFTER wrapping (the opposite of
+    # wrap_untrusted's documented order), so a long thread can drop the final
+    # message's closing </email> tag — an acceptable, benign dangling-open-tag
+    # outcome: earlier messages stay fully delimited, and the notice below still
+    # applies to whatever text survives. Per-message truncation above ([:1000])
+    # keeps any single dangling block small.
     thread_text = thread_text[:8000]
 
     try:
@@ -617,7 +626,12 @@ async def extract_durable_facts(
 
         from app.utils.claude_client import claude_structured
 
-        prompt = f"From: {sender_name} <{sender_email}>\n\nBody:\n{wrap_untrusted(body[:3000])}"
+        # F10: sender_name is an externally-supplied display name (the email's
+        # From header), so it is delimited the same as the body.
+        prompt = (
+            f"From: {wrap_untrusted(sender_name, tag='sender_name')} <{sender_email}>"
+            f"\n\nBody:\n{wrap_untrusted(body[:3000])}"
+        )
 
         result = await claude_structured(
             prompt,

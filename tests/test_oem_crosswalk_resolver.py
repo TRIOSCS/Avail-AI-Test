@@ -209,3 +209,13 @@ def test_result_rejects_illegal_resolved_shapes():
     # Legal shapes construct fine.
     OemResolveResult(status="resolved", canonical_mpn="ST4000NM0035", source_url="https://x.example", confidence=0.95)
     OemResolveResult(status="no_match")
+
+
+def test_system_prompt_cautions_against_untrusted_web_content():
+    """F10 (pairs with the F3 citation work): the LLM reads arbitrary OEM/cross-ref web
+    pages via the web_search tool, so the system prompt must warn that page content is
+    untrusted and instructions embedded in it must not be followed."""
+    from app.services.enrichment_worker.oem_crosswalk_resolver import _RESOLVE_SYSTEM
+
+    assert "untrusted" in _RESOLVE_SYSTEM.lower()
+    assert "instructions" in _RESOLVE_SYSTEM.lower()

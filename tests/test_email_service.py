@@ -1791,7 +1791,10 @@ class TestSubmitParseBatch:
                 new_callable=AsyncMock,
                 return_value="batch-123",
             ),
-            patch("app.services.response_parser.clean_email_body", return_value="cleaned"),
+            # _submit_parse_batch does a local `from app.utils.text_utils import
+            # clean_email_body` inside the function body, so the effective patch
+            # seam is the source module, not response_parser's re-export.
+            patch("app.utils.text_utils.clean_email_body", return_value="cleaned"),
             patch("app.services.response_parser.RESPONSE_PARSE_SCHEMA", {"type": "object"}),
             patch("app.services.response_parser.SYSTEM_PROMPT", "System prompt"),
         ):
@@ -1824,7 +1827,9 @@ class TestSubmitParseBatch:
                 new_callable=AsyncMock,
                 return_value=None,
             ),
-            patch("app.services.response_parser.clean_email_body", return_value="cleaned"),
+            # See test_successful_batch_submit above: effective seam is text_utils,
+            # not response_parser's re-export.
+            patch("app.utils.text_utils.clean_email_body", return_value="cleaned"),
             patch("app.services.response_parser.RESPONSE_PARSE_SCHEMA", {"type": "object"}),
             patch("app.services.response_parser.SYSTEM_PROMPT", "System prompt"),
             pytest.raises(RuntimeError, match="no batch_id"),
@@ -2094,6 +2099,26 @@ class TestParseSequentialFallback:
             await _parse_sequential_fallback([vr], MagicMock())
 
         assert vr.status == "new"
+
+    @pytest.mark.asyncio
+    async def test_null_subject_passed_as_empty_string(self):
+        """F10: vr.subject can be None (nullable column); parse_response_ai's subject
+        arg feeds parse_vendor_response's wrap_untrusted(email_subject, tag='subject'),
+        which raises on None. Must be normalized to "" before the call."""
+        vr = MagicMock(spec=VendorResponse)
+        vr.id = 1
+        vr.body = "Quote body"
+        vr.subject = None
+        vr.status = "new"
+
+        with patch(
+            "app.email_service.parse_response_ai",
+            new_callable=AsyncMock,
+            return_value=None,
+        ) as mock_parse:
+            await _parse_sequential_fallback([vr], MagicMock())
+
+        mock_parse.assert_awaited_once_with("Quote body", "")
 
     @pytest.mark.asyncio
     async def test_multiple_items_with_semaphore(self):
