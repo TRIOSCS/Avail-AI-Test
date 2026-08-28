@@ -31,12 +31,13 @@ from app.utils.normalization import (
     normalize_price,
     normalize_quantity,
 )
-from app.utils.text_utils import clean_email_body
+from app.utils.text_utils import UNTRUSTED_EMAIL_NOTICE, clean_email_body, wrap_untrusted
 
 CONFIDENCE_AUTO = 0.8
 CONFIDENCE_REVIEW = 0.5
 
-SYSTEM_PROMPT = """\
+SYSTEM_PROMPT = (
+    """\
 You are a precise data extractor for electronic component vendor email replies.
 
 Context: An electronic component broker sent RFQ (Request for Quote) emails to \
@@ -87,6 +88,9 @@ Return ONLY valid JSON matching this exact structure:
   "email_type": "quote"|"no_stock"|"partial"|"price_on_request"|"ooo_bounce"|"unclear",
   "vendor_notes": "string or null"
 }"""
+    + "\n\n"
+    + UNTRUSTED_EMAIL_NOTICE
+)
 
 
 async def parse_email(
@@ -113,8 +117,8 @@ async def parse_email(
     body_truncated = body[:5000]
 
     prompt = f"Vendor: {vendor_name}\n" if vendor_name else ""
-    prompt += f"Subject: {email_subject}\n\n" if email_subject else ""
-    prompt += f"Email body:\n{body_truncated}"
+    prompt += f"Subject: {wrap_untrusted(email_subject, tag='subject')}\n\n" if email_subject else ""
+    prompt += f"Email body:\n{wrap_untrusted(body_truncated)}"
 
     try:
         result = await claude_json(

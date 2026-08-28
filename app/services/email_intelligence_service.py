@@ -22,10 +22,13 @@ from typing import TYPE_CHECKING
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from app.utils.text_utils import UNTRUSTED_EMAIL_NOTICE, wrap_untrusted
+
 if TYPE_CHECKING:
     from ..models.intelligence import EmailIntelligence
 
-CLASSIFICATION_SYSTEM = """\
+CLASSIFICATION_SYSTEM = (
+    """\
 You are an email classifier for an electronic component brokerage.
 
 Classify this email into exactly ONE category:
@@ -51,6 +54,9 @@ Return ONLY valid JSON:
   "brands_detected": ["Brand1"],
   "commodities_detected": ["Category1"]
 }"""
+    + "\n\n"
+    + UNTRUSTED_EMAIL_NOTICE
+)
 
 
 async def classify_email_ai(
@@ -65,7 +71,11 @@ async def classify_email_ai(
     from app.utils.claude_client import claude_json
     from app.utils.claude_errors import ClaudeError, ClaudeUnavailableError
 
-    prompt = f"From: {sender_email}\nSubject: {subject}\n\nBody:\n{body[:3000]}"
+    prompt = (
+        f"From: {sender_email}\n"
+        f"Subject: {wrap_untrusted(subject, tag='subject')}\n\n"
+        f"Body:\n{wrap_untrusted(body[:3000])}"
+    )
 
     try:
         result = await claude_json(
@@ -521,7 +531,8 @@ FACT_EXPIRY_DEFAULTS: dict[str, int | None] = {
     "condition_note": 180,
 }
 
-FACT_EXTRACTION_PROMPT = """\
+FACT_EXTRACTION_PROMPT = (
+    """\
 You are an expert at extracting durable facts from electronic component \
 vendor emails. Extract concrete, reusable facts — NOT pricing data \
 (that is handled separately).
@@ -545,6 +556,9 @@ For each fact found, provide:
 - confidence: 0.0-1.0
 
 Only extract facts you are confident about. Skip vague or ambiguous statements."""
+    + "\n\n"
+    + UNTRUSTED_EMAIL_NOTICE
+)
 
 FACT_EXTRACTION_SCHEMA = {
     "type": "object",
@@ -603,7 +617,7 @@ async def extract_durable_facts(
 
         from app.utils.claude_client import claude_structured
 
-        prompt = f"From: {sender_name} <{sender_email}>\n\nBody:\n{body[:3000]}"
+        prompt = f"From: {sender_name} <{sender_email}>\n\nBody:\n{wrap_untrusted(body[:3000])}"
 
         result = await claude_structured(
             prompt,

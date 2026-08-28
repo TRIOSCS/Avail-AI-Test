@@ -31,7 +31,7 @@ from app.utils.normalization import (
     normalize_price,
     normalize_quantity,
 )
-from app.utils.text_utils import clean_email_body
+from app.utils.text_utils import UNTRUSTED_EMAIL_NOTICE, clean_email_body, wrap_untrusted
 
 # ── Confidence thresholds ─────────────────────────────────────────────
 
@@ -98,7 +98,8 @@ RESPONSE_PARSE_SCHEMA = {
     "required": ["overall_sentiment", "overall_classification", "confidence", "parts"],
 }
 
-SYSTEM_PROMPT = """You are a precise data extractor for electronic component vendor email replies.
+SYSTEM_PROMPT = (
+    """You are a precise data extractor for electronic component vendor email replies.
 
 Context: An electronic component broker sent an RFQ (request for quote) to a vendor.
 The vendor has replied. Extract structured data from their reply.
@@ -112,6 +113,9 @@ Rules:
 - Currency defaults to USD unless explicitly stated otherwise
 - "out of office" or bounce messages → overall_classification: "ooo_bounce", empty parts list
 - If the email is ambiguous or you can't extract reliably, set confidence < 0.5"""
+    + "\n\n"
+    + UNTRUSTED_EMAIL_NOTICE
+)
 
 
 async def parse_vendor_response(
@@ -142,7 +146,11 @@ async def parse_vendor_response(
         elif isinstance(rfq_context, dict):
             context_str = f"\nParts we asked about: {rfq_context.get('mpn', '?')} x{rfq_context.get('qty', '?')}"
 
-    prompt = f"Vendor: {vendor_name}\nSubject: {email_subject}\n{context_str}\n\nVendor reply:\n{body_truncated}"
+    prompt = (
+        f"Vendor: {vendor_name}\n"
+        f"Subject: {wrap_untrusted(email_subject, tag='subject')}\n"
+        f"{context_str}\n\nVendor reply:\n{wrap_untrusted(body_truncated)}"
+    )
 
     try:
         result = await claude_structured(
