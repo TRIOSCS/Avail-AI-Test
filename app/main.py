@@ -178,47 +178,59 @@ async def lifespan(app):
 
     _is_testing = os.environ.get("TESTING") == "1"
 
-    if not _is_testing:
-        from .startup import seed_api_sources, seed_browser_workers
+    # RUN_SCHEDULER gates the APScheduler process and everything that seeds or
+    # feeds it (source/browser-worker seeding, the deferred startup backfills).
+    # Default "1" preserves today's single-process behavior (instant rollback
+    # knob). In the split-process deploy, the app service sets RUN_SCHEDULER=0
+    # and a dedicated `scheduler` service sets it to "1" — exactly one process
+    # must run the scheduler, since the approval-notification outbox has no
+    # cross-process locking and two schedulers would double-send emails.
+    _run_scheduler = os.environ.get("RUN_SCHEDULER", "1") == "1"
 
-        seed_api_sources()
-        seed_browser_workers()
+    if not _is_testing:
+        if _run_scheduler:
+            from .startup import seed_api_sources, seed_browser_workers
+
+            seed_api_sources()
+            seed_browser_workers()
         from .connector_status import log_connector_status
 
         _connector_status = log_connector_status()
         app.state.connector_status = _connector_status
 
-        from .scheduler import configure_scheduler, scheduler
+        if _run_scheduler:
+            from .scheduler import configure_scheduler, scheduler
 
-        configure_scheduler()
-        scheduler.start()
-        logger.info("APScheduler started")
+            configure_scheduler()
+            scheduler.start()
+            logger.info("APScheduler started")
 
-        # P2.7: launch the SLOW, idempotent startup backfills + ANALYZE as a
-        # post-yield background task instead of running them inline before /health
-        # can answer (docs/CODE_AUDIT_AND_HARDENING_PLAN.md P2.7). run_startup_migrations()
-        # above already ran the FAST, order-critical ops synchronously.
-        from .services.prepayment_notifications import set_main_event_loop
-        from .startup import mark_deferred_backfills_pending, run_deferred_startup_backfills
-        from .utils.async_helpers import safe_background_task
+            # P2.7: launch the SLOW, idempotent startup backfills + ANALYZE as a
+            # post-yield background task instead of running them inline before /health
+            # can answer (docs/CODE_AUDIT_AND_HARDENING_PLAN.md P2.7). run_startup_migrations()
+            # above already ran the FAST, order-critical ops synchronously.
+            from .services.prepayment_notifications import set_main_event_loop
+            from .startup import mark_deferred_backfills_pending, run_deferred_startup_backfills
+            from .utils.async_helpers import safe_background_task
 
-        # run_deferred_startup_backfills executes on an asyncio.to_thread worker
-        # thread with no running loop of its own; register the main loop so
-        # schedule_prepayment_notify can still deliver a DO-NOT-WIRE stand-down
-        # notification if that sweep auto-completes a buy plan with a pending
-        # prepayment (see prepayment_notifications.py's cross-thread fallback).
-        set_main_event_loop(asyncio.get_running_loop())
-        mark_deferred_backfills_pending()
-        await safe_background_task(
-            asyncio.to_thread(run_deferred_startup_backfills),
-            task_name="deferred_startup_backfills",
-        )
+            # run_deferred_startup_backfills executes on an asyncio.to_thread worker
+            # thread with no running loop of its own; register the main loop so
+            # schedule_prepayment_notify can still deliver a DO-NOT-WIRE stand-down
+            # notification if that sweep auto-completes a buy plan with a pending
+            # prepayment (see prepayment_notifications.py's cross-thread fallback).
+            set_main_event_loop(asyncio.get_running_loop())
+            mark_deferred_backfills_pending()
+            await safe_background_task(
+                asyncio.to_thread(run_deferred_startup_backfills),
+                task_name="deferred_startup_backfills",
+            )
 
     yield
 
     if not _is_testing:
-        logger.info("Shutting down scheduler (waiting for running jobs)...")
-        scheduler.shutdown(wait=True)
+        if _run_scheduler:
+            logger.info("Shutting down scheduler (waiting for running jobs)...")
+            scheduler.shutdown(wait=True)
         from .http_client import close_clients
 
         await close_clients()

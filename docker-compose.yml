@@ -98,6 +98,13 @@ services:
     # redis://redis:6379/0 (unchanged default local-dev behavior).
     environment:
       - REDIS_URL=redis://${REDIS_PASSWORD:+:${REDIS_PASSWORD}@}redis:6379/0
+      # Phase-4 infra: the scheduler process now lives in its own `scheduler`
+      # service below. RUN_SCHEDULER=0 keeps this app process free of
+      # APScheduler + the seeds/backfills that feed it — exactly one process
+      # (the scheduler service) must run APScheduler, since the
+      # approval-notification outbox has no cross-process locking and two
+      # schedulers would double-send emails.
+      - RUN_SCHEDULER=0
     stop_grace_period: 60s
     depends_on:
       db:
@@ -162,6 +169,42 @@ services:
       redis:
         condition: service_healthy
       app:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # --- Scheduler (Phase-4 infra: split out of `app` — APScheduler runs here,
+  # and ONLY here. Same image/command as `app` (single uvicorn worker), just
+  # with RUN_SCHEDULER=1 flipped on and RUN_SCHEDULER=0 on `app` above.
+  # Not reachable from Caddy (no ports mapping) — it exists to run background
+  # jobs, not serve traffic. See app/main.py lifespan + deploy.sh's post-deploy
+  # "exactly one scheduler" verification. ---
+  scheduler:
+    build: .
+    restart: always
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "172.28.0.0/24"]
+    env_file: .env
+    # stop_grace_period 60s: matches `app` — APScheduler's shutdown handler
+    # (app/main.py lifespan) waits for in-flight jobs to finish rather than
+    # being SIGKILLed mid-run.
+    stop_grace_period: 60s
+    environment:
+      # P1.4: same REDIS_URL composition as `app` — keep in sync if changed.
+      - REDIS_URL=redis://${REDIS_PASSWORD:+:${REDIS_PASSWORD}@}redis:6379/0
+      - RUN_SCHEDULER=1
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     healthcheck:
       disable: true

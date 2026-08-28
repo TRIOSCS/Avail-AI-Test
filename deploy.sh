@@ -91,13 +91,14 @@ fi
 # input-pinned layers (apt, gh, pip, Chromium, `npm ci`) stay cached. ~4x faster deploys
 # with no stale-template risk. The unique timestamp also invalidates --no-commit deploys.
 BUILD_COMMIT="$(git rev-parse --short HEAD)-$(date +%s)"
-echo "==> Rebuilding app + enrichment-worker images (build tag: $BUILD_COMMIT)..."
-# app and enrichment-worker share `build: .` (same Dockerfile), so building both
-# here reuses every cached layer — the worker image is nearly free. This stops the
-# worker from silently running stale wheels after a dependency bump: it shares
-# requirements.txt with the app (e.g. redis-py, anthropic), and deploy.sh used to
-# rebuild only the app, leaving the worker on the old image until someone noticed.
-docker compose build --build-arg BUILD_COMMIT="$BUILD_COMMIT" app enrichment-worker
+echo "==> Rebuilding app + enrichment-worker + scheduler images (build tag: $BUILD_COMMIT)..."
+# app, enrichment-worker, and scheduler all share `build: .` (same Dockerfile),
+# so building all three here reuses every cached layer — worker/scheduler images
+# are nearly free. This stops either from silently running stale wheels after a
+# dependency bump: they share requirements.txt with the app (e.g. redis-py,
+# anthropic), and deploy.sh used to rebuild only the app, leaving siblings on
+# the old image until someone noticed.
+docker compose build --build-arg BUILD_COMMIT="$BUILD_COMMIT" app enrichment-worker scheduler
 
 # Step 2b: Record the currently-running app image BEFORE we recreate the container,
 # so a failed health check can roll the app back to the last-known-good image instead
@@ -117,6 +118,23 @@ if [ -n "$PREV_APP_CONTAINER" ]; then
     echo "==> Recorded current app image for rollback: ${PREV_APP_IMAGE_REF:-unknown} (${PREV_APP_IMAGE_ID:-none})"
 else
     echo "==> No running app container found — no rollback target (first deploy?)."
+fi
+
+# Same capture for `scheduler` (Phase-4 infra split): app and scheduler are
+# recreated together in Step 3, both BEFORE the health-check gate, so a failed
+# deploy needs a rollback target for scheduler too — restoring only app's image
+# would leave scheduler running the broken new build (same image content, same
+# app.main:app entrypoint, just RUN_SCHEDULER=1). Empty on the first deploy of
+# the scheduler split — rollback_app() degrades gracefully when unset.
+PREV_SCHEDULER_CONTAINER="$(docker compose ps -q scheduler 2>/dev/null || true)"
+PREV_SCHEDULER_IMAGE_ID=""
+PREV_SCHEDULER_IMAGE_REF=""
+if [ -n "$PREV_SCHEDULER_CONTAINER" ]; then
+    PREV_SCHEDULER_IMAGE_ID="$(docker inspect -f '{{.Image}}' "$PREV_SCHEDULER_CONTAINER" 2>/dev/null || true)"
+    PREV_SCHEDULER_IMAGE_REF="$(docker inspect -f '{{.Config.Image}}' "$PREV_SCHEDULER_CONTAINER" 2>/dev/null || true)"
+    echo "==> Recorded current scheduler image for rollback: ${PREV_SCHEDULER_IMAGE_REF:-unknown} (${PREV_SCHEDULER_IMAGE_ID:-none})"
+else
+    echo "==> No running scheduler container found — no rollback target (first deploy of the scheduler split?)."
 fi
 
 # Capture the DB's alembic revision BEFORE the new container migrates on startup.
@@ -163,7 +181,23 @@ rollback_app() {
         echo "==> ROLLBACK ERROR: could not re-tag the previous image — manual intervention required." >&2
         return 1
     fi
-    docker compose up -d --force-recreate app || true
+    # scheduler is a separately-tagged image (compose tags per service even when
+    # they share `build: .`), so restoring app's tag does NOT also restore
+    # scheduler — it must be re-tagged on its own. Recreate both together so
+    # there's never a moment with a stale-app/fresh-scheduler (or vice versa)
+    # mismatch, and so the exactly-one-scheduler invariant holds throughout.
+    RECREATE_TARGETS="app"
+    if [ -n "$PREV_SCHEDULER_IMAGE_ID" ] && [ -n "$PREV_SCHEDULER_IMAGE_REF" ]; then
+        echo "==> ROLLBACK: restoring previous scheduler image ${PREV_SCHEDULER_IMAGE_REF} -> ${PREV_SCHEDULER_IMAGE_ID}"
+        if ! docker tag "$PREV_SCHEDULER_IMAGE_ID" "$PREV_SCHEDULER_IMAGE_REF"; then
+            echo "==> ROLLBACK ERROR: could not re-tag the previous scheduler image — manual intervention required." >&2
+            return 1
+        fi
+        RECREATE_TARGETS="app scheduler"
+    else
+        echo "==> ROLLBACK WARNING: no previous scheduler image recorded — scheduler stays on its current (new) image." >&2
+    fi
+    docker compose up -d --force-recreate $RECREATE_TARGETS || true
     echo "==> ROLLBACK: waiting for the restored app to become healthy..."
     RB_TRIES=0
     RB_STATUS="unknown"
@@ -181,12 +215,17 @@ rollback_app() {
     return 1
 }
 
-# Step 3: Recreate only the app container with the new image
+# Step 3: Recreate the app + scheduler containers with the new images.
+# Recreated together (scheduler is not gated behind the health-check loop
+# below, which stays app-only): `down` fully removes both old containers
+# before `up` starts the new ones, so there is never a window with two live
+# scheduler containers (old + new) — compose only ever runs one instance per
+# service name either way.
 # Clean up any orphaned rename containers from previous deploys
-echo "==> Restarting app..."
-docker compose down app 2>/dev/null || true
+echo "==> Restarting app + scheduler..."
+docker compose down app scheduler 2>/dev/null || true
 docker container prune -f --filter "label=com.docker.compose.project=availai" 2>/dev/null || true
-docker compose up -d app
+docker compose up -d app scheduler
 
 # Step 4: Wait for health check to pass
 echo "==> Waiting for app to become healthy..."
@@ -236,6 +275,63 @@ if [ "$DEPLOYED_COMMIT" != "$BUILD_COMMIT" ]; then
     exit 1
 fi
 echo "==> MATCH: deployed build tag ($DEPLOYED_COMMIT)"
+
+# Step 5a: Verify the scheduler container, then enforce the exactly-one-
+# scheduler invariant. This is the riskiest part of the Phase-4 infra split:
+# the approval-notification outbox has no cross-process locking, so two live
+# schedulers means double-sent emails. Done after app is confirmed healthy +
+# on the right build (scheduler was recreated alongside app in Step 3, but
+# the health-check loop above is app-only — scheduler has no HTTP healthcheck
+# to poll).
+echo ""
+echo "==> Verifying scheduler container..."
+sleep 3
+SCHEDULER_CONTAINER=$(docker compose ps -q scheduler)
+if [ "$(docker inspect --format='{{.State.Running}}' "$SCHEDULER_CONTAINER" 2>/dev/null)" != "true" ]; then
+    echo "==> ERROR: scheduler is not running after recreate"
+    echo "==> Last 50 log lines:"
+    docker compose logs --tail=50 scheduler
+    echo "==> Attempting automatic rollback..."
+    if rollback_app; then
+        echo "==> Rollback complete: previous images restored and app healthy. Deploy FAILED."
+    else
+        echo "==> Rollback did NOT fully succeed — investigate immediately."
+    fi
+    exit 1
+fi
+SCHEDULER_COMMIT=$(docker compose exec -T scheduler printenv BUILD_COMMIT 2>/dev/null | tr -d '[:space:]' || echo "UNKNOWN")
+if [ "$SCHEDULER_COMMIT" != "$BUILD_COMMIT" ]; then
+    echo "==> MISMATCH: scheduler ($SCHEDULER_COMMIT) does NOT match build ($BUILD_COMMIT)"
+    exit 1
+fi
+echo "==> MATCH: scheduler build tag ($SCHEDULER_COMMIT)"
+
+# The exactly-one-scheduler check itself. app/jobs/__init__.py logs
+# "APScheduler configured with N jobs" exactly once per process where
+# configure_scheduler() actually runs (RUN_SCHEDULER=1, gated in
+# app/main.py's lifespan). docker-compose.yml sets RUN_SCHEDULER=0 on `app`
+# and =1 on `scheduler` — so this must read exactly ONE occurrence in the
+# scheduler container's logs and exactly ZERO in the app container's logs.
+# Any other count means the RUN_SCHEDULER split failed (env not applied, code
+# gate broken, etc.) and must not be left live.
+echo ""
+echo "==> Verifying exactly-one-scheduler invariant..."
+SCHED_LOG_COUNT=$(docker compose logs scheduler 2>/dev/null | grep -c "APScheduler configured" || true)
+APP_LOG_COUNT=$(docker compose logs app 2>/dev/null | grep -c "APScheduler configured" || true)
+echo "==> 'APScheduler configured' occurrences — scheduler: ${SCHED_LOG_COUNT:-0}, app: ${APP_LOG_COUNT:-0}"
+if [ "${SCHED_LOG_COUNT:-0}" -ne 1 ] || [ "${APP_LOG_COUNT:-0}" -ne 0 ]; then
+    echo "==> CRITICAL: exactly-one-scheduler invariant VIOLATED (scheduler=${SCHED_LOG_COUNT:-0}, app=${APP_LOG_COUNT:-0})." >&2
+    echo "==>           Two live schedulers double-send approval-notification emails (no cross-process" >&2
+    echo "==>           locking on that outbox) — this deploy MUST NOT stay live." >&2
+    echo "==> Attempting automatic rollback..."
+    if rollback_app; then
+        echo "==> Rollback complete: previous images restored and app healthy. Deploy FAILED."
+    else
+        echo "==> Rollback did NOT fully succeed — investigate immediately."
+    fi
+    exit 1
+fi
+echo "==> OK: exactly one scheduler process running, zero in app."
 
 # Step 5b: Recreate the enrichment-worker on the freshly-built image.
 # The worker has no HTTP health check, so confirm it is running and verify the
