@@ -55,7 +55,7 @@ from ...services.quote_send import (
 )
 from ...services.status_machine import require_valid_transition
 from ...template_env import template_response
-from ._shared import _base_ctx, _parse_date_safe, toast_error_response
+from ._shared import _base_ctx, _parse_date_safe, set_toast, toast_error_response
 
 router = APIRouter(tags=["htmx-views"])
 
@@ -479,10 +479,47 @@ async def add_offer_to_quote(
     return template_response("htmx/partials/quotes/line_row.html", ctx)
 
 
+@router.get("/v2/partials/quotes/{quote_id}/send-dialog", response_class=HTMLResponse)
+async def send_quote_dialog(
+    request: Request,
+    quote_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render the Send Quote dialog (Task 4/B1): editable recipient + CC + preflight.
+
+    Loaded into #modal-content by $dispatch('open-modal', {url: ...}) from the quote
+    detail / Build-Quote action bars — replaces the old hx-confirm. Recipient resolution
+    mirrors send_quote_email's default (site.contact_email/contact_name), prefilled as
+    editable override_email/override_name inputs so the sender can redirect the quote or
+    add a CC without leaving the dialog. The subject reuses build_quote_subject (Task 3)
+    and preflight_warnings reuses quote_preflight (Task 1) so neither can drift from what
+    the detail page and the real send show.
+    """
+    quote = get_quote_for_user(db, user, quote_id)
+    site = db.get(CustomerSite, quote.customer_site_id) if quote.customer_site_id else None
+    to_email = (site.contact_email or "").strip() if site else ""
+    to_name = ((site.contact_name if site else "") or "").strip()
+    return template_response(
+        "htmx/partials/quotes/_send_dialog.html",
+        {
+            "request": request,
+            "quote": quote,
+            "to_email": to_email,
+            "to_name": to_name,
+            "subject": build_quote_subject(quote),
+            "preflight_warnings": [w.to_dict() for w in quote_preflight(db, quote)],
+        },
+    )
+
+
 @router.post("/v2/partials/quotes/{quote_id}/send", response_class=HTMLResponse)
 async def send_quote_htmx(
     request: Request,
     quote_id: int,
+    override_email: str | None = Form(None),
+    override_name: str | None = Form(None),
+    cc: str | None = Form(None),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -491,6 +528,10 @@ async def send_quote_htmx(
     Delegates to the canonical quote-send service so this button actually emails the
     customer (captures Graph ids, writes an outbound ActivityLog, hard-blocks DNC). In
     TESTING the service skips the real Graph call but still marks the quote sent.
+
+    override_email/override_name/cc (Task 4/B1) come from the send dialog and are all
+    optional — a request with none of them (the legacy hx-confirm button, or any other
+    caller) resolves the recipient exactly as before.
     """
     quote = get_quote_for_user(db, user, quote_id)
     testing = os.environ.get("TESTING") == "1"
@@ -502,7 +543,16 @@ async def send_quote_htmx(
 
         token = await require_fresh_token(request, db)
     try:
-        await send_quote_email(db, quote, user, token=token, testing=testing)
+        result = await send_quote_email(
+            db,
+            quote,
+            user,
+            token=token,
+            override_email=override_email,
+            override_name=override_name,
+            cc=cc,
+            testing=testing,
+        )
     except QuoteSendDNCBlocked:
         # Surface the failure as a toast WITHOUT swapping — the Send buttons
         # (quotes/detail.html, requisitions/tabs/build_quote.html) target #main-content,
@@ -512,7 +562,8 @@ async def send_quote_htmx(
         return toast_error_response("This recipient is do-not-contact — quote not sent.")
     except QuoteSendError as exc:
         return toast_error_response(exc.detail)
-    return await quote_detail_partial(request, quote_id, user, db)
+    resp = await quote_detail_partial(request, quote_id, user, db)
+    return set_toast(resp, f"Quote {quote.quote_number} sent to {result.sent_to}", "success")
 
 
 @router.post("/v2/partials/quotes/{quote_id}/result", response_class=HTMLResponse)

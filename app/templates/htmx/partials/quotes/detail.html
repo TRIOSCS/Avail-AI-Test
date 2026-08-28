@@ -137,12 +137,9 @@
   {# Quote actions bar #}
   <div class="mb-6 flex flex-wrap gap-2">
     {% if quote.status == 'draft' %}
-    <button hx-post="/v2/partials/quotes/{{ quote.id }}/send"
-            hx-target="#main-content"
-            hx-confirm="Send this quote to the customer?"
-            data-loading-disable
+    <button type="button"
+            @click="$dispatch('open-modal', {url: '/v2/partials/quotes/{{ quote.id }}/send-dialog'})"
             class="btn-primary btn-md">
-      {{ loading_spinner("h-4 w-4 spinner") }}
       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
       Send Quote
     </button>
