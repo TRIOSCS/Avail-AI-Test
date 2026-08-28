@@ -140,10 +140,21 @@
     {% if is_owner and is_draft %}
     <div class="mt-2 flex justify-end">{{ _line_edit_actions(el, item) }}</div>
     {% endif %}
-    <div class="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+    {# Full literal classes on both branches (never interpolate the number) — Tailwind's
+       JIT scanner needs the exact class string present in the source to generate it. #}
+    <div class="mt-3 grid grid-cols-2 {{ 'sm:grid-cols-5' if is_owner else 'sm:grid-cols-4' }} gap-3 text-sm">
       <div><span class="block text-secondary uppercase tracking-wide">Qty</span><span class="font-medium tabular-nums">{{ "{:,}".format(item.quantity) }}</span></div>
       <div><span class="block text-secondary uppercase tracking-wide">Condition</span><span class="font-medium">{{ item.condition or '—' }}</span></div>
       <div><span class="block text-secondary uppercase tracking-wide">Date code</span><span class="font-medium">{{ item.date_code or '—' }}</span></div>
+      {% if is_owner %}
+      {# R5: Ask (the seller's asking price) is owner-only — same boundary as Best offer. #}
+      <div>
+        <span class="block text-secondary uppercase tracking-wide">Ask</span>
+        {% if item.asking_price is not none %}
+        <span class="font-medium tabular-nums">${{ "{:,.4f}".format(item.asking_price|float) }}</span>
+        {% else %}<span class="text-gray-400">—</span>{% endif %}
+      </div>
+      {% endif %}
       <div>
         <span class="block text-secondary uppercase tracking-wide">Best offer</span>
         {# Owner-only: a non-owner broker must never see the current best COMPETING
@@ -205,6 +216,7 @@
             <th class="text-left">Part</th>
             <th class="text-right">Qty</th>
             <th class="text-left">Condition</th>
+            {% if is_owner %}<th class="text-right">Ask</th>{% endif %}
             <th class="text-right">Best offer</th>
             <th class="text-center">Offers</th>
             {% if is_owner and is_draft %}<th class="text-right">Edit</th>{% endif %}
@@ -226,6 +238,13 @@
             </td>
             <td class="text-right tabular-nums">{{ "{:,}".format(item.quantity) }}</td>
             <td>{{ item.condition or '—' }}</td>
+            {% if is_owner %}
+            <td class="text-right tabular-nums">
+              {% if item.asking_price is not none %}
+              <span class="tabular-nums">${{ "{:,.4f}".format(item.asking_price|float) }}</span>
+              {% else %}<span class="text-gray-400">—</span>{% endif %}
+            </td>
+            {% endif %}
             <td class="text-right tabular-nums">
               {# Owner-only best competing price (see single-card note above). #}
               {% if is_owner and item.best_offer_unit_price is not none %}

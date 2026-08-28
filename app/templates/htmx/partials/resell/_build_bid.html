@@ -56,6 +56,7 @@
             <th class="text-left">Part</th>
             <th class="text-right">Qty</th>
             <th class="text-left">Condition</th>
+            <th class="text-right">Ask</th>
             <th class="text-right">Best offer</th>
             <th class="text-right">Our offer</th>
           </tr>
@@ -75,6 +76,14 @@
             </td>
             <td class="text-right tabular-nums">{{ "{:,}".format(item.quantity) }}</td>
             <td>{{ item.condition or '—' }}</td>
+            <td class="text-right tabular-nums">
+              {# R5: Ask — this whole tab is owner-only (route-enforced), so no
+                 template-level gate is needed here (unlike the shared Lines/compare
+                 surfaces, which a non-owner can also reach). #}
+              {% if item.asking_price is not none %}
+              <span class="tabular-nums">${{ "{:,.4f}".format(item.asking_price|float) }}</span>
+              {% else %}<span class="text-gray-400">—</span>{% endif %}
+            </td>
             <td class="text-right tabular-nums">
               {% if item.best_offer_unit_price is not none %}
               <span class="font-semibold text-emerald-600">${{ "{:,.4f}".format(item.best_offer_unit_price|float) }}</span>
@@ -204,9 +213,40 @@
             Mark rejected
           </button>
         </div>
-      {% elif bid.status in ['accepted', 'rejected'] %}
+      {% elif bid.status == 'accepted' %}
+        <div class="w-full space-y-3">
+          <span class="text-secondary block">
+            Customer accepted{% if bid.responded_at %} on {{ bid.responded_at.strftime('%b %d, %Y') }}{% endif %}{% if bid.responded_by %} · logged by {{ bid.responded_by.name }}{% endif %}.
+          </span>
+
+          {# ── Customer PO reference capture (owner-only; C3 — ERP reference only,
+               AVAIL never owns the SO/PO lifecycle) ───────────────────────────── #}
+          <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+            <p class="text-xs font-semibold text-emerald-800 uppercase tracking-wide mb-2">Customer PO reference</p>
+            {% if bid.po_number %}
+            <p class="text-sm font-mono text-gray-900">{{ bid.po_number }}</p>
+            {% else %}
+            <form hx-post="/api/resell/{{ el.id }}/bid/{{ bid.id }}/reference"
+                  hx-target="#tab-build-{{ el.id }}" hx-swap="innerHTML"
+                  class="flex items-center gap-2">
+              <input type="text" name="po_number" maxlength="100" placeholder="e.g. PO-2026-0042"
+                     class="input text-sm flex-1" aria-label="Customer PO number">
+              <button type="submit" data-loading-disable class="btn-primary btn-sm">Save</button>
+            </form>
+            {% endif %}
+          </div>
+
+          {# ── Next steps — reference capture, not lifecycle ownership; the ERP owns
+               the SO (CLAUDE.md "Hard constraints" — nothing integrates with Acctivate) #}
+          <ol class="text-secondary list-decimal list-inside space-y-0.5">
+            <li>Cut the customer's sales order in the ERP.</li>
+            <li>Record the PO reference above once it's confirmed.</li>
+            <li>Award the winning offer(s) on the Offers tab to close out the lines.</li>
+          </ol>
+        </div>
+      {% elif bid.status == 'rejected' %}
         <span class="text-secondary">
-          Customer {{ bid.status }}{% if bid.responded_at %} on {{ bid.responded_at.strftime('%b %d, %Y') }}{% endif %}{% if bid.responded_by %} · logged by {{ bid.responded_by.name }}{% endif %}.
+          Customer rejected{% if bid.responded_at %} on {{ bid.responded_at.strftime('%b %d, %Y') }}{% endif %}{% if bid.responded_by %} · logged by {{ bid.responded_by.name }}{% endif %}.
           Re-assemble above to revise as a new revision.
         </span>
       {% endif %}

@@ -4,11 +4,14 @@
   container and never the filter bar / input the user is typing in (finding #17,
   the sightings/knowledge/parts pattern). The "Load more" row replaces itself with
   the next page (htmx click-to-load), keeping the query-level page cap.
-  Receives: cards [{list, display_title, customer_name, coverage_filled,
-            coverage_total, offer_count, hours_until, is_live, close_at_display}],
-            lens, stage, needs, q, has_more, next_offset, offset (empty state
-            renders only on the offset-0 page), can_see_customer (owner-only
-            coverage/offer gate — D2), can_post.
+  Receives: cards [{list, can_see_customer, display_title, customer_name, row_signal,
+            coverage_filled, coverage_total, offer_count, hours_until, is_live,
+            close_at_display}], lens, stage, needs, q, has_more, next_offset, offset
+            (empty state renders only on the offset-0 page), can_post.
+            can_see_customer is now PER CARD (c.can_see_customer, not a page-level
+            flag) — the manager "All" lens (C4) mixes the viewer's own rows with
+            everyone else's in one render, so the badge merge and coverage/offer gate
+            below read off each card, not one context-wide value.
   Called by: _lists.html (include), resell.resell_list_rows (search/Load-more swap).
 #}
 {% from "htmx/partials/shared/_macros.html" import status_badge, coverage_meter, time_text %}
@@ -28,14 +31,20 @@
       <p class="text-sm font-semibold text-gray-900 truncate">{{ c.display_title }}</p>
       {% if c.customer_name %}
       <p class="text-secondary truncate mt-0.5">{{ c.customer_name }}</p>
+      {% elif c.row_signal %}
+      {# R4: non-identifying content signal replaces the bare "Anonymized posting"
+         placeholder — line count, top manufacturers, condition (never identity). #}
+      <p class="text-secondary truncate mt-0.5">{{ c.row_signal }}</p>
       {% else %}
       <p class="text-secondary truncate mt-0.5 italic">Anonymized posting</p>
       {% endif %}
     </div>
     {# Finding #13: the open↔collecting split is an offer-existence signal (a list flips
        to collecting on its first inbound bid), so a non-owner sees a neutral 'open'
-       badge for a collecting list — same D2 predicate as the coverage/offer gates. #}
-    {% set badge_status = 'open' if (not can_see_customer and el.status == 'collecting') else el.status %}
+       badge for a collecting list — same D2 predicate as the coverage/offer gates.
+       Per-card (c.can_see_customer): the manager "All" lens renders the viewer's own
+       row true-to-status alongside foreign rows that still merge. #}
+    {% set badge_status = 'open' if (not c.can_see_customer and el.status == 'collecting') else el.status %}
     {{ status_badge(badge_status, status_map={
       'draft': 'bg-slate-50 text-slate-500 border-slate-200',
       'open': 'bg-sky-50 text-sky-600 border-sky-200',
@@ -47,11 +56,12 @@
     }) }}
   </div>
   <div class="mt-1.5 flex items-center gap-3 text-secondary">
-    {# Offer coverage + count are OWNER-PRIVATE (D2): the "Open to Me" (offerer) lens
-       must not learn how many lines already have offers or how many bids are in —
-       same competitive leak the per-line offer badge hides. The closing time below
-       stays public (offerers need the window). #}
-    {% if can_see_customer %}
+    {# Offer coverage + count are OWNER-PRIVATE (D2): the "Open to Me" (offerer) lens —
+       and a foreign card in the manager "All" lens — must not learn how many lines
+       already have offers or how many bids are in — same competitive leak the
+       per-line offer badge hides. The closing time below stays public (offerers need
+       the window). Per-card: the viewer's own row in the "All" lens still shows it. #}
+    {% if c.can_see_customer %}
     <span class="inline-flex items-center gap-1.5" title="Offer coverage: {{ c.coverage_filled }} of {{ c.coverage_total }} lines have an offer">
       {{ coverage_meter(c.coverage_filled, c.coverage_total) }}
       <span class="tabular-nums">{{ c.coverage_filled }}/{{ c.coverage_total }}</span>
@@ -100,6 +110,8 @@
       No lists match this filter.
     {% elif lens == 'open' %}
       No postings are open to you right now.
+    {% elif lens == 'all' %}
+      No posted lists yet.
     {% else %}
       <p>You haven't posted any excess lists yet.</p>
       {% if can_post %}

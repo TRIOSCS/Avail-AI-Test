@@ -42,9 +42,10 @@ from ..constants import (
     ExcessOfferStatus,
     ExcessOutreachChannel,
     ExcessOutreachStatus,
+    OfferLineMatchStatus,
 )
 from ..database import get_db
-from ..dependencies import require_access, require_fresh_token
+from ..dependencies import is_manager_or_admin, require_access, require_fresh_token
 from ..file_utils import ParseError, parse_tabular_file
 from ..models import Company, User, VendorCard, VendorResponse
 from ..models.excess import CustomerBid, ExcessLineItem, ExcessList, ExcessOffer, ExcessOfferLine, ExcessOutreach
@@ -228,16 +229,83 @@ def _display_title(el: ExcessList, *, can_see_customer: bool) -> str:
     return f"Excess listing #{el.id}"
 
 
-def _list_cards(db: Session, lists: list[ExcessList], *, can_see_customer: bool) -> list[dict]:
+def _row_signal(total: int, manufacturers: list[str], condition_summary: str | None) -> str | None:
+    """Format the non-owner row content signal (R4): '12 lines · Xilinx, TI · New'.
+
+    NON-IDENTIFYING only — line count, top distinct manufacturers, and a condition
+    summary. Never seller/customer identity, never coverage/offer_count/needs (those
+    stay owner-only nulls, unchanged by this task). Returns None for an empty list
+    (nothing to summarize yet).
+    """
+    if total <= 0:
+        return None
+    parts = [f"{total} line{'s' if total != 1 else ''}"]
+    if manufacturers:
+        parts.append(", ".join(manufacturers))
+    if condition_summary:
+        parts.append(condition_summary)
+    return " · ".join(parts)
+
+
+def _row_signal_data(db: Session, ids: list[int]) -> dict[int, dict]:
+    """One grouped query over ExcessLineItem for the page's list ids (no N+1).
+
+    Per-list manufacturer + condition tallies, reduced to the top-3 distinct
+    manufacturers (by line count) and a condition summary (the single shared condition,
+    or "Mixed" when the list carries more than one). Feeds ``_row_signal`` — the
+    non-owner row content signal (R4). Purely non-identifying: manufacturer/condition
+    are already part-level facts a non-owner sees once they open the list, not seller
+    identity.
+    """
+    if not ids:
+        return {}
+    rows = db.execute(
+        select(
+            ExcessLineItem.excess_list_id,
+            ExcessLineItem.manufacturer,
+            ExcessLineItem.condition,
+            func.count(ExcessLineItem.id),
+        )
+        .where(ExcessLineItem.excess_list_id.in_(ids))
+        .group_by(ExcessLineItem.excess_list_id, ExcessLineItem.manufacturer, ExcessLineItem.condition)
+    ).all()
+    by_list: dict[int, dict] = {}
+    for lid, manufacturer, condition, n in rows:
+        mfr_counts, cond_counts = by_list.setdefault(lid, ({}, {}))
+        n = int(n or 0)
+        if manufacturer:
+            mfr_counts[manufacturer] = mfr_counts.get(manufacturer, 0) + n
+        if condition:
+            cond_counts[condition] = cond_counts.get(condition, 0) + n
+
+    result: dict[int, dict] = {}
+    for lid, (mfr_counts, cond_counts) in by_list.items():
+        top_manufacturers = [m for m, _ in sorted(mfr_counts.items(), key=lambda kv: -kv[1])[:3]]
+        condition_summary = next(iter(cond_counts)) if len(cond_counts) == 1 else ("Mixed" if cond_counts else None)
+        result[lid] = {"manufacturers": top_manufacturers, "condition_summary": condition_summary}
+    return result
+
+
+def _list_cards(db: Session, lists: list[ExcessList], *, user_id: int) -> list[dict]:
     """Project many ExcessLists into left-list rows in a FIXED number of queries.
 
     Was one line-items ``.all()`` PLUS one filtered offer-count query PER list (~2N
     queries for N lists, re-run on every filter keystroke) — SQLite-masked, bit on live
-    PG. Now: one grouped coverage query (total + offered-line count per list) and one
-    grouped unactioned-offer-count query, keyed by ``excess_list_id``. ``can_see_customer``
-    gates the seller name (False for the offerer-facing "Open to Me" lens — pure whitelist,
-    never leak the customer); the same gate swaps the free-text ``title`` for a neutral
-    label (``_display_title``). Company is eager-loaded by the caller's query.
+    PG. Now: one grouped coverage query (total + offered-line count per list), one grouped
+    manufacturer/condition query (``_row_signal_data`` — the R4 non-owner content signal),
+    and one grouped unactioned-offer-count query, keyed by ``excess_list_id``.
+
+    ``can_see_customer`` is computed PER CARD (``el.owner_id == user_id``), not as a
+    single page-level flag — required by the manager "All" lens (C4, Decision G), which
+    mixes the viewer's own lists with every other POSTED list in ONE render: the
+    viewer's own cards must show full identity/coverage/offer data while every foreign
+    card in the SAME render stays anonymized, exactly like the "Open to Me" lens. For
+    "mine" and "open" the per-card value collapses to the old page-level constant (every
+    row in "mine" is owned, every row in "open" is not), so their rendered output is
+    byte-for-byte unchanged. The seller name and free-text ``title`` (``_display_title``)
+    are both gated on this same per-card flag. Company is eager-loaded by the caller's
+    query. ``row_signal`` is computed for every card regardless of ``can_see_customer`` —
+    it is non-identifying and IS the "All" lens's foreign-card content signal.
     """
     ids = [el.id for el in lists]
     if not ids:
@@ -256,6 +324,7 @@ def _list_cards(db: Session, lists: list[ExcessList], *, can_see_customer: bool)
             .all()
         )
     }
+    row_signal_data = _row_signal_data(db, ids)
     offer_counts: dict[int, int] = {
         lid: int(n or 0)
         for lid, n in (
@@ -271,17 +340,29 @@ def _list_cards(db: Session, lists: list[ExcessList], *, can_see_customer: bool)
 
     cards = []
     for el in lists:
+        can_see_customer = el.owner_id == user_id
         covered, total = coverage.get(el.id, (0, 0))
+        signal = row_signal_data.get(el.id, {})
         cards.append(
             {
                 "list": el,
+                # Per-card gate, consumed directly by _list_rows.html (badge merge +
+                # coverage/offer-count section) instead of the page-level context value —
+                # the "All" lens mixes owned and foreign rows in one render.
+                "can_see_customer": can_see_customer,
                 "display_title": _display_title(el, can_see_customer=can_see_customer),
                 "customer_name": (el.company.name if (can_see_customer and el.company) else None),
+                # R4: non-identifying row content signal for the non-owner card — line
+                # count, top-3 manufacturers, condition summary. Computed for every card
+                # (cheap, non-identifying); the template shows it only on the non-owner
+                # branch (where customer_name is None).
+                "row_signal": _row_signal(total, signal.get("manufacturers", []), signal.get("condition_summary")),
                 # Offer coverage + count are OWNER-PRIVATE (D2): a non-owner (the "Open to
-                # Me" lens) must not learn how many lines already have offers or how many
-                # bids are in — same competitive leak the per-line offer badge hides. Null
-                # them here so the data never reaches the template (defense-in-depth with
-                # the ``can_see_customer`` gate around the meter/badge in _lists.html).
+                # Me" lens, or a foreign card in the manager "All" lens) must not learn how
+                # many lines already have offers or how many bids are in — same competitive
+                # leak the per-line offer badge hides. Null them here so the data never
+                # reaches the template (defense-in-depth with the ``can_see_customer`` gate
+                # around the meter/badge in _list_rows.html).
                 "coverage_filled": covered if can_see_customer else None,
                 "coverage_total": total if can_see_customer else None,
                 "offer_count": offer_counts.get(el.id, 0) if can_see_customer else None,
@@ -371,6 +452,22 @@ def _require_owner(el: ExcessList, user: User) -> None:
         raise HTTPException(403, "Only the list owner can edit it")
 
 
+def _normalize_lens(lens: str, user: User) -> str:
+    """Validate the requested left-list lens, authorizing ``all`` (C4, Decision G).
+
+    ``mine``/``open`` are open to everyone (existing behavior; an unrecognized value
+    falls back to ``mine``). ``all`` — every POSTED list tenant-wide, a manager/admin
+    oversight lens — additionally requires ``is_manager_or_admin``; a non-manager
+    requesting it silently falls back to ``open`` (the lens it already has, not an
+    error and not a leak) rather than ``mine``, since ``all`` is shaped like ``open``
+    (many lists the requester doesn't own) and ``mine`` would silently narrow what
+    they asked to see.
+    """
+    if lens == "all":
+        return "all" if is_manager_or_admin(user) else "open"
+    return lens if lens in ("mine", "open") else "mine"
+
+
 def _detail_context(
     request: Request, db: Session, el: ExcessList, user: User, *, items: list[ExcessLineItem] | None = None
 ) -> dict:
@@ -452,7 +549,7 @@ async def resell_workspace(
     db: Session = Depends(get_db),
 ):
     """Split-panel Resell workspace shell: lens pills + stat strip + lists."""
-    lens = lens if lens in ("mine", "open") else "mine"
+    lens = _normalize_lens(lens, user)
     needs = needs if needs in ("offers", "take_all") else ""
     # The active triage token drives the single-highlight ring. The offer-based cards
     # (offers/take_all) live in the ``needs`` dimension; the status cards in ``stage`` —
@@ -470,6 +567,8 @@ async def resell_workspace(
             "q": q,
             "stats": _stat_strip(db, user),
             "can_post": excess_service.can_post(user),
+            # Gates the "All" lens pill (C4, Decision G) — manager/admin oversight only.
+            "is_manager": is_manager_or_admin(user),
         },
     )
 
@@ -500,6 +599,12 @@ def _list_rows_context(
     ``lens=mine`` → lists this user owns (seller identity visible).
     ``lens=open`` → posted lists owned by OTHERS that this user may offer on
     (customer-anonymized — pure whitelist, never the seller).
+    ``lens=all`` → EVERY posted list tenant-wide (manager/admin oversight, C4, Decision
+    G) — the caller's own rows AND everyone else's in one render; ``_list_cards``
+    decides per row whether the viewer may see identity (``el.owner_id == user.id``),
+    so a manager's own cards render full data while every foreign card stays
+    anonymized exactly like ``open``. ``_normalize_lens`` already downgrades a
+    non-manager's ``all`` request to ``open`` before this runs.
 
     ``stage`` filters on list STATUS (open/collecting/…). ``needs`` is the offer-based
     triage dimension the status filter can't express: ``needs=offers`` → lists with ≥1
@@ -510,7 +615,7 @@ def _list_rows_context(
     Rows are paged at the query level (``_LIST_PAGE_SIZE`` per page, ``offset`` from the
     "Load more" reveal); ``has_more``/``next_offset`` drive the Load-more row.
     """
-    lens = lens if lens in ("mine", "open") else "mine"
+    lens = _normalize_lens(lens, user)
     needs = needs if needs in ("offers", "take_all") else ""
     # Eager-load company so the per-card seller-name render (mine lens) doesn't lazy-load
     # one company per list (M8: kill the N+1s in the left list).
@@ -522,6 +627,18 @@ def _list_rows_context(
             ExcessList.owner_id != user.id,
             ExcessList.status.in_([s.value for s in _POSTED_STATUSES]),
         )
+        can_see_customer = False
+    elif lens == "all":
+        # Manager oversight (C4, Decision G): every POSTED list tenant-wide, no owner
+        # filter. Identity is still per-card gated below (_list_cards renders the
+        # viewer's own rows in full and everyone else's anonymized). The page-level
+        # ``can_see_customer`` stays False here — same as ``open`` — because this lens
+        # is MOSTLY foreign rows and every guard below (``needs`` reset, the
+        # open/collecting merge, part-match-only search) exists to keep the offer-
+        # existence oracle (D2) off the anonymized majority; the manager's own subset
+        # trades a little precision (no needs filter, no stage split, no title search)
+        # for one uniform, leak-safe query shape rather than a second code path.
+        query = query.filter(ExcessList.status.in_([s.value for s in _POSTED_STATUSES]))
         can_see_customer = False
     else:
         query = query.filter(ExcessList.owner_id == user.id)
@@ -535,6 +652,7 @@ def _list_rows_context(
     # competitive signal the coverage meter / amber badge / offer-count chip are hidden from
     # non-owners to protect. Gate it on the one predicate (``can_see_customer``) everywhere:
     # for a non-owner the filter never runs and the passed-through state never reflects it.
+    # The "all" lens shares the same gate (it is mostly foreign rows too).
     if not can_see_customer:
         needs = ""
 
@@ -570,13 +688,15 @@ def _list_rows_context(
             offer_lists = offer_lists.filter(ExcessOffer.scope == ExcessOfferScope.TAKE_ALL)
         query = query.filter(ExcessList.id.in_(offer_lists))
     if q:
-        if lens == "open":
+        if lens in ("open", "all"):
             # #10: a non-owner must NOT be able to search the free-text title — traders name
             # lists after the customer ("Acme Corp — surplus"), so title search is a
             # de-anonymization oracle (a hit/miss confirms the hidden customer name). Match
             # on PART IDENTITY instead: normalized MPN (query normalized the same way the
             # column is) or manufacturer — both indexed (models/excess.py) — via a subquery
             # on excess_list_id. The title ILIKE stays for the owner's mine lens only.
+            # "all" shares this branch (C4): it is mostly foreign rows too, so a raw title
+            # search would leak the same hidden customer text for them.
             conds = [ExcessLineItem.manufacturer.ilike(f"%{escape_like(q)}%", escape="\\")]
             norm_q = normalize_mpn_key(q)
             if norm_q:
@@ -597,7 +717,7 @@ def _list_rows_context(
     )
     has_more = len(lists) > _LIST_PAGE_SIZE
     lists = lists[:_LIST_PAGE_SIZE]
-    cards = _list_cards(db, lists, can_see_customer=can_see_customer)
+    cards = _list_cards(db, lists, user_id=user.id)
 
     return {
         "request": request,
@@ -1300,6 +1420,32 @@ async def resell_reject_bid(
     return set_toast(resp, "Bid marked rejected")
 
 
+@router.post("/api/resell/{list_id}/bid/{bid_id}/reference", response_class=HTMLResponse)
+async def resell_save_bid_reference(
+    request: Request,
+    list_id: int,
+    bid_id: int,
+    po_number: str = Form(""),
+    user: User = Depends(require_access(AccessKey.RESELL)),
+    db: Session = Depends(get_db),
+):
+    """Save the customer's PO reference captured against the accepted bid (owner-only;
+    C3 — ERP reference capture).
+
+    Free-text record only — AVAIL never validates or syncs it against Acctivate
+    (CLAUDE.md "Hard constraints"). Blank input clears a previously-saved value. Gated
+    exactly like the other bid tab actions above: ``_get_list_for_user`` +
+    ``_require_owner`` (a foreign private DRAFT 404-masks before the owner 403, finding
+    #48). Re-renders the Build-Bid tab with a toast.
+    """
+    el, _ = _get_list_for_user(db, list_id, user)
+    _require_owner(el, user)
+    bid_back_service.save_bid_reference(db, list_id=list_id, bid_id=bid_id, po_number=po_number)
+    el = excess_service.get_excess_list(db, list_id)
+    resp = template_response("htmx/partials/resell/_build_bid.html", _build_bid_context(request, db, el, user))
+    return set_toast(resp, "Reference saved")
+
+
 # ── Modal forms ──────────────────────────────────────────────────────
 
 
@@ -1346,7 +1492,8 @@ async def resell_offer_form(
     user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
-    """Render the submit-offer modal (per-line / take-all scope toggle)."""
+    """Render the submit-offer modal: posting lines (checkbox + qty + unit price per
+    line) plus an optional free-text row for a part not on the posting."""
     # Load-and-authorize: non-owners 404 on a draft (existence not revealed).
     el, is_owner = _get_list_for_user(db, list_id, user)
     if not excess_service.can_offer(user):
@@ -1361,6 +1508,12 @@ async def resell_offer_form(
     # modal exposes, not competitor-offer data (no can_see_customer leak). (id, name)
     # tuples only — the dropdown never needs the full Company entity.
     companies = db.execute(select(Company.id, Company.name).order_by(Company.name)).all()
+    # R1: every posted line, so the trader checks off exactly what they're offering on
+    # instead of blind free-text. Non-owner-safe — MPN/qty/condition only, no customer
+    # identity (mirrors what the Lines tab already shows a non-owner, _lines.html).
+    line_items = db.scalars(
+        select(ExcessLineItem).where(ExcessLineItem.excess_list_id == el.id).order_by(ExcessLineItem.id)
+    ).all()
     return template_response(
         "htmx/partials/resell/offer_form.html",
         {
@@ -1368,6 +1521,7 @@ async def resell_offer_form(
             "list": el,
             "display_title": _display_title(el, can_see_customer=is_owner),
             "companies": companies,
+            "line_items": line_items,
         },
     )
 
@@ -1843,11 +1997,27 @@ async def resell_submit_offer(
     user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
-    """Submit an inbound offer (per_line single-entry or take_all) via the service.
+    """Submit an inbound offer (per_line multi-line + optional free-text row, or
+    take_all) via the service — ONE ExcessOffer per submission.
 
-    This slice handles the single-line quick-add path; the paste/upload funnel reuses
-    the same preview grid (import_preview) and lands here per-row. The service enforces
-    can_offer + the self-offer guard.
+    R1: the offer form now renders every posting line as a checkbox + qty + unit-price
+    row (``line_item_ids`` — one checked value per line, paired with per-line
+    ``qty_<line_id>`` / ``price_<line_id>`` fields read off the raw form since FastAPI's
+    ``Form(...)`` params can't express a dynamic per-line field name). Each checked line
+    contributes a row keyed by ITS OWN part_number as ``mpn_raw`` — the exact same
+    part-number-only matcher ``submit_offer`` already runs (``_classify_mpn_match``) then
+    matches it straight back to that line (or, in the rare case two posted lines share a
+    normalized part number, ambiguous — unchanged existing behavior). The optional
+    free-text row (``mpn_raw``/``quantity``/…) covers a part NOT on the posting; it goes
+    through the same matcher and lands unmatched (queued, never dropped) unless it
+    happens to normalize onto a posted line. ONE ``submit_offer`` call carries every row,
+    so the service's single entry point (and its can_offer + self-offer guards) is
+    unchanged — this is still ONE ExcessOffer with N ExcessOfferLine children, per the
+    existing per_line/take_all shape, never one-offer-per-line.
+
+    The response toast is server-owned and honest about match state (replacing the old
+    unconditional client-side "Offer submitted"): "Matched N line(s)" and, when any row
+    didn't resolve, "— X not on the posting, flagged unmatched".
     """
     # Load-and-authorize: non-owners 404 on a draft (existence not revealed), and offers
     # are only accepted on a posted/published list — never on an unpublished draft.
@@ -1859,22 +2029,60 @@ async def resell_submit_offer(
 
     lines = None
     if scope == ExcessOfferScope.PER_LINE:
-        qty = _to_int(quantity)
-        # L2: reject a non-positive quantity here (400) — otherwise it reaches the
-        # ExcessOfferLine @validates("quantity") ValueError as an unhandled 500.
-        if not mpn_raw.strip() or qty is None or qty <= 0:
-            raise HTTPException(400, "Per-line offer needs a part number and a positive quantity")
-        lines = [
+        form = await request.form()
+        checked_ids = [int(v) for v in form.getlist("line_item_ids") if str(v).strip().isdigit()]
+        # Never trust a checked id blind — it must actually belong to THIS list (a
+        # tampered/stale id from another list/tab is silently skipped, not honored).
+        posted_by_id = (
             {
-                "mpn_raw": mpn_raw.strip(),
-                "quantity": qty,
-                "unit_price": _to_decimal(unit_price),
-                "lead_time_days": _to_int(lead_time_days),
-                "terms_text": terms_text or None,
+                li.id: li
+                for li in db.scalars(
+                    select(ExcessLineItem).where(
+                        ExcessLineItem.excess_list_id == list_id, ExcessLineItem.id.in_(checked_ids)
+                    )
+                ).all()
             }
-        ]
+            if checked_ids
+            else {}
+        )
 
-    excess_service.submit_offer(
+        lines = []
+        for line_id in checked_ids:
+            li = posted_by_id.get(line_id)
+            if li is None:
+                continue
+            row_qty = _to_int(form.get(f"qty_{line_id}", ""))
+            if row_qty is None or row_qty <= 0:
+                continue  # checked but no valid qty entered — skip the row, not the whole submit
+            lines.append(
+                {
+                    "mpn_raw": li.part_number,
+                    "quantity": row_qty,
+                    "unit_price": _to_decimal(form.get(f"price_{line_id}", "")),
+                }
+            )
+
+        # Optional free-text row for a part not on the posting.
+        if mpn_raw.strip():
+            qty = _to_int(quantity)
+            # L2: reject a non-positive quantity here (400) — otherwise it reaches the
+            # ExcessOfferLine @validates("quantity") ValueError as an unhandled 500.
+            if qty is None or qty <= 0:
+                raise HTTPException(400, "The free-text part needs a positive quantity")
+            lines.append(
+                {
+                    "mpn_raw": mpn_raw.strip(),
+                    "quantity": qty,
+                    "unit_price": _to_decimal(unit_price),
+                    "lead_time_days": _to_int(lead_time_days),
+                    "terms_text": terms_text or None,
+                }
+            )
+
+        if not lines:
+            raise HTTPException(400, "Select at least one posting line or enter a part number")
+
+    offer = excess_service.submit_offer(
         db,
         list_id=list_id,
         user=user,
@@ -1886,7 +2094,18 @@ async def resell_submit_offer(
     )
 
     el = excess_service.get_excess_list(db, list_id)
-    return await resell_offers(request, list_id=el.id, user=user, db=db)
+    resp = await resell_offers(request, list_id=el.id, user=user, db=db)
+
+    if scope == ExcessOfferScope.PER_LINE:
+        offer_lines = db.scalars(select(ExcessOfferLine).where(ExcessOfferLine.offer_id == offer.id)).all()
+        matched = sum(1 for ol in offer_lines if ol.match_status == OfferLineMatchStatus.MATCHED)
+        unmatched = len(offer_lines) - matched
+        message = f"Matched {matched} line{'s' if matched != 1 else ''}"
+        if unmatched:
+            message += f" — {unmatched} not on the posting, flagged unmatched"
+    else:
+        message = "Take-all offer submitted"
+    return set_toast(resp, message)
 
 
 @router.post("/api/resell/{list_id}/offers/{offer_id}/award", response_class=HTMLResponse)
@@ -1982,6 +2201,37 @@ async def resell_withdraw_offer(
         "htmx/partials/resell/_award_response.html", _award_response_context(request, db, el, user)
     )
     return set_toast(resp, "Offer withdrawn")
+
+
+@router.post("/api/resell/{list_id}/offers/{offer_id}/reference", response_class=HTMLResponse)
+async def resell_save_offer_reference(
+    request: Request,
+    list_id: int,
+    offer_id: int,
+    sales_order_number: str = Form(""),
+    user: User = Depends(require_access(AccessKey.RESELL)),
+    db: Session = Depends(get_db),
+):
+    """Save the ERP sales-order reference captured against a won offer (owner-only; C3 —
+    ERP reference capture).
+
+    Free-text record only — AVAIL never validates or syncs it against Acctivate
+    (CLAUDE.md "Hard constraints"). Blank input clears a previously-saved value. Gated
+    via ``_get_list_for_user`` + ``_require_owner``, then the same cross-list 404 guard
+    as ``resell_award_offer``/``resell_unaward_offer`` (finding #32 — existence not
+    revealed across lists). Re-renders the Offers tab + OOB lines/chips.
+    """
+    el, _ = _get_list_for_user(db, list_id, user)
+    _require_owner(el, user)
+    offer = db.get(ExcessOffer, offer_id)
+    if offer is None or offer.excess_list_id != list_id:
+        raise HTTPException(404, f"Offer {offer_id} not found on list {list_id}")
+    excess_service.save_offer_reference(db, offer_id=offer_id, sales_order_number=sales_order_number)
+    el = excess_service.get_excess_list(db, list_id)
+    resp = template_response(
+        "htmx/partials/resell/_award_response.html", _award_response_context(request, db, el, user)
+    )
+    return set_toast(resp, "Reference saved")
 
 
 @router.post("/api/resell/{list_id}/offer-lines/{offer_line_id}/assign", response_class=HTMLResponse)

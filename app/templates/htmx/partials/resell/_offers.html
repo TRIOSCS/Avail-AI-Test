@@ -64,6 +64,7 @@
           <th class="text-right">Qty</th>
           <th class="text-center">Lead</th>
           <th class="text-left">Terms</th>
+          <th class="text-left">Match</th>
         </tr>
       </thead>
       <tbody>
@@ -74,6 +75,16 @@
           <td class="text-right tabular-nums">{{ "{:,}".format(line.quantity) }}</td>
           <td class="text-center">{{ (line.lead_time_days|string ~ 'd') if line.lead_time_days is not none else '—' }}</td>
           <td class="text-gray-500">{{ line.terms_text or '—' }}</td>
+          {# R1: honest match feedback on the trader's own offer — a matched line stays
+             quiet (it landed on the posting); unmatched/ambiguous rows get a chip so the
+             trader knows it's queued for manual resolution, not silently lost. #}
+          <td>
+            {% if line.match_status != 'matched' %}
+            <span class="rounded bg-rose-50 px-1.5 py-0.5 text-[11px] font-medium text-rose-600 border border-rose-200 whitespace-nowrap">
+              {{ 'ambiguous match' if line.match_status == 'ambiguous' else 'not on the posting' }}
+            </span>
+            {% else %}<span class="text-gray-300">—</span>{% endif %}
+          </td>
         </tr>
         {% endfor %}
       </tbody>
@@ -136,6 +147,17 @@
     <div class="mt-3 pt-3 border-t flex items-center justify-end gap-2 {{ 'border-emerald-200' if won else 'border-violet-200' }}">
       {% if won %}
       <span class="text-xs font-semibold text-emerald-700">Awarded ✓ — the whole list</span>
+      {% if offer.sales_order_number %}
+      <span class="text-xs text-gray-500 font-mono">SO {{ offer.sales_order_number }}</span>
+      {% else %}
+      <form hx-post="/api/resell/{{ el.id }}/offers/{{ offer.id }}/reference"
+            hx-target="#tab-offers-{{ el.id }}" hx-swap="innerHTML"
+            class="inline-flex items-center gap-1">
+        <input type="text" name="sales_order_number" placeholder="SO #" maxlength="100"
+               aria-label="Sales order reference" class="text-xs border border-brand-200 rounded px-1.5 py-0.5 w-24">
+        <button type="submit" data-loading-disable class="btn-ghost btn-sm">Save</button>
+      </form>
+      {% endif %}
       <button hx-post="/api/resell/{{ el.id }}/offers/{{ offer.id }}/unaward"
               hx-target="#tab-offers-{{ el.id }}" hx-swap="innerHTML"
               hx-confirm="Reverse this take-all award? Every line returns to the pool."
@@ -200,7 +222,25 @@
             <td class="text-right tabular-nums">{{ "{:,}".format(e.line.quantity) }}</td>
             <td class="text-center">{{ (e.line.lead_time_days|string ~ 'd') if e.line.lead_time_days is not none else '—' }}</td>
             <td class="text-gray-500">{{ e.line.terms_text or '—' }}</td>
-            <td class="text-center">{{ _offer_action(el, item, e.offer, is_owner) }}</td>
+            <td class="text-center">
+              {{ _offer_action(el, item, e.offer, is_owner) }}
+              {% if won %}
+              <div class="mt-1">
+                {% if e.offer.sales_order_number %}
+                <span class="text-xs text-gray-500 font-mono">SO {{ e.offer.sales_order_number }}</span>
+                {% else %}
+                <form hx-post="/api/resell/{{ el.id }}/offers/{{ e.offer.id }}/reference"
+                      hx-target="#tab-offers-{{ el.id }}" hx-swap="innerHTML"
+                      class="inline-flex items-center gap-1">
+                  <input type="text" name="sales_order_number" placeholder="SO #" maxlength="100"
+                         aria-label="Sales order reference for {{ item.part_number }}"
+                         class="text-xs border border-brand-200 rounded px-1.5 py-0.5 w-20">
+                  <button type="submit" data-loading-disable class="btn-ghost btn-sm">Save</button>
+                </form>
+                {% endif %}
+              </div>
+              {% endif %}
+            </td>
           </tr>
           {% endfor %}
         </tbody>

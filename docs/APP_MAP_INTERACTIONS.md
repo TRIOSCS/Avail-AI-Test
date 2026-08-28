@@ -2499,6 +2499,30 @@ card counts open+collecting (a list flips open→collecting on its first offer b
 live), so it links to `stage=live` to match its count; the strict `open` pill in `_lists.html`
 keeps meaning EXACTLY `status=open`.
 
+**ERP references, offer-lines modal, row signal, Ask, manager "All" lens (Phase-3 Tranche
+F).** Migration 216 adds two nullable `String(100)` reference-only columns — `customer_bids
+.po_number` and `excess_offers.sales_order_number` — that a trader free-types once the ERP
+document exists (`POST .../bid/{bid_id}/reference`, `.../offers/{offer_id}/reference`); AVAIL
+never validates or syncs them (Hard constraints — nothing integrates with Acctivate). The
+accepted-bid pane in `_build_bid.html` pairs the PO-capture box with a post-accept next-step
+list (cut the SO in the ERP → record the PO ref → award the winning offers) so the trader
+always knows what AVAIL still expects. `offer_form.html` (the submit-offer modal) now renders
+every posting `ExcessLineItem` as a checkbox + qty + unit-price row instead of blind free-text,
+plus a collapsed "part not on this posting" fallback explicitly flagged unmatched for manual
+resolution; the response toast is server-owned (`close_modal_on_success()`) so it states the
+honest match outcome instead of an optimistic client-fired one. `_list_cards` (router) computes
+a non-identifying `row_signal` (line count + top-3 manufacturers + condition summary, one
+grouped `_row_signal_data` query, no N+1) that `_list_rows.html` shows on a non-owner card in
+place of the bare "Anonymized posting" placeholder. `asking_price` gets an owner-only "Ask"
+column in `_lines.html` (single-card + table view) and `offer_compare.html`, gated the same way
+as "Best offer". The manager "All" lens (`lens=all`, pill gated by `is_manager_or_admin` via
+`_normalize_lens`, silently downgrading a non-manager's request to `open` rather than leaking
+or erroring) lists every POSTED list tenant-wide in one render; `_list_cards` was reworked to
+take `user_id` and compute `can_see_customer` PER CARD (`el.owner_id == user_id`) instead of
+one page-level flag, so a manager's own cards render full identity/coverage/offer data while
+every foreign card in the same render stays anonymized exactly like `open` — the triage glance
+strip stays scoped to "My lists" under `all` (labeled) so its counts never read as team-wide.
+
 **RS-4 reply tracking (inbound half).** The send path already stamps
 `ExcessOutreach.graph_conversation_id`/`graph_message_id` (migration 133); RS-4 wires the
 INBOUND half with NO new migration. `email_service.poll_inbox` gained Tier 2.5 (see §4):

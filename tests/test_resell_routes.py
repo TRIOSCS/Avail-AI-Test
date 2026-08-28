@@ -162,7 +162,11 @@ def test_lists_mine_shows_customer(client, db_session, trader_user, posted_list)
 
 def test_lists_open_lens_hides_customer(client, db_session, trader_user, posted_list):
     """Open-to-Me lens (offerer view) lists the posting but NEVER the seller name —
-    including via the owner's free-text title (finding H2)."""
+    including via the owner's free-text title (finding H2).
+
+    Task 4 (R4): the row shows a non-identifying content signal (line count + condition)
+    in place of the old bare "Anonymized posting" placeholder.
+    """
     # The default client user is the buyer fixture (!= owner) → sees it under 'open'.
     resp = client.get("/v2/partials/resell/lists?lens=open")
     assert resp.status_code == 200
@@ -170,7 +174,8 @@ def test_lists_open_lens_hides_customer(client, db_session, trader_user, posted_
     assert posted_list.title not in body  # raw free-text title is anonymized, not leaked
     assert f"Excess listing #{posted_list.id}" in body  # neutral, id-derived label instead
     assert "Acme Electronics" not in body  # customer hidden from non-owner
-    assert "Anonymized" in body
+    assert "2 lines" in body  # R4 content signal (posted_list has 2 lines, condition New)
+    assert "New" in body
 
 
 def test_open_lens_title_never_leaks_customer_via_free_text(client, db_session, trader_user, test_company):
@@ -1215,7 +1220,7 @@ def test_list_cards_batched_coverage_and_offer_count(db_session, trader_user, te
     )
     db_session.commit()
 
-    cards = _list_cards(db_session, [el], can_see_customer=True)
+    cards = _list_cards(db_session, [el], user_id=trader_user.id)
     assert len(cards) == 1
     card = cards[0]
     assert card["coverage_total"] == 2
@@ -1228,7 +1233,7 @@ def test_list_cards_empty_input():
     """No lists → no cards, no queries."""
     from app.routers.resell import _list_cards
 
-    assert _list_cards(None, [], can_see_customer=True) == []
+    assert _list_cards(None, [], user_id=1) == []
 
 
 # ── Triage cards: offers-to-review / take-all now filter (dead-control fix) ──

@@ -21,7 +21,14 @@
   <div class="flex items-center justify-between mb-4">
     <div>
       <h2 class="h2 font-mono">{{ item.part_number }}</h2>
-      <p class="text-sm text-gray-500">{{ "{:,}".format(item.quantity) }} pcs · {{ item.condition or '—' }}</p>
+      <p class="text-sm text-gray-500">
+        {{ "{:,}".format(item.quantity) }} pcs · {{ item.condition or '—' }}
+        {# R5: Ask (the seller's asking price) is owner-only, same boundary as the rest
+           of this owner-only comparison modal. #}
+        {% if is_owner and item.asking_price is not none %}
+        · Ask ${{ "{:,.4f}".format(item.asking_price|float) }}
+        {% endif %}
+      </p>
     </div>
     <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-amber-100 text-amber-700 tabular-nums">{{ rows|length }} offer{{ 's' if rows|length != 1 }}</span>
   </div>
