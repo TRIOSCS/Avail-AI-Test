@@ -122,7 +122,11 @@
   {% endif %}
   {% endmacro %}
 
-  {% if line.status == 'awaiting_po' %}
+  {# ── A9: the confirm-PO workspace — paste-import + AI banner + the confirm form
+       itself. Shown outright to the assigned buyer; behind a manager/admin's
+       "Act for the buyer" expander otherwise. Factored into a macro so the two call
+       sites below never drift apart. ── #}
+  {% macro po_confirm_workspace() %}
   {# ── Paste PO confirmation (inbound twin of Copy-for-ERP): AI pre-fills the
        confirm form below for REVIEW — its own form (forms can't nest), no DB write,
        the buyer still submits Confirm PO. ── #}
@@ -219,6 +223,33 @@
       <button type="submit" data-loading-disable class="btn-primary btn-sm">Confirm PO</button>
     </div>
   </form>
+  {% endmacro %}
+
+  {% if line.status == 'awaiting_po' %}
+  {% set assigned_buyer_name = (assigned_buyer.name or assigned_buyer.email) if assigned_buyer else 'nobody yet' %}
+  {% if is_assigned_buyer %}
+  {{ po_confirm_workspace() }}
+  {% elif is_manager_or_admin %}
+  {# ── Manager/admin, not the assigned buyer: read-only card + an explicit
+       act-for-buyer expander (never silently pre-open — this is a deliberate
+       stand-in for a buyer who is out, not the default manager path). ── #}
+  <div class="rounded-lg border border-line-base bg-gray-50 p-3 space-y-2" x-data="{ actingForBuyer: false }">
+    <div class="text-sm font-semibold text-gray-700">Awaiting PO — assigned to {{ assigned_buyer_name }}</div>
+    <button type="button" @click="actingForBuyer = !actingForBuyer"
+            class="text-xs font-medium text-accent-600 hover:text-accent-700 underline decoration-dashed"
+            x-text="actingForBuyer ? 'Hide act-for-buyer form' : 'Act for the buyer'">Act for the buyer</button>
+    <div x-show="actingForBuyer" x-cloak x-collapse class="pt-1 space-y-3">
+      {{ po_confirm_workspace() }}
+    </div>
+  </div>
+  {% else %}
+  {# ── Any other viewer with plan access (e.g. sales/trader co-owner): read-only —
+       A9 closes the gap where anyone with plan access could confirm someone else's
+       PO. ── #}
+  <div class="rounded-lg border border-line-base bg-gray-50 p-3">
+    <div class="text-sm font-semibold text-gray-700">Awaiting PO — assigned to {{ assigned_buyer_name }}</div>
+  </div>
+  {% endif %}
 
   {{ flag_issue_form() }}
 

@@ -729,6 +729,10 @@ def render_po_pane(
             "can_verify": can_verify_po_line(user, line),
             "can_resource": _can_resource(user),
             "is_assigned_buyer": line.buyer_id == user.id,
+            # A9: the non-assigned pane's read-only card ("Awaiting PO — assigned to
+            # {buyer}") + the manager/admin "Act for the buyer" expander gate.
+            "assigned_buyer": line.buyer,
+            "is_manager_or_admin": is_manager_or_admin(user),
             "line_index": line_index,
             "line_total": len(sibling_ids),
             "partial_ship": (qp.sales_authorized_ship_partial if qp is not None else None),
@@ -808,11 +812,12 @@ async def approvals_po_parse_confirmation(
     filled (advisory mismatch warnings included).
 
     No DB write — the buyer reviews every field and still submits Confirm PO themselves.
-    Ownership, line-status, and a per-user throttle all gate BEFORE the paid AI call.
-    Failure paths return a small #po-paste-result fragment (the pasted text and any
-    typed values stay untouched); success retargets the full #aw-pane.
+    Ownership, the assigned-buyer/manager gate, line-status, and a per-user throttle all
+    gate BEFORE the paid AI call. Failure paths return a small #po-paste-result fragment
+    (the pasted text and any typed values stay untouched); success retargets the full
+    #aw-pane.
     """
-    from ...dependencies import get_buyplan_for_user
+    from ...dependencies import get_buyplan_for_user, is_manager_or_admin
 
     line = db.get(BuyPlanLine, line_id, options=[joinedload(BuyPlanLine.offer), joinedload(BuyPlanLine.requirement)])
     if line is None:
@@ -820,6 +825,11 @@ async def approvals_po_parse_confirmation(
     # Ownership BEFORE any AI work (mirrors approvals_po_sent_check): a restricted
     # non-owner 404s here, never burning a Claude call on a line they can't view.
     get_buyplan_for_user(db, user, line.buy_plan_id)
+    # A9: this route never calls confirm_po (no DB write — it only pre-fills the form),
+    # so it needs its own copy of the same buyer-or-manager gate, or a non-assigned
+    # viewer with plan access could burn a paid AI call on someone else's line.
+    if not (line.buyer_id == user.id or is_manager_or_admin(user)):
+        raise HTTPException(403, "Only the line's buyer or a manager can confirm its PO.")
     if line.status != BuyPlanLineStatus.AWAITING_PO.value:
         # The line moved on (e.g. confirmed in another tab) — the pane's current
         # state IS the feedback; no AI call for a form that no longer renders.

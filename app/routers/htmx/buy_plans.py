@@ -858,6 +858,8 @@ async def buy_plan_confirm_po_partial(
         log_field_edits(db, user=user, buy_plan_id=plan_id, buy_plan_line_id=line_id, edits=edits)
         db.commit()
         await run_notify_bg(notify_po_confirmed, plan_id, line_id=line_id)
+    except PermissionError as e:
+        raise HTTPException(403, str(e)) from e
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
 
