@@ -3933,6 +3933,15 @@ merges different-`account_owner_id` accounts) are reused AS-IS.
   clean. **create_company no longer silently stores the AI-typo-corrected name** — it
   keeps the rep's typed name (the AI fix still strengthens the duplicate check), making
   naming suggest-only end-to-end.
+- **Unmatched Activity review card (admin):** a fourth Data Ops card, lazy-loaded via
+  `GET /v2/partials/data-ops/unmatched-activities` (`require_admin`, same gate as the
+  JSON queue in `app/routers/v13_features/activity.py`) using the `lazy_body` idiom
+  (like Connector Health), `hx-push-url="false"` since push-url is inherited from the
+  tab nav. Each row **Attribute**s (to a company or vendor, via
+  `POST .../{activity_id}/attribute`, `activity_service.attribute_activity`) or
+  **Dismiss**es (`POST .../{activity_id}/dismiss`, `dismiss_activity`); both re-render
+  just the card (`_render_unmatched_activities` → `_unmatched_activities.html`) with a
+  toast, never a 500.
 
 ### 10a. Global contact lists + vendor stock-list upload UI
 
