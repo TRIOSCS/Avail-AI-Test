@@ -8,10 +8,22 @@
    button used (/v2/partials/quotes/{id}/send) — absent/blank fields resolve exactly as
    before (site contact, no CC). On success the route swaps #main-content with the
    refreshed quote detail and fires a showToast HX-Trigger naming the recipient; this
-   form only needs to close itself on success (close_modal_on_success), never its own toast.
+   form only needs to close itself on success, never its own toast.
+
+   Fix round 1 (B1 follow-up): the route's error paths (DNC block, QuoteSendError) are
+   also 200 OK — toast_error_response sets HX-Reswap: none so the failure toast fires
+   without wiping #main-content — so the shared close_modal_on_success() macro (which
+   closes on ANY htmx "successful" 2xx) would close this dialog on a REJECTED send too,
+   silently discarding the typed override_email/override_name/cc with no retry. This
+   form instead closes only when BOTH htmx's own `successful` flag is true (still a
+   floor against a genuinely-failed request — a network error, an unhandled 500) AND
+   that same HX-Reswap: none header is ABSENT (rules out the documented 200-but-
+   rejected error contract). Any failure — network, 5xx, or the documented DNC/
+   QuoteSendError 200 — leaves the dialog open with the error toast already visible.
+   Route's 200-based error contract is unchanged — other callers of
+   /v2/partials/quotes/{id}/send still get exactly the same response.
    Called by: GET /v2/partials/quotes/{quote_id}/send-dialog
 #}
-{% from "htmx/partials/shared/_macros.html" import close_modal_on_success -%}
 <div class='p-5'>
   <h3 id="modal-title" class='text-sm font-semibold text-gray-900 mb-1'>Send Quote</h3>
   <p class='text-secondary mb-4'>{{ quote.quote_number }} &nbsp;&middot;&nbsp; {{ subject }}</p>
@@ -43,7 +55,7 @@
 
   <form hx-post='/v2/partials/quotes/{{ quote.id }}/send'
         hx-target='#main-content'
-        {{ close_modal_on_success() }}
+        hx-on::after-request="if(event.detail.successful && event.detail.xhr.getResponseHeader('HX-Reswap') !== 'none') this.dispatchEvent(new CustomEvent('close-modal', {bubbles: true}))"
         data-loading-disable
         class='space-y-3'>
 

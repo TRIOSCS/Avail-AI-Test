@@ -218,3 +218,65 @@ async def test_service_empty_cc_is_none_no_cc_recipients_key(
     assert mock_post.called
     payload = mock_post.call_args.args[1]
     assert "ccRecipients" not in payload["message"]
+
+
+# ── Fix round 1 (B1 follow-up): dialog must NOT close on a rejected send ────
+#
+# close_modal_on_success() closes on ANY htmx "successful" 2xx — but the send route's
+# error paths (DNC block, QuoteSendError) are ALSO 200 (HX-Reswap: none + a showToast
+# error, so the failure toast fires without wiping #main-content). The dialog form no
+# longer uses that shared macro; it keys its own close on the same HX-Reswap: none
+# signal so a rejected send leaves it open (with the typed override_email/
+# override_name/cc intact) instead of silently discarding the user's input.
+
+
+def test_send_success_response_has_no_hx_reswap_none_header(
+    client, db_session, test_requisition, test_customer_site, test_user
+):
+    """The signal the dialog's close guard keys on: a genuine send carries NO
+    HX-Reswap: none header (so the guard's `getResponseHeader(...) !== 'none'` closes
+    the dialog)."""
+    quote = _draft_quote(db_session, test_requisition, test_customer_site, test_user, number="Q-2026-CLOSEOK")
+
+    resp = client.post(f"/v2/partials/quotes/{quote.id}/send")
+
+    assert resp.status_code == 200
+    assert resp.headers.get("HX-Reswap") != "none"
+    db_session.refresh(quote)
+    assert quote.status == QuoteStatus.SENT
+
+
+def test_send_dnc_blocked_response_has_hx_reswap_none_header(
+    client, db_session, test_requisition, test_customer_site, test_user
+):
+    """A DNC-blocked send (still HTTP 200) carries HX-Reswap: none — the exact signal
+    the dialog's close guard checks to stay OPEN instead of discarding the user's typed
+    overrides."""
+    test_customer_site.do_not_contact = True
+    db_session.commit()
+    quote = _draft_quote(db_session, test_requisition, test_customer_site, test_user, number="Q-2026-CLOSEDNC")
+
+    resp = client.post(f"/v2/partials/quotes/{quote.id}/send")
+
+    assert resp.status_code == 200
+    assert resp.headers.get("HX-Reswap") == "none"
+    trigger = json.loads(resp.headers["HX-Trigger"])
+    assert trigger["showToast"]["type"] == "error"
+    db_session.refresh(quote)
+    assert quote.status == "draft"
+
+
+def test_send_dialog_form_guards_close_on_hx_reswap_and_successful(
+    client, db_session, test_requisition, test_customer_site, test_user
+):
+    """The dialog's <form> must NOT use the bare close_modal_on_success() idiom (which
+    closes on ANY 2xx) — it needs its own guard checking both htmx's `successful` flag
+    AND the absence of the HX-Reswap: none error signal before closing."""
+    quote = _draft_quote(db_session, test_requisition, test_customer_site, test_user, number="Q-2026-CLOSEGUARD")
+
+    resp = client.get(f"/v2/partials/quotes/{quote.id}/send-dialog")
+
+    assert resp.status_code == 200
+    assert "event.detail.successful" in resp.text
+    assert "getResponseHeader('HX-Reswap')" in resp.text
+    assert "!== 'none'" in resp.text
