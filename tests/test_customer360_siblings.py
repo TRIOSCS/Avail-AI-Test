@@ -90,3 +90,65 @@ class TestSiblingPooling:
         with patch("app.utils.claude_client.claude_json", new_callable=AsyncMock, side_effect=RuntimeError("boom")):
             out = _run(generate_account_summary(test_company.id, db_session))
         assert out == {}
+
+
+class TestAccountSummaryPanel:
+    def test_get_renders_generate_button(self, client, db_session, test_company, test_user):
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
+        resp = client.get(f"/v2/partials/customers/{test_company.id}/account-summary", headers={"HX-Request": "true"})
+        assert resp.status_code == 200
+        assert "Generate" in resp.text
+        assert f"/v2/partials/customers/{test_company.id}/account-summary" in resp.text
+
+    def test_post_renders_summary_with_sibling_banner(self, client, db_session, test_company, test_user):
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
+        fake = {
+            "situation": "Solid account.",
+            "development": "Growing.",
+            "next_steps": ["Call the buyer"],
+            "sibling_accounts": [{"id": 9, "name": "Sib Co", "owner": "Pat"}],
+        }
+        with patch(
+            "app.services.account_summary_service.generate_account_summary", new_callable=AsyncMock, return_value=fake
+        ):
+            resp = client.post(
+                f"/v2/partials/customers/{test_company.id}/account-summary", headers={"HX-Request": "true"}
+            )
+        assert resp.status_code == 200
+        assert "Solid account." in resp.text
+        assert "Includes 1 sibling account" in resp.text
+        assert "Sib Co" in resp.text and "Pat" in resp.text
+
+    def test_post_ai_unavailable_friendly(self, client, db_session, test_company, test_user):
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
+        with patch(
+            "app.services.account_summary_service.generate_account_summary", new_callable=AsyncMock, return_value={}
+        ):
+            resp = client.post(
+                f"/v2/partials/customers/{test_company.id}/account-summary", headers={"HX-Request": "true"}
+            )
+        assert resp.status_code == 200
+        assert "unavailable" in resp.text.lower()
+
+    def test_post_rate_limited_friendly(self, client, db_session, test_company, test_user):
+        test_company.account_owner_id = test_user.id
+        db_session.commit()
+        with patch("app.routers.htmx.insights_views.check_rate_limit", return_value=False):
+            resp = client.post(
+                f"/v2/partials/customers/{test_company.id}/account-summary", headers={"HX-Request": "true"}
+            )
+        assert resp.status_code == 200
+        assert "wait" in resp.text.lower()
+
+    def test_non_manager_gets_forbidden_card(self, client, db_session, test_company):
+        # client's test_user (buyer) neither owns nor manages test_company
+        resp = client.get(f"/v2/partials/customers/{test_company.id}/account-summary", headers={"HX-Request": "true"})
+        assert resp.status_code == 200
+        assert "restricted" in resp.text.lower() or "not available" in resp.text.lower()
+
+    def test_missing_company_404(self, client, db_session):
+        resp = client.get("/v2/partials/customers/999999/account-summary", headers={"HX-Request": "true"})
+        assert resp.status_code == 404

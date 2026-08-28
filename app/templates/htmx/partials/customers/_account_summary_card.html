@@ -1,0 +1,50 @@
+{# _account_summary_card.html — one-tap AI account summary (sibling-pooled).
+   Receives: company, mode (idle|ready|unavailable|throttled|forbidden),
+   summary (situation/development/next_steps), sibling_accounts [{id,name,owner}].
+   Called by: account-summary routes in routers/htmx/insights_views.py. #}
+<div class="account-summary-card rounded-lg border border-brand-200 bg-white p-4">
+  <div class="flex items-center justify-between gap-3">
+    <p class="text-xs font-semibold uppercase tracking-wide text-gray-500">Account summary
+      <span class="ml-1 text-[11px] uppercase tracking-wide text-amber-600"
+            title="AI-generated from CRM data — verify before acting.">AI</span>
+    </p>
+    {% if mode != 'forbidden' %}
+    <button type="button"
+            hx-post="/v2/partials/customers/{{ company.id }}/account-summary"
+            hx-target="closest .account-summary-card"
+            hx-swap="outerHTML"
+            hx-push-url="false"
+            class="text-xs text-brand-600 hover:text-brand-700 cursor-pointer">
+      {% if mode == 'ready' %}Regenerate{% else %}Generate{% endif %}
+    </button>
+    {% endif %}
+  </div>
+
+  {% if sibling_accounts %}
+  <div class="mt-2 rounded border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-800">
+    Includes {{ sibling_accounts | length }} sibling account{{ 's' if sibling_accounts | length != 1 }}:
+    {% for s in sibling_accounts %}{{ s.name }} (owner: {{ s.owner }}){% if not loop.last %}, {% endif %}{% endfor %}
+    — same customer under separate rows; accounts stay unmerged.
+  </div>
+  {% endif %}
+
+  {% if mode == 'ready' %}
+    <p class="text-sm text-gray-900 mt-2">{{ summary.situation }}</p>
+    {% if summary.development %}<p class="text-xs text-gray-600 mt-1 leading-relaxed">{{ summary.development }}</p>{% endif %}
+    {% if summary.next_steps %}
+    <ul class="mt-2 space-y-0.5">
+      {% for step in summary.next_steps %}
+      <li class="text-xs text-gray-700">→ {{ step }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  {% elif mode == 'idle' %}
+    <p class="text-xs text-gray-500 mt-2">One-tap AI briefing on this account — pipeline, engagement, and suggested next moves.</p>
+  {% elif mode == 'throttled' %}
+    <p class="text-xs text-amber-700 mt-2">Generating too fast — please wait a minute and try again.</p>
+  {% elif mode == 'unavailable' %}
+    <p class="text-xs text-gray-500 mt-2">Summary unavailable right now — try again shortly.</p>
+  {% elif mode == 'forbidden' %}
+    <p class="text-xs text-gray-500 mt-2">Restricted — account summaries are available to the account team.</p>
+  {% endif %}
+</div>
