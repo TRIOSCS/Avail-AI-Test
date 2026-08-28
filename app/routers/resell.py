@@ -42,6 +42,7 @@ from ..constants import (
     ExcessOfferStatus,
     ExcessOutreachChannel,
     ExcessOutreachStatus,
+    OfferLineMatchStatus,
 )
 from ..database import get_db
 from ..dependencies import require_access, require_fresh_token
@@ -1372,7 +1373,8 @@ async def resell_offer_form(
     user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
-    """Render the submit-offer modal (per-line / take-all scope toggle)."""
+    """Render the submit-offer modal: posting lines (checkbox + qty + unit price per
+    line) plus an optional free-text row for a part not on the posting."""
     # Load-and-authorize: non-owners 404 on a draft (existence not revealed).
     el, is_owner = _get_list_for_user(db, list_id, user)
     if not excess_service.can_offer(user):
@@ -1387,6 +1389,12 @@ async def resell_offer_form(
     # modal exposes, not competitor-offer data (no can_see_customer leak). (id, name)
     # tuples only — the dropdown never needs the full Company entity.
     companies = db.execute(select(Company.id, Company.name).order_by(Company.name)).all()
+    # R1: every posted line, so the trader checks off exactly what they're offering on
+    # instead of blind free-text. Non-owner-safe — MPN/qty/condition only, no customer
+    # identity (mirrors what the Lines tab already shows a non-owner, _lines.html).
+    line_items = db.scalars(
+        select(ExcessLineItem).where(ExcessLineItem.excess_list_id == el.id).order_by(ExcessLineItem.id)
+    ).all()
     return template_response(
         "htmx/partials/resell/offer_form.html",
         {
@@ -1394,6 +1402,7 @@ async def resell_offer_form(
             "list": el,
             "display_title": _display_title(el, can_see_customer=is_owner),
             "companies": companies,
+            "line_items": line_items,
         },
     )
 
@@ -1869,11 +1878,27 @@ async def resell_submit_offer(
     user: User = Depends(require_access(AccessKey.RESELL)),
     db: Session = Depends(get_db),
 ):
-    """Submit an inbound offer (per_line single-entry or take_all) via the service.
+    """Submit an inbound offer (per_line multi-line + optional free-text row, or
+    take_all) via the service — ONE ExcessOffer per submission.
 
-    This slice handles the single-line quick-add path; the paste/upload funnel reuses
-    the same preview grid (import_preview) and lands here per-row. The service enforces
-    can_offer + the self-offer guard.
+    R1: the offer form now renders every posting line as a checkbox + qty + unit-price
+    row (``line_item_ids`` — one checked value per line, paired with per-line
+    ``qty_<line_id>`` / ``price_<line_id>`` fields read off the raw form since FastAPI's
+    ``Form(...)`` params can't express a dynamic per-line field name). Each checked line
+    contributes a row keyed by ITS OWN part_number as ``mpn_raw`` — the exact same
+    part-number-only matcher ``submit_offer`` already runs (``_classify_mpn_match``) then
+    matches it straight back to that line (or, in the rare case two posted lines share a
+    normalized part number, ambiguous — unchanged existing behavior). The optional
+    free-text row (``mpn_raw``/``quantity``/…) covers a part NOT on the posting; it goes
+    through the same matcher and lands unmatched (queued, never dropped) unless it
+    happens to normalize onto a posted line. ONE ``submit_offer`` call carries every row,
+    so the service's single entry point (and its can_offer + self-offer guards) is
+    unchanged — this is still ONE ExcessOffer with N ExcessOfferLine children, per the
+    existing per_line/take_all shape, never one-offer-per-line.
+
+    The response toast is server-owned and honest about match state (replacing the old
+    unconditional client-side "Offer submitted"): "Matched N line(s)" and, when any row
+    didn't resolve, "— X not on the posting, flagged unmatched".
     """
     # Load-and-authorize: non-owners 404 on a draft (existence not revealed), and offers
     # are only accepted on a posted/published list — never on an unpublished draft.
@@ -1885,22 +1910,60 @@ async def resell_submit_offer(
 
     lines = None
     if scope == ExcessOfferScope.PER_LINE:
-        qty = _to_int(quantity)
-        # L2: reject a non-positive quantity here (400) — otherwise it reaches the
-        # ExcessOfferLine @validates("quantity") ValueError as an unhandled 500.
-        if not mpn_raw.strip() or qty is None or qty <= 0:
-            raise HTTPException(400, "Per-line offer needs a part number and a positive quantity")
-        lines = [
+        form = await request.form()
+        checked_ids = [int(v) for v in form.getlist("line_item_ids") if str(v).strip().isdigit()]
+        # Never trust a checked id blind — it must actually belong to THIS list (a
+        # tampered/stale id from another list/tab is silently skipped, not honored).
+        posted_by_id = (
             {
-                "mpn_raw": mpn_raw.strip(),
-                "quantity": qty,
-                "unit_price": _to_decimal(unit_price),
-                "lead_time_days": _to_int(lead_time_days),
-                "terms_text": terms_text or None,
+                li.id: li
+                for li in db.scalars(
+                    select(ExcessLineItem).where(
+                        ExcessLineItem.excess_list_id == list_id, ExcessLineItem.id.in_(checked_ids)
+                    )
+                ).all()
             }
-        ]
+            if checked_ids
+            else {}
+        )
 
-    excess_service.submit_offer(
+        lines = []
+        for line_id in checked_ids:
+            li = posted_by_id.get(line_id)
+            if li is None:
+                continue
+            row_qty = _to_int(form.get(f"qty_{line_id}", ""))
+            if row_qty is None or row_qty <= 0:
+                continue  # checked but no valid qty entered — skip the row, not the whole submit
+            lines.append(
+                {
+                    "mpn_raw": li.part_number,
+                    "quantity": row_qty,
+                    "unit_price": _to_decimal(form.get(f"price_{line_id}", "")),
+                }
+            )
+
+        # Optional free-text row for a part not on the posting.
+        if mpn_raw.strip():
+            qty = _to_int(quantity)
+            # L2: reject a non-positive quantity here (400) — otherwise it reaches the
+            # ExcessOfferLine @validates("quantity") ValueError as an unhandled 500.
+            if qty is None or qty <= 0:
+                raise HTTPException(400, "The free-text part needs a positive quantity")
+            lines.append(
+                {
+                    "mpn_raw": mpn_raw.strip(),
+                    "quantity": qty,
+                    "unit_price": _to_decimal(unit_price),
+                    "lead_time_days": _to_int(lead_time_days),
+                    "terms_text": terms_text or None,
+                }
+            )
+
+        if not lines:
+            raise HTTPException(400, "Select at least one posting line or enter a part number")
+
+    offer = excess_service.submit_offer(
         db,
         list_id=list_id,
         user=user,
@@ -1912,7 +1975,18 @@ async def resell_submit_offer(
     )
 
     el = excess_service.get_excess_list(db, list_id)
-    return await resell_offers(request, list_id=el.id, user=user, db=db)
+    resp = await resell_offers(request, list_id=el.id, user=user, db=db)
+
+    if scope == ExcessOfferScope.PER_LINE:
+        offer_lines = db.scalars(select(ExcessOfferLine).where(ExcessOfferLine.offer_id == offer.id)).all()
+        matched = sum(1 for ol in offer_lines if ol.match_status == OfferLineMatchStatus.MATCHED)
+        unmatched = len(offer_lines) - matched
+        message = f"Matched {matched} line{'s' if matched != 1 else ''}"
+        if unmatched:
+            message += f" — {unmatched} not on the posting, flagged unmatched"
+    else:
+        message = "Take-all offer submitted"
+    return set_toast(resp, message)
 
 
 @router.post("/api/resell/{list_id}/offers/{offer_id}/award", response_class=HTMLResponse)

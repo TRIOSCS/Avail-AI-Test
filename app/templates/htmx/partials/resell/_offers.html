@@ -64,6 +64,7 @@
           <th class="text-right">Qty</th>
           <th class="text-center">Lead</th>
           <th class="text-left">Terms</th>
+          <th class="text-left">Match</th>
         </tr>
       </thead>
       <tbody>
@@ -74,6 +75,16 @@
           <td class="text-right tabular-nums">{{ "{:,}".format(line.quantity) }}</td>
           <td class="text-center">{{ (line.lead_time_days|string ~ 'd') if line.lead_time_days is not none else '—' }}</td>
           <td class="text-gray-500">{{ line.terms_text or '—' }}</td>
+          {# R1: honest match feedback on the trader's own offer — a matched line stays
+             quiet (it landed on the posting); unmatched/ambiguous rows get a chip so the
+             trader knows it's queued for manual resolution, not silently lost. #}
+          <td>
+            {% if line.match_status != 'matched' %}
+            <span class="rounded bg-rose-50 px-1.5 py-0.5 text-[11px] font-medium text-rose-600 border border-rose-200 whitespace-nowrap">
+              {{ 'ambiguous match' if line.match_status == 'ambiguous' else 'not on the posting' }}
+            </span>
+            {% else %}<span class="text-gray-300">—</span>{% endif %}
+          </td>
         </tr>
         {% endfor %}
       </tbody>
