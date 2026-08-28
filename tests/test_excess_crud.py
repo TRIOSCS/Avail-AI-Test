@@ -95,7 +95,6 @@ class TestCreateExcessList:
         assert el.company_id == company.id
         assert el.owner_id == user.id
         assert el.status == "draft"
-        assert el.total_line_items == 0
 
     def test_create_with_optional_fields(self, db_session: Session):
         company = _make_company(db_session)
@@ -180,10 +179,6 @@ class TestImportLineItems:
         assert result["skipped"] == 0
         assert result["errors"] == []
 
-        # Verify counter updated
-        db_session.refresh(el)
-        assert el.total_line_items == 2
-
         # Verify items in DB
         items = db_session.query(ExcessLineItem).filter_by(excess_list_id=el.id).all()
         assert len(items) == 2
@@ -237,21 +232,6 @@ class TestImportLineItems:
 
         assert result["imported"] == 1
         assert result["skipped"] == 3
-
-    def test_updates_total_counter(self, db_session: Session):
-        _, _, el = _setup_list(db_session)
-
-        # First import
-        import_line_items(db_session, el.id, [{"part_number": "A", "quantity": "1"}])
-        db_session.refresh(el)
-        assert el.total_line_items == 1
-
-        # Second import adds to counter
-        import_line_items(
-            db_session, el.id, [{"part_number": "B", "quantity": "2"}, {"part_number": "C", "quantity": "3"}]
-        )
-        db_session.refresh(el)
-        assert el.total_line_items == 3
 
     def test_not_found_list_raises_404(self, db_session: Session):
         with pytest.raises(HTTPException) as exc_info:
@@ -318,8 +298,6 @@ class TestConfirmImport:
         ]
         result = confirm_import(db_session, el.id, trader, validated_rows)
         assert result["imported"] == 2
-        db_session.refresh(el)
-        assert el.total_line_items == 2
 
     def test_rejects_empty_rows(self, db_session, company, trader):
         el = create_excess_list(db_session, title="Empty", company_id=company.id, owner_id=trader.id)

@@ -89,9 +89,6 @@ class TestExcessListModel:
     def test_default_status_is_draft(self, excess_list: ExcessList):
         assert excess_list.status == "draft"
 
-    def test_default_total_line_items_is_zero(self, excess_list: ExcessList):
-        assert excess_list.total_line_items == 0
-
 
 class TestExcessOfferValidUntilDropped:
     """D6: the dead ``excess_offers.valid_until`` column is dropped (migration 201) — the

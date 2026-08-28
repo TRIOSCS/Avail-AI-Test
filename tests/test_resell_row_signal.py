@@ -63,7 +63,6 @@ def _posted_list(db_session: Session, owner: User, company: Company, lines: list
         company_id=company.id,
         owner_id=owner.id,
         status=ExcessListStatus.COLLECTING,
-        total_line_items=len(lines),
         created_at=datetime.now(UTC),
     )
     db_session.add(el)

@@ -235,6 +235,71 @@ class TestVendorMergeService:
         assert (refreshed.alternate_names or []).count("Arrow Elec") == 1
 
 
+class TestDeleteVendorCards:
+    """delete_vendor_cards — dedup pair where NEITHER card is worth keeping.
+
+    QC C4: this function was zero-coverage. Migration 217 also edited its
+    ``detach_tables`` list to drop the EnrichmentQueue tuple, so these tests exercise
+    the edited list directly.
+    """
+
+    def test_deletes_both_cards_detaches_soft_refs_cascades_contacts(self, db_session):
+        from app.models import ProspectContact, StockListHash
+        from app.services.vendor_merge_service import delete_vendor_cards
+
+        card_a = _make_vendor(db_session, "Dead Vendor A")
+        card_b = _make_vendor(db_session, "Dead Vendor B")
+
+        # Soft references (nullable vendor_card_id) — must survive, detached.
+        activity = ActivityLog(vendor_card_id=card_a.id, activity_type="note", channel="manual")
+        stock_hash = StockListHash(
+            user_id=_make_user(db_session).id,
+            content_hash="deadbeef" * 8,
+            vendor_card_id=card_b.id,
+        )
+        prospect = ProspectContact(
+            vendor_card_id=card_b.id, full_name="Jane Prospect", source="manual", confidence="low"
+        )
+        # Card-scoped NOT-NULL CASCADE child — must be deleted with the card.
+        contact = VendorContact(vendor_card_id=card_a.id, full_name="John Contact", source="manual")
+        db_session.add_all([activity, stock_hash, prospect, contact])
+        db_session.commit()
+
+        result = delete_vendor_cards(card_a.id, card_b.id, db_session)
+        db_session.commit()
+
+        assert result["ok"] is True
+        assert sorted(result["deleted"]) == sorted([card_a.id, card_b.id])
+        assert result["detached"] >= 3
+
+        assert db_session.get(VendorCard, card_a.id) is None
+        assert db_session.get(VendorCard, card_b.id) is None
+        assert db_session.get(VendorContact, contact.id) is None  # cascade-deleted
+
+        # Soft refs survive, unlinked (not EnrichmentQueue — that table/tuple is gone).
+        assert db_session.get(ActivityLog, activity.id).vendor_card_id is None
+        assert db_session.get(StockListHash, stock_hash.id).vendor_card_id is None
+        assert db_session.get(ProspectContact, prospect.id).vendor_card_id is None
+
+    def test_same_id_raises(self, db_session):
+        from app.services.vendor_merge_service import delete_vendor_cards
+
+        v = _make_vendor(db_session, "Solo Dead Vendor")
+        db_session.commit()
+
+        with pytest.raises(ValueError, match="identical ids"):
+            delete_vendor_cards(v.id, v.id, db_session)
+
+    def test_missing_card_raises(self, db_session):
+        from app.services.vendor_merge_service import delete_vendor_cards
+
+        v = _make_vendor(db_session, "Exists Dead Vendor")
+        db_session.commit()
+
+        with pytest.raises(ValueError, match="not found"):
+            delete_vendor_cards(v.id, 99999, db_session)
+
+
 # ══════════════════════════════════════════════════════════════════════
 # Company Merge Service
 # ══════════════════════════════════════════════════════════════════════

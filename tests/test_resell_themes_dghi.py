@@ -69,7 +69,6 @@ def _make_list(
         company_id=company.id,
         owner_id=owner.id,
         status=status,
-        total_line_items=lines,
     )
     db.add(el)
     db.flush()
@@ -539,9 +538,9 @@ class TestEmptyStateBranchOrder:
 
 
 class TestAddLineService:
-    def test_add_line_creates_and_bumps_counter(self, db_session, owner, test_company):
+    def test_add_line_creates(self, db_session, owner, test_company):
         el = _make_list(db_session, owner, test_company, lines=0)
-        result = excess_service.add_line(
+        excess_service.add_line(
             db_session,
             el.id,
             owner,
@@ -555,7 +554,6 @@ class TestAddLineService:
         line = db_session.query(ExcessLineItem).filter_by(excess_list_id=el.id).one()
         assert line.part_number == "LM358N"  # stripped
         assert line.normalized_part_number == normalize_mpn_key("LM358N")
-        assert result.total_line_items == 1
 
     def test_blank_part_number_400(self, db_session, owner, test_company):
         el = _make_list(db_session, owner, test_company, lines=0)
