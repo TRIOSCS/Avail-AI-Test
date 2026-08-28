@@ -446,6 +446,38 @@ class TestMergeRoutes:
         )
         assert resp.status_code == 403
 
+    def test_merge_writes_dedup_audit_row(
+        self,
+        owner_client_a: TestClient,
+        db_session: Session,
+        company_a: Company,
+        keeper: SiteContact,
+        loser: SiteContact,
+        test_user: User,
+    ):
+        """A6: the contact merge route calls audited_merge() (not merge_contacts()
+        directly), so a manual CRM contact merge leaves a DedupMergeAudit row and
+        prunes any stale DedupDecision dismissal for the pair."""
+        from app.models import DedupDecision, DedupMergeAudit
+
+        lo, hi = sorted((keeper.id, loser.id))
+        db_session.add(DedupDecision(entity_type="contact", id_a=lo, id_b=hi))
+        db_session.commit()
+
+        resp = owner_client_a.post(
+            f"/v2/partials/customers/{company_a.id}/contacts/{keeper.id}/merge",
+            data={"remove_id": str(loser.id), "confirmed": "true"},
+        )
+        assert resp.status_code == 200, resp.text[:1500]
+
+        audit = db_session.query(DedupMergeAudit).one()
+        assert audit.actor_id == test_user.id
+        assert (audit.entity_type, audit.action) == ("contact", "merge")
+        assert (audit.kept_id, audit.removed_id) == (keeper.id, loser.id)
+        assert audit.kept_name == "Keep Me"
+        assert audit.removed_name == "Lose Me"
+        assert db_session.query(DedupDecision).count() == 0  # stale dismissal pruned
+
     def test_merge_preview_unrelated_rep_gets_403(
         self,
         unrelated_client: TestClient,

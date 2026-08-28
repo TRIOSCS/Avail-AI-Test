@@ -929,7 +929,10 @@ async def test_oneshot_send_blocks_ai_variants_without_confirm(db_session, mock_
     data = _setup_send_scenario(db_session)
     _flag_lm358n_class_as_ai(db_session)
 
-    with pytest.raises(ValueError, match="AI-matched variant"):
+    # A5 (2026-08-27): the rep is already on Prepare when this fires, so — unlike
+    # send_draft_offer's review-strip gate — the message stays terse and does not
+    # redirect anywhere.
+    with pytest.raises(ValueError, match="AI-matched variant") as exc_info:
         await send_proactive_offer(
             db=db_session,
             user=data["owner"],
@@ -938,6 +941,7 @@ async def test_oneshot_send_blocks_ai_variants_without_confirm(db_session, mock_
             contact_ids=[data["contact1"].id],
             sell_prices={},
         )
+    assert "open Prepare" not in str(exc_info.value)
     mock_graph_client.post_json.assert_not_called()
     db_session.rollback()
     assert db_session.query(ProactiveOffer).count() == 0

@@ -2861,6 +2861,32 @@ class TestManualCompanyMerge:
         # Escaped form must appear instead
         assert "&lt;b&gt;" in resp.text
 
+    def test_merge_writes_dedup_audit_row(self, client: TestClient, db_session: Session, test_user: User):
+        """A6: the merge route calls audited_merge() (not merge_companies() directly),
+        so a manual CRM merge now leaves a DedupMergeAudit row and prunes any stale
+        DedupDecision dismissal for the pair — the same audit trail the Data Ops
+        dedup surface already gets."""
+        from app.models import DedupDecision, DedupMergeAudit
+
+        keep, remove, *_ = self._make_pair(db_session, test_user)
+        lo, hi = sorted((keep.id, remove.id))
+        db_session.add(DedupDecision(entity_type="company", id_a=lo, id_b=hi))
+        db_session.commit()
+
+        resp = client.post(
+            f"/v2/partials/customers/{keep.id}/merge",
+            data={"remove_id": str(remove.id), "confirmed": "true"},
+        )
+        assert resp.status_code == 200, resp.text[:1500]
+
+        audit = db_session.query(DedupMergeAudit).one()
+        assert audit.actor_id == test_user.id
+        assert (audit.entity_type, audit.action) == ("company", "merge")
+        assert (audit.kept_id, audit.removed_id) == (keep.id, remove.id)
+        assert audit.kept_name == "Keep Corp"
+        assert audit.removed_name == "Remove Corp"
+        assert db_session.query(DedupDecision).count() == 0  # stale dismissal pruned
+
     # ── UI presence ──────────────────────────────────────────────────────────
 
     def test_merge_button_appears_in_company_detail(self, client: TestClient, db_session: Session, test_user: User):

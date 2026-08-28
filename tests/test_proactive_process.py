@@ -564,7 +564,9 @@ async def test_send_draft_blocks_ai_variants_without_confirm(db_session):
     draft = db_session.query(ProactiveOffer).one()
 
     with patch("app.utils.graph_client.GraphClient.post_json", new_callable=AsyncMock) as mock_send:
-        with pytest.raises(ValueError, match="AI-matched variant"):
+        # A5 (2026-08-27): this is the review-strip send — the rep is NOT on the
+        # Prepare page, so the gate must point them there.
+        with pytest.raises(ValueError, match="AI-matched variant.*open Prepare to review and send"):
             await send_draft_offer(db_session, s["rep"], "tok", draft.id)
 
     mock_send.assert_not_called()

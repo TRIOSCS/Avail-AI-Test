@@ -522,6 +522,10 @@ async def send_proactive_offer(
 
     # AI-variant send gate (2026-08-24): same rule as send_draft_offer, enforced
     # before the ProactiveOffer row is created so a refusal leaves no residue.
+    # Deliberate asymmetry (A5, 2026-08-27): this gate's message stays terse —
+    # the caller is `proactive_send_offer`, which posts from the Prepare page
+    # itself, so there is nowhere else to send the rep. Compare send_draft_offer's
+    # gate below, which fires from the review strip and points back to Prepare.
     if any(r["has_ai_variants"] for r in rollups.values()) and not confirm_ai_variants:
         raise ValueError("This offer includes AI-matched variant part numbers — verify before sending")
 
@@ -813,7 +817,10 @@ async def send_draft_offer(
     }
     rollups = compute_offer_rollups(db, parts=line_parts)
     if any(r["has_ai_variants"] for r in rollups.values()) and not confirm_ai_variants:
-        raise ValueError("This offer includes AI-matched variant part numbers — verify before sending")
+        raise ValueError(
+            "This offer includes AI-matched variant part numbers — "
+            "verify before sending — open Prepare to review and send"
+        )
 
     # Atomic claim (QC 2026-08-14): flip DRAFT→SENT in ONE conditional UPDATE BEFORE the
     # Graph send. A concurrent send_draft_offer — or the digest-draft "supersede" sweep —

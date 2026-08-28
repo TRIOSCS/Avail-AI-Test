@@ -4,12 +4,15 @@ split).
 Merge-preview → confirm → merge for both companies and site contacts. No FK
 reassignment logic lives here — that's owned by the canonical
 ``company_merge_service.merge_companies`` / ``contact_merge_service.merge_contacts``
-engines; these routes only gate authz, show counts, and call into the engine.
+engines; these routes only gate authz, show counts, and call the
+``dedup_decision_service.audited_merge`` wrapper around them (A6, 2026-08-27) so a
+manual CRM merge also leaves a DedupMergeAudit row and prunes any stale
+DedupDecision dismissal for the pair — the same trail the Data Ops dedup surface
+already gets. The wrapper is commit-free; these routes keep their own db.commit().
 
 Called by: app.routers.htmx.companies (package __init__ re-export, route registration)
-Depends on: app.services.company_merge_service, app.services.contact_merge_service,
-    app.models.intelligence, app.models.task, app.models.crm, .contacts
-    (_render_contacts_list)
+Depends on: app.services.dedup_decision_service (audited_merge), app.models.intelligence,
+    app.models.task, app.models.crm, .contacts (_render_contacts_list)
 """
 
 import html as html_mod
@@ -27,8 +30,7 @@ from ....models import Company, CustomerSite, Requisition, SiteContact, User
 from ....models.crm import SiteContactAttachment
 from ....models.intelligence import ActivityLog
 from ....models.task import RequisitionTask
-from ....services.company_merge_service import merge_companies
-from ....services.contact_merge_service import merge_contacts
+from ....services.dedup_decision_service import audited_merge
 from ....template_env import template_response
 from ....utils.sql_helpers import escape_like
 from . import router
@@ -100,9 +102,10 @@ async def company_merge(
 ):
     """Merge remove_id into company_id (the keeper).
 
-    Requires confirmed="true" to prevent accidental submissions. Calls the
-    canonical merge_companies() engine — no FK logic lives here.
-    POST is mandatory: this is a destructive, irreversible operation.
+    Requires confirmed="true" to prevent accidental submissions. Calls the canonical
+    merge_companies() engine (via audited_merge, which also writes a DedupMergeAudit row
+    and prunes stale DedupDecision dismissals) — no FK logic lives here. POST is
+    mandatory: this is a destructive, irreversible operation.
     """
     if confirmed.lower() != "true":
         raise HTTPException(400, "Merge requires explicit confirmation (confirmed=true)")
@@ -123,7 +126,7 @@ async def company_merge(
         raise HTTPException(403, "Not authorized to manage the duplicate company")
 
     try:
-        result = merge_companies(company_id, remove_id, db)
+        result = audited_merge(db, "company", company_id, remove_id, user.id)
         db.commit()
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -337,7 +340,8 @@ async def contact_merge(
 ):
     """Merge remove_id into contact_id (the keeper).
 
-    Requires confirmed="true". Calls merge_contacts() — no FK logic here.
+    Requires confirmed="true". Calls merge_contacts() via audited_merge (also writes a
+    DedupMergeAudit row and prunes stale DedupDecision dismissals) — no FK logic here.
     """
     if confirmed.lower() != "true":
         raise HTTPException(400, "Merge requires explicit confirmation (confirmed=true)")
@@ -371,7 +375,7 @@ async def contact_merge(
         raise HTTPException(400, "Duplicate contact not found or not in this company")
 
     try:
-        result = merge_contacts(contact_id, remove_id, db)
+        result = audited_merge(db, "contact", contact_id, remove_id, user.id)
         db.commit()
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
