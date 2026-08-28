@@ -195,7 +195,19 @@ rollback_app() {
         fi
         RECREATE_TARGETS="app scheduler"
     else
-        echo "==> ROLLBACK WARNING: no previous scheduler image recorded — scheduler stays on its current (new) image." >&2
+        # CRITICAL: no previous scheduler image to restore to means this is the
+        # first deploy of the scheduler split -- the app image we're about to
+        # restore predates RUN_SCHEDULER entirely, so it starts its own
+        # in-process scheduler unconditionally (today's pre-split behavior).
+        # Leaving the `scheduler` container running after that restore would
+        # mean TWO live schedulers -- exactly the failure mode this feature
+        # exists to prevent. Stop it BEFORE recreating app (not after), so
+        # there is never a window with both alive.
+        echo "==> ROLLBACK: no previous scheduler image recorded (first deploy of the split)." >&2
+        echo "==>           Stopping the scheduler container: the restored (pre-split) app image" >&2
+        echo "==>           runs its own scheduler unconditionally, so leaving scheduler running" >&2
+        echo "==>           too would mean two live schedulers." >&2
+        docker compose stop scheduler || true
     fi
     docker compose up -d --force-recreate $RECREATE_TARGETS || true
     echo "==> ROLLBACK: waiting for the restored app to become healthy..."

@@ -839,8 +839,16 @@ async def health(
         except Exception:
             redis_status = "error"
 
-        scheduler_running = getattr(sched_mod.scheduler, "running", False)
-        scheduler_status = "ok" if scheduler_running else "off"
+        if os.environ.get("RUN_SCHEDULER", "1") == "1":
+            scheduler_running = getattr(sched_mod.scheduler, "running", False)
+            scheduler_status = "ok" if scheduler_running else "off"
+        else:
+            # Phase-4 infra split: this process deliberately never starts
+            # APScheduler (RUN_SCHEDULER=0, set on the `app` compose service) —
+            # it runs in the dedicated `scheduler` service instead. "off" would
+            # read as an unexpected outage; report the true, by-design state
+            # so "off" keeps meaning "should be running here and isn't."
+            scheduler_status = "external (scheduler service)"
 
         connector_status = getattr(request.app.state, "connector_status", {})
         connectors_enabled = sum(1 for v in connector_status.values() if v)

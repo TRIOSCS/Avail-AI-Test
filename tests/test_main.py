@@ -794,6 +794,44 @@ class TestHealthPublicVsAuth:
             assert "redis" in data
 
 
+# ── Health endpoint: RUN_SCHEDULER-aware scheduler field ──────────────
+
+
+class TestHealthSchedulerField:
+    """Phase-4 infra: on a process with RUN_SCHEDULER=0 (the `app` compose
+    service), APScheduler deliberately never starts -- the /health `scheduler`
+    field must say so honestly instead of reporting the permanently-wrong
+    "off" (which would read as an unexpected outage on every single request).
+    """
+
+    def test_run_scheduler_zero_reports_external(self, client):
+        """RUN_SCHEDULER=0 -> "external (scheduler service)", not "off"."""
+        original = os.environ.pop("RUN_SCHEDULER", None)
+        try:
+            os.environ["RUN_SCHEDULER"] = "0"
+            with patch("app.main.settings.metrics_token", "test-token"):
+                resp = client.get("/health", headers={"x-metrics-token": "test-token"})
+                data = resp.json()
+                assert data["scheduler"] == "external (scheduler service)"
+        finally:
+            os.environ.pop("RUN_SCHEDULER", None)
+            if original is not None:
+                os.environ["RUN_SCHEDULER"] = original
+
+    def test_run_scheduler_default_keeps_off_meaning(self, client):
+        """RUN_SCHEDULER unset (default "1") -- scheduler not running under TESTING
+        still reports "off", exactly as before this change."""
+        original = os.environ.pop("RUN_SCHEDULER", None)
+        try:
+            with patch("app.main.settings.metrics_token", "test-token"):
+                resp = client.get("/health", headers={"x-metrics-token": "test-token"})
+                data = resp.json()
+                assert data["scheduler"] == "off"
+        finally:
+            if original is not None:
+                os.environ["RUN_SCHEDULER"] = original
+
+
 # ── P2.7: liveness/readiness split ────────────────────────────────────
 
 

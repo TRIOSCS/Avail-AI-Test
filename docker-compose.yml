@@ -211,7 +211,13 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
+          # App parity, not enrichment-worker's 512M: this runs the full
+          # app.main:app import graph + 61 registered jobs (register_all_jobs),
+          # not a lazy polling loop.
+          memory: 2G
+          cpus: '2'
+        reservations:
+          memory: 1G
     logging:
       driver: json-file
       options:
