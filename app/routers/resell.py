@@ -1300,6 +1300,32 @@ async def resell_reject_bid(
     return set_toast(resp, "Bid marked rejected")
 
 
+@router.post("/api/resell/{list_id}/bid/{bid_id}/reference", response_class=HTMLResponse)
+async def resell_save_bid_reference(
+    request: Request,
+    list_id: int,
+    bid_id: int,
+    po_number: str = Form(""),
+    user: User = Depends(require_access(AccessKey.RESELL)),
+    db: Session = Depends(get_db),
+):
+    """Save the customer's PO reference captured against the accepted bid (owner-only;
+    C3 — ERP reference capture).
+
+    Free-text record only — AVAIL never validates or syncs it against Acctivate
+    (CLAUDE.md "Hard constraints"). Blank input clears a previously-saved value. Gated
+    exactly like the other bid tab actions above: ``_get_list_for_user`` +
+    ``_require_owner`` (a foreign private DRAFT 404-masks before the owner 403, finding
+    #48). Re-renders the Build-Bid tab with a toast.
+    """
+    el, _ = _get_list_for_user(db, list_id, user)
+    _require_owner(el, user)
+    bid_back_service.save_bid_reference(db, list_id=list_id, bid_id=bid_id, po_number=po_number)
+    el = excess_service.get_excess_list(db, list_id)
+    resp = template_response("htmx/partials/resell/_build_bid.html", _build_bid_context(request, db, el, user))
+    return set_toast(resp, "Reference saved")
+
+
 # ── Modal forms ──────────────────────────────────────────────────────
 
 
@@ -1982,6 +2008,37 @@ async def resell_withdraw_offer(
         "htmx/partials/resell/_award_response.html", _award_response_context(request, db, el, user)
     )
     return set_toast(resp, "Offer withdrawn")
+
+
+@router.post("/api/resell/{list_id}/offers/{offer_id}/reference", response_class=HTMLResponse)
+async def resell_save_offer_reference(
+    request: Request,
+    list_id: int,
+    offer_id: int,
+    sales_order_number: str = Form(""),
+    user: User = Depends(require_access(AccessKey.RESELL)),
+    db: Session = Depends(get_db),
+):
+    """Save the ERP sales-order reference captured against a won offer (owner-only; C3 —
+    ERP reference capture).
+
+    Free-text record only — AVAIL never validates or syncs it against Acctivate
+    (CLAUDE.md "Hard constraints"). Blank input clears a previously-saved value. Gated
+    via ``_get_list_for_user`` + ``_require_owner``, then the same cross-list 404 guard
+    as ``resell_award_offer``/``resell_unaward_offer`` (finding #32 — existence not
+    revealed across lists). Re-renders the Offers tab + OOB lines/chips.
+    """
+    el, _ = _get_list_for_user(db, list_id, user)
+    _require_owner(el, user)
+    offer = db.get(ExcessOffer, offer_id)
+    if offer is None or offer.excess_list_id != list_id:
+        raise HTTPException(404, f"Offer {offer_id} not found on list {list_id}")
+    excess_service.save_offer_reference(db, offer_id=offer_id, sales_order_number=sales_order_number)
+    el = excess_service.get_excess_list(db, list_id)
+    resp = template_response(
+        "htmx/partials/resell/_award_response.html", _award_response_context(request, db, el, user)
+    )
+    return set_toast(resp, "Reference saved")
 
 
 @router.post("/api/resell/{list_id}/offer-lines/{offer_line_id}/assign", response_class=HTMLResponse)

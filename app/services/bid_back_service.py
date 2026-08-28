@@ -461,6 +461,29 @@ def record_bid_response(
     return bid
 
 
+def save_bid_reference(db: Session, *, list_id: int, bid_id: int, po_number: str) -> CustomerBid:
+    """Persist the customer's PO reference number against a bid (Task 2 / C3).
+
+    ERP reference capture only — a free-text record of the customer PO number issued
+    against the accepted bid-back, entered by the trader once the customer confirms it
+    verbally or in writing. AVAIL never validates or syncs this value against Acctivate
+    (CLAUDE.md "Hard constraints" — nothing integrates with Acctivate, references only).
+    Blank input clears a previously-saved reference.
+
+    The caller (the router) has already gated ownership via ``_require_owner``; this
+    still 404s if the bid does not exist or belongs to a different list (existence not
+    revealed across lists), mirroring :func:`guard_bid_for_owner`'s bid lookup.
+    """
+    bid = db.get(CustomerBid, bid_id)
+    if bid is None or bid.excess_list_id != list_id:
+        raise HTTPException(404, f"Bid {bid_id} not found on list {list_id}")
+    bid.po_number = po_number.strip() or None
+    db.commit()
+    db.refresh(bid)
+    logger.info("Saved CustomerBid id={} po_number", bid.id)
+    return bid
+
+
 def bid_back_export_context(bid: CustomerBid, *, status_override: CustomerBidStatus | None = None) -> dict:
     """Build the CLEAN customer-facing export payload for *bid* (pure whitelist).
 
