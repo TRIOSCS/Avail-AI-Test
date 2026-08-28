@@ -28,11 +28,13 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.constants import (
+    ActivityType,
     ApprovalGateType,
     ApprovalRequestStatus,
     ApprovalSubjectType,
     PrepaymentStatus,
 )
+from app.models import ActivityLog
 from app.models.approvals import ApprovalRequest
 from app.models.quality_plan import Prepayment
 from app.services.prepayment_service import mark_prepayment_paid
@@ -257,6 +259,44 @@ def test_unmark_paid_manager_only(db_session: Session):
     assert pp.status == PrepaymentStatus.PAID.value  # still paid
 
 
+def test_mark_paid_bad_amount_is_400_inline(db_session: Session):
+    """An unparsable paid_amount is a REAL 400 rendered into #pp-markpaid-error (hx-
+    target-4xx), not the old 200 toast — a 200 would let close_modal_on_success close
+    the modal and drop the buyer's other field entries."""
+    manager = _make_user(db_session, role="manager")
+    pp = _approved_prepay_on_plan(db_session, manager)
+
+    with _client_as(db_session, manager) as c:
+        r = c.post(
+            f"/v2/partials/prepayments/{pp.id}/mark-paid",
+            data={"wire_reference": "WIRE-1", "paid_amount": "not-a-number"},
+            headers={"HX-Request": "true"},
+        )
+    assert r.status_code == 400
+    assert "Enter a valid paid amount" in r.text
+
+    db_session.refresh(pp)
+    assert pp.status == PrepaymentStatus.APPROVED.value  # untouched
+
+
+def test_mark_paid_already_paid_is_400_inline(db_session: Session):
+    """The service's non-approved guard (mark_prepayment_paid raises ValueError) must
+    surface as a REAL 400 inline, not a 200 toast."""
+    manager = _make_user(db_session, role="manager")
+    pp = _approved_prepay_on_plan(db_session, manager)
+    mark_prepayment_paid(db_session, pp, wire_reference="WIRE-1", paid_amount=Decimal("20002.38"), paid_via="in_app")
+    assert pp.status == PrepaymentStatus.PAID.value
+
+    with _client_as(db_session, manager) as c:
+        r = c.post(
+            f"/v2/partials/prepayments/{pp.id}/mark-paid",
+            data={"wire_reference": "WIRE-2"},
+            headers={"HX-Request": "true"},
+        )
+    assert r.status_code == 400
+    assert pp.wire_reference == "WIRE-1"  # untouched by the rejected second call
+
+
 def test_mark_paid_twice_is_rejected(db_session: Session, approved_prepay: Prepayment):
     """A second mark-paid on a now-PAID prepayment raises (the FOR UPDATE re-fetch +
     status re-check serialize a double-submit, so the paid fan-out never double-fires
@@ -299,6 +339,37 @@ def test_resend_pay_link_notifies_without_reminting_token(db_session: Session):
     db_session.refresh(pp)
     assert pp.pay_token == "tok-approved-1"  # NOT re-minted — the emailed link stays valid
     assert pp.status == PrepaymentStatus.APPROVED.value
+
+
+def test_resend_pay_link_writes_audit_row(db_session: Session):
+    """A resend writes a durable ActivityLog NOTE row (mirroring the unmark-paid
+    correction log in prepayment_service.py) so the resend shows up in the plan's
+    timeline, naming the actor who triggered it."""
+    manager = _make_user(db_session, role="manager")
+    pp = _approved_prepay_on_plan(db_session, manager)
+
+    with _client_as(db_session, manager) as c, patch(_RUNNER, new_callable=AsyncMock):
+        r = c.post(
+            f"/v2/partials/prepayments/{pp.id}/resend-pay-link",
+            data={},
+            headers={"HX-Request": "true"},
+        )
+    assert r.status_code == 200, r.text
+
+    db_session.refresh(pp)
+    log = (
+        db_session.query(ActivityLog)
+        .filter(ActivityLog.subject == "Prepayment pay link resent")
+        .order_by(ActivityLog.id.desc())
+        .first()
+    )
+    assert log is not None
+    assert log.activity_type == ActivityType.NOTE
+    assert log.channel == "system"
+    assert log.user_id == manager.id
+    assert log.buy_plan_id == pp.buy_plan_id
+    assert log.requisition_id == pp.buy_plan.requisition_id
+    assert manager.name in log.notes
 
 
 def test_resend_pay_link_paid_is_400_and_never_notifies(db_session: Session):
