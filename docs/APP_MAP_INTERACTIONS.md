@@ -97,7 +97,8 @@ column (not encoded in `activity_type`). Readers that distinguish direction
    `EIGHT_BY_EIGHT_API_KEY`, `EIGHT_BY_EIGHT_USERNAME`,
    `EIGHT_BY_EIGHT_PASSWORD`, `EIGHT_BY_EIGHT_PBX_ID`
    (`EIGHT_BY_EIGHT_TIMEZONE` / `EIGHT_BY_EIGHT_POLL_INTERVAL_MINUTES` have
-   defaults).
+   defaults — the poll defaults to every 5 minutes, cheap since the access
+   token is cached).
 2. Per user whose calls should be logged: set their `eight_by_eight_extension`
    and enable their per-user `eight_by_eight_enabled` toggle in user settings.
 3. On restart, `register_eight_by_eight_jobs()` schedules the CDR poll. Calls
@@ -1659,6 +1660,26 @@ compared with `hmac.compare_digest` against `settings.acs_webhook_secret`
 including the validation handshake — even when `ACS_CONNECTION_STRING` is
 configured; the app lifespan (`app/main.py`) logs a startup warning for that
 misconfiguration.
+
+### 4b. Graph calendar webhook subscriptions (real-time meeting capture)
+
+`create_calendar_subscription` registers a `/me/events` Graph subscription (same
+`webhook_path`, clientState/replay hardening as 4a above) with `changeType="created"`
+only. `handle_notification` dispatches `/me/events` rows to
+`_handle_calendar_notification`, which fetches the event, skips `isCancelled`, and
+calls `log_meeting_activity` directly — **without** the daily scan's
+`create_unlinked_fallback=True`, so a real-time notification for a meeting with no
+CRM-matched attendee logs nothing. That gap is closed, not left open: the daily
+`_job_calendar_scan` (`calendar_intelligence.scan_calendar_events`, 06:00) is retained
+and still runs its own unlinked-fallback pass, sharing the same
+`external_id = "calendar-{graph_event_id}"` dedupe key, so a webhook notification and
+a later scan of the same event can never double-log it. Caveat (documented in-repo on
+`_handle_calendar_notification`): the daily scan is a 30-day **lookback**, not a
+lookahead, so an unmatched-attendee meeting scheduled far in the future is only
+backfilled once its start time has passed into that window. Unrelated cadence note:
+the 8x8 CDR poll (section 1) now defaults to every 5 minutes
+(`EIGHT_BY_EIGHT_POLL_INTERVAL_MINUTES=5`, env-overridable) — cheap because the access
+token is cached.
 
 ## 5. Quote Building
 

@@ -1,6 +1,7 @@
 """eight_by_eight_jobs.py — 8x8 Work Analytics polling job.
 
-Polls 8x8 CDR API every 30 minutes for call activity.
+Polls 8x8 CDR API every 5 minutes for call activity (env-overridable via
+EIGHT_BY_EIGHT_POLL_INTERVAL_MINUTES; cheap because the access token is cached).
 Writes matched calls to activity_log and updates company.last_activity_at.
 
 Business Rules:
