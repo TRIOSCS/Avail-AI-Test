@@ -1,8 +1,9 @@
 """tests/test_buyplan_handoff.py — Buy-plan handoff brief (AI queue P3-6).
 
 Covers: DigestEntityType.BUY_PLAN, activity_service.get_buy_plan_activities,
-services/buyplan_handoff.build_handoff_facts, and the BUY_PLAN branch of
-activity_digest_service.get_or_build_digest.
+services/buyplan_handoff.build_handoff_facts, the BUY_PLAN branch of
+activity_digest_service.get_or_build_digest, and the
+/v2/partials/buy-plans/{plan_id}/handoff-brief endpoint.
 """
 
 from datetime import UTC, datetime
@@ -201,6 +202,16 @@ class TestBuyPlanDigest:
             second = await digest_svc.get_or_build_digest(DigestEntityType.BUY_PLAN, test_buy_plan.id, db_session)
         assert second["state"] == digest_svc.DigestState.READY
         assert mock_ai2.called  # non-meaningful row still regenerated the brief
+
+    async def test_facts_build_error_returns_error_state(self, db_session, test_buy_plan, test_offer, monkeypatch):
+        monkeypatch.setattr(digest_svc, "_get_redis", lambda: None)
+        db_session.add(
+            BuyPlanLine(buy_plan_id=test_buy_plan.id, offer_id=test_offer.id, quantity=10, status="awaiting_po")
+        )
+        db_session.commit()
+        with patch("app.services.buyplan_handoff.build_handoff_facts", side_effect=RuntimeError("boom")):
+            res = await digest_svc.get_or_build_digest(DigestEntityType.BUY_PLAN, test_buy_plan.id, db_session)
+        assert res["state"] == digest_svc.DigestState.ERROR
 
 
 class TestHandoffEndpoint:

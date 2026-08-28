@@ -27,6 +27,10 @@ def _money(v) -> str:
     return f"${v:,.0f}" if v is not None else "—"
 
 
+def _unit_money(v) -> str:
+    return f"${v:,.2f}" if v is not None else "—"
+
+
 def _d(dt) -> str:
     return dt.strftime("%Y-%m-%d") if dt else "not yet"
 
@@ -52,10 +56,11 @@ def build_handoff_facts(db: Session, plan: BuyPlan) -> str:
         for line in lines[:LINE_CAP]:
             mpn = line.requirement.primary_mpn if line.requirement else "?"
             vendor = line.offer.vendor_name if line.offer else "?"
+            eta = _d(line.estimated_ship_date) if line.estimated_ship_date else "—"
             seg = (
                 f"  - {mpn} ×{line.quantity or 0} | vendor: {vendor} | "
-                f"{_money(line.unit_cost)} → {_money(line.unit_sell)} | {line.status} | "
-                f"PO {line.po_number or '—'} | ETA {line.estimated_ship_date or '—'}"
+                f"{_unit_money(line.unit_cost)} → {_unit_money(line.unit_sell)} | {line.status} | "
+                f"PO {line.po_number or '—'} | ETA {eta}"
             )
             if line.issue_type:
                 note = f": {line.issue_note}" if line.issue_note else ""

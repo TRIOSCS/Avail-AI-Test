@@ -219,9 +219,12 @@ async def get_or_build_digest(
             from .buyplan_handoff import build_handoff_facts
 
             act_block = _build_activity_lines(meaningful) if meaningful else "none logged"
-            prompt = (
-                "Deal facts:\n" + build_handoff_facts(db, plan) + "\n\nRecent activity (newest first):\n" + act_block
-            )
+            try:
+                facts = build_handoff_facts(db, plan)
+            except Exception as e:
+                logger.warning("Handoff facts build failed for plan {}: {}", entity_id, e)
+                return {"state": DigestState.ERROR}
+            prompt = "Deal facts:\n" + facts + "\n\nRecent activity (newest first):\n" + act_block
         else:
             prompt = "Recent activity (newest first):\n" + _build_activity_lines(activities)
         try:
