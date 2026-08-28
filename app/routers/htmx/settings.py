@@ -3,9 +3,11 @@
 Server-rendered HTML partials for the settings surface: ops verification group, users,
 scorecard, sources, system, profile + the per-user toggle endpoints, inbox scan-now,
 data-ops + connectors tabs, connector test-all, the CRM vendor/company merge + dedup
-admin actions, and the admin api-health + data-ops partials. Extracted verbatim from
-htmx_views.py (same `/v2/partials/settings`, `/api/user`, `/v2/partials/admin` paths,
-same `htmx-views` tag).
+admin actions, the admin api-health + data-ops partials, and the Data-Ops unmatched-
+activity review card (`/v2/partials/data-ops/unmatched-activities`, same require_admin
+gate as the JSON queue in app/routers/v13_features/activity.py). Extracted verbatim
+from htmx_views.py (same `/v2/partials/settings`, `/api/user`, `/v2/partials/admin`
+paths, same `htmx-views` tag).
 
 Called by: app/main.py (router mount); htmx_views.py re-imports `_run_inbox_scan_now`
     (the staying poll-inbox route). Toast feedback goes through the shared
@@ -448,6 +450,114 @@ async def settings_data_ops_tab(
         raise HTTPException(403, "Admin only")
 
     return _render_data_ops(request, user, db)
+
+
+def _render_unmatched_activities(request: Request, user: User, db: Session) -> Response:
+    """Render the unmatched-activity review card — list + count, lazy-loaded onto the
+    Data Ops tab next to the vendor/company/contact dedup sections.
+
+    Reused by the attribute/dismiss actions below so a successful (or friendly-failed)
+    action re-renders just this card and the acted-on row drops without a manual
+    refresh.
+    """
+    from ...services.activity_service import count_unmatched_activities, get_unmatched_activities
+
+    ctx = _base_ctx(request, user, "settings")
+    ctx["unmatched_activities"] = get_unmatched_activities(db, limit=30)
+    ctx["unmatched_count"] = count_unmatched_activities(db)
+    return template_response("htmx/partials/settings/_unmatched_activities.html", ctx)
+
+
+@router.get("/v2/partials/data-ops/unmatched-activities", response_class=HTMLResponse)
+async def data_ops_unmatched_activities(
+    request: Request,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Unmatched-activity review card (admin only) — same require_admin gate as the JSON
+    queue endpoints in app/routers/v13_features/activity.py."""
+    return _render_unmatched_activities(request, user, db)
+
+
+@router.post("/v2/partials/data-ops/unmatched-activities/{activity_id}/attribute", response_class=HTMLResponse)
+async def data_ops_unmatched_attribute(
+    request: Request,
+    activity_id: int,
+    entity_type: str = Form(...),
+    entity_id: int = Form(...),
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Attribute an unmatched activity to a company or vendor, then re-render the card.
+
+    Validation mirrors the JSON endpoint (attribute_activity_endpoint): the entity
+    vocabulary comes from the same ActivityAttributeRequest schema, and the target
+    company/vendor must exist. Any failure is a friendly toast + re-render, never a 500
+    or a bare error page — the row stays put so the admin can retry.
+    """
+    from pydantic import ValidationError
+
+    from ...schemas.v13_features import ActivityAttributeRequest
+    from ...services.activity_service import attribute_activity
+
+    try:
+        payload = ActivityAttributeRequest(entity_type=entity_type, entity_id=entity_id)
+    except ValidationError:
+        resp = _render_unmatched_activities(request, user, db)
+        set_toast(resp, "Choose company or vendor and a valid id.", kind="error")
+        return resp
+
+    if payload.entity_type == "company":
+        target = db.get(Company, payload.entity_id)
+        not_found_msg = "Company not found."
+    else:
+        target = db.get(VendorCard, payload.entity_id)
+        not_found_msg = "Vendor not found."
+    if not target:
+        resp = _render_unmatched_activities(request, user, db)
+        set_toast(resp, not_found_msg, kind="error")
+        return resp
+
+    result = attribute_activity(
+        activity_id=activity_id,
+        entity_type=payload.entity_type,
+        entity_id=payload.entity_id,
+        db=db,
+        user_id=user.id,
+    )
+    if not result:
+        db.rollback()
+        resp = _render_unmatched_activities(request, user, db)
+        set_toast(resp, "Activity not found.", kind="error")
+        return resp
+
+    db.commit()
+    resp = _render_unmatched_activities(request, user, db)
+    set_toast(resp, "Activity attributed.")
+    return resp
+
+
+@router.post("/v2/partials/data-ops/unmatched-activities/{activity_id}/dismiss", response_class=HTMLResponse)
+async def data_ops_unmatched_dismiss(
+    request: Request,
+    activity_id: int,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Dismiss an unmatched activity (admin only), then re-render the card."""
+    from ...services.activity_service import dismiss_activity
+
+    result = dismiss_activity(activity_id, db)
+    if not result:
+        db.rollback()
+        resp = _render_unmatched_activities(request, user, db)
+        set_toast(resp, "Activity not found.", kind="error")
+        return resp
+
+    db.commit()
+    resp = _render_unmatched_activities(request, user, db)
+    set_toast(resp, "Activity dismissed.")
+    return resp
 
 
 @router.get("/v2/partials/settings/data-export", response_class=HTMLResponse)

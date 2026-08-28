@@ -1,0 +1,86 @@
+{# _unmatched_activities.html — Unmatched-activity review card (Data Ops, admin only).
+   Receives: unmatched_activities (list[ActivityLog]; company_id/vendor_card_id/
+   dismissed_at all NULL, newest first, capped at 30), unmatched_count (int, total
+   non-dismissed unmatched rows, not just the page shown).
+   Called by: app/routers/htmx/settings.py data_ops_unmatched_activities (initial
+   lazy load) and the attribute/dismiss routes below it, all of which re-render this
+   same card into #unmatched-activities-card so the acted-on row drops in place.
+   Depends on: HTMX, Tailwind CSS. Two plain id-input forms per row (no reusable
+   company/vendor typeahead exists in the Data-Ops/dedup surfaces to reuse — see
+   task-1-report.md) — the simplest faithful control per the brief.
+#}
+<div class="bg-white border border-line-base rounded-lg overflow-hidden">
+  <div class="px-4 py-3 bg-gray-50 border-b flex items-center justify-between">
+    <h2 class="text-lg font-semibold text-gray-900">
+      Unmatched Activity <span class="text-xs font-normal text-gray-500">&middot; {{ unmatched_count }}</span>
+    </h2>
+    <button hx-get="/v2/partials/data-ops/unmatched-activities"
+            hx-target="#unmatched-activities-card"
+            hx-swap="innerHTML"
+            hx-push-url="false"
+            class="px-3 py-1 text-xs font-medium text-accent-600 border border-accent-200 rounded hover:bg-accent-50">
+      Refresh
+    </button>
+  </div>
+
+  {% if unmatched_activities %}
+  <div class="divide-y divide-gray-100">
+    {% for a in unmatched_activities %}
+    <div class="px-4 py-3 flex items-start justify-between gap-4 flex-wrap" data-activity="{{ a.id }}">
+      <div class="min-w-0">
+        <div class="flex items-center gap-2 text-xs flex-wrap">
+          <span class="text-gray-500">{{ a.created_at.strftime('%b %d, %Y') if a.created_at else '—' }}</span>
+          <span class="px-1.5 py-0.5 uppercase tracking-wide rounded bg-gray-100 text-gray-600">{{ a.channel }}</span>
+          <span class="text-gray-400">&middot;</span>
+          <span class="text-gray-600">{{ a.activity_type }}</span>
+        </div>
+        <p class="text-sm font-medium text-gray-900 mt-0.5">{{ a.subject or '(no subject)' }}</p>
+        <p class="text-xs text-gray-600 mt-0.5">
+          {{ a.contact_name or 'Unknown contact' }}{% if a.contact_email %} &middot; {{ a.contact_email }}{% endif %}{% if a.contact_phone %} &middot; {{ a.contact_phone }}{% endif %}
+        </p>
+      </div>
+      <div class="flex flex-col gap-1.5 shrink-0 items-stretch">
+        <form hx-post="/v2/partials/data-ops/unmatched-activities/{{ a.id }}/attribute"
+              hx-target="#unmatched-activities-card"
+              hx-swap="innerHTML"
+              class="flex items-center gap-1">
+          <input type="hidden" name="entity_type" value="company">
+          <input type="number" name="entity_id" min="1" required placeholder="Company #"
+                 aria-label="Attribute to company id"
+                 class="w-24 rounded border border-gray-300 px-2 py-1 text-xs">
+          <button type="submit" data-loading-disable
+                  class="px-2 py-1 text-xs rounded bg-white text-accent-600 border border-accent-200 hover:bg-accent-50 whitespace-nowrap">
+            Attribute
+          </button>
+        </form>
+        <form hx-post="/v2/partials/data-ops/unmatched-activities/{{ a.id }}/attribute"
+              hx-target="#unmatched-activities-card"
+              hx-swap="innerHTML"
+              class="flex items-center gap-1">
+          <input type="hidden" name="entity_type" value="vendor">
+          <input type="number" name="entity_id" min="1" required placeholder="Vendor #"
+                 aria-label="Attribute to vendor id"
+                 class="w-24 rounded border border-gray-300 px-2 py-1 text-xs">
+          <button type="submit" data-loading-disable
+                  class="px-2 py-1 text-xs rounded bg-white text-accent-600 border border-accent-200 hover:bg-accent-50 whitespace-nowrap">
+            Attribute
+          </button>
+        </form>
+        <button type="button" data-loading-disable
+                hx-post="/v2/partials/data-ops/unmatched-activities/{{ a.id }}/dismiss"
+                hx-target="#unmatched-activities-card"
+                hx-swap="innerHTML"
+                hx-confirm="Dismiss this activity? It will be hidden from the unmatched queue."
+                class="px-2 py-1 text-xs rounded bg-white text-gray-500 border border-gray-300 hover:bg-gray-50">
+          Dismiss
+        </button>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="px-4 py-8 text-center">
+    <p class="text-sm text-gray-600">No unmatched activity.</p>
+  </div>
+  {% endif %}
+</div>
