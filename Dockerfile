@@ -67,8 +67,9 @@ COPY alembic/ alembic/
 # Overlay Vite build output from stage 1
 COPY --from=builder /build/app/static/dist/ app/static/dist/
 
-# Copy entrypoint
-COPY docker-entrypoint.sh .
+# Copy entrypoint (+ its migration-lock helper — see docker-entrypoint-migrate.py
+# for why `alembic upgrade head` is wrapped instead of invoked bare)
+COPY docker-entrypoint.sh docker-entrypoint-migrate.py .
 RUN chmod +x docker-entrypoint.sh
 
 # Create non-root user for running the app process

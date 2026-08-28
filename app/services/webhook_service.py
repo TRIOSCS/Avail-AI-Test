@@ -22,6 +22,7 @@ from datetime import UTC, datetime, timedelta
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from app.cache.intel_cache import _get_redis
 from app.config import settings
 from app.constants import UserRole
 from app.models import ActivityLog, GraphSubscription, User
@@ -39,8 +40,13 @@ RENEW_BUFFER_HOURS = 6  # renew when less than 6h remaining
 RENEW_FAIL_THRESHOLD = 3
 _M365_SUB_ERROR_MSG = "Email tracking degraded — Graph subscription renewal failing"
 
-# Replay protection: reject duplicate notifications within this window
+# Replay protection: reject duplicate notifications within this window. Shared across
+# worker processes via a Redis SET NX EX (mirrors the token-refresh lock idiom in
+# app/jobs/core_jobs.py:_safe_refresh); _seen_notifications is the in-process fallback
+# used when Redis is unavailable (TESTING, or an outage) — unchanged from before Redis
+# support was added.
 REPLAY_WINDOW_SECONDS = 300  # 5 minutes
+_REPLAY_REDIS_PREFIX = "webhook:replay:"
 _seen_notifications: dict[str, float] = {}  # key -> timestamp
 
 # Validation-echo bounds. Microsoft Graph requires the raw ``validationToken``
@@ -320,11 +326,34 @@ async def ensure_all_users_subscribed(db: Session):
 
 
 def _prune_replay_cache():
-    """Remove expired entries from the replay-protection cache."""
+    """Remove expired entries from the in-process replay-protection fallback cache."""
     cutoff = time.monotonic() - REPLAY_WINDOW_SECONDS
     expired = [k for k, ts in _seen_notifications.items() if ts < cutoff]
     for k in expired:
         del _seen_notifications[k]
+
+
+def _replay_check_and_mark(replay_key: str, now: float) -> bool:
+    """Return True if *replay_key* is a replay (already seen within the window).
+
+    Redis available: an atomic ``SET NX EX`` on the shared substrate (same client as
+    ``app.rate_limit`` / ``app.jobs.core_jobs``) — the 5-minute window is enforced across
+    every worker process, not just this one. Redis unavailable (TESTING, or the SET call
+    itself errors): falls back to the original in-process ``_seen_notifications`` dict,
+    exactly as before Redis support was added.
+    """
+    redis = _get_redis()
+    if redis is not None:
+        try:
+            acquired = redis.set(f"{_REPLAY_REDIS_PREFIX}{replay_key}", "1", nx=True, ex=REPLAY_WINDOW_SECONDS)
+            return not acquired
+        except Exception as e:
+            logger.warning("Webhook replay cache: Redis error ({}) — falling back to in-process cache", e)
+
+    if replay_key in _seen_notifications:
+        return True
+    _seen_notifications[replay_key] = now
+    return False
 
 
 def validate_notifications(payload: dict, db: Session) -> list[dict]:
@@ -380,10 +409,9 @@ def validate_notifications(payload: dict, db: Session) -> list[dict]:
         # Replay protection
         resource = notif.get("resource", "")
         replay_key = f"{sub_id}:{resource}"
-        if replay_key in _seen_notifications:
+        if _replay_check_and_mark(replay_key, now):
             logger.warning(f"Replay detected for {replay_key}, ignoring")
             continue
-        _seen_notifications[replay_key] = now
 
         user = db.get(User, sub.user_id)
         if not user:

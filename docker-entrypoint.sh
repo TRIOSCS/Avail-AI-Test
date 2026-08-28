@@ -41,8 +41,15 @@ fi
 # risks data corruption and masks the real problem. `alembic upgrade head` is
 # idempotent — it is a no-op when the schema is already current, so a non-zero
 # exit always means a genuine failure.
+#
+# Wrapped in docker-entrypoint-migrate.py (a Postgres advisory lock around the
+# alembic call) rather than invoked bare: `app`, `enrichment-worker`, and
+# `scheduler` all share this entrypoint and can boot concurrently, so without
+# serialization two containers could race `alembic upgrade head` against the
+# same DB. The wrapper still just runs `alembic upgrade head` under the hood —
+# see that file for why.
 echo "Running alembic upgrade head..."
-if ! runuser -u appuser -- alembic upgrade head 2>&1; then
+if ! runuser -u appuser -- python3 docker-entrypoint-migrate.py 2>&1; then
     echo "ERROR: alembic upgrade head failed — refusing to start the app." >&2
     echo "The database schema is not at head. Investigate the migration failure" >&2
     echo "before restarting; do not start the app against a stale schema." >&2

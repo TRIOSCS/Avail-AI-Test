@@ -188,8 +188,14 @@ class TestMakeEngine:
     """
 
     def test_postgresql_branch_passes_pool_and_timeout_args(self):
-        """A postgresql:// URL gets the production pool settings and the
-        statement_timeout / lock_timeout connect option."""
+        """A postgresql:// URL gets the default (env-tunable) pool settings and the
+        statement_timeout / lock_timeout connect option.
+
+        Defaults (5 + 5 = 10
+        max per process) match Settings.db_pool_size/db_max_overflow — see the
+        connection-budget comment above the module-level `engine` in
+        app/database.py for the arithmetic against Postgres max_connections.
+        """
         import app.database as database
 
         with patch.object(database, "create_engine") as mock_create:
@@ -198,13 +204,31 @@ class TestMakeEngine:
         assert mock_create.call_count == 1
         args, kwargs = mock_create.call_args
         assert args[0] == "postgresql://user:pass@localhost/testdb"
-        assert kwargs["pool_size"] == 20
-        assert kwargs["max_overflow"] == 20
+        assert kwargs["pool_size"] == 5
+        assert kwargs["max_overflow"] == 5
         assert kwargs["pool_timeout"] == 10
         assert kwargs["pool_pre_ping"] is True
         assert kwargs["pool_recycle"] == 1800
         assert "statement_timeout" in kwargs["connect_args"]["options"]
         assert "lock_timeout" in kwargs["connect_args"]["options"]
+
+    def test_postgresql_branch_honors_explicit_pool_kwargs(self):
+        """pool_size/max_overflow passed to _make_engine (as the module-level `engine`
+        does, from settings.db_pool_size/db_max_overflow) override the defaults — this
+        is the env-driven knob the scheduler/enrichment-worker/ host-worker processes
+        all share via the same Settings instance."""
+        import app.database as database
+
+        with patch.object(database, "create_engine") as mock_create:
+            database._make_engine(
+                "postgresql://user:pass@localhost/testdb",
+                pool_size=8,
+                max_overflow=12,
+            )
+
+        _, kwargs = mock_create.call_args
+        assert kwargs["pool_size"] == 8
+        assert kwargs["max_overflow"] == 12
 
     def test_sqlite_branch_uses_static_pool(self):
         """A sqlite:// URL builds a StaticPool engine with check_same_thread off."""
@@ -228,18 +252,46 @@ class TestMakeEngine:
 
         assert mock_create.call_count == 1
         _, kwargs = mock_create.call_args
-        assert kwargs["pool_size"] == 20
+        assert kwargs["pool_size"] == 5
         assert "options" not in kwargs["connect_args"]
 
     def test_make_engine_postgresql_builds_real_queue_pool(self):
         """Sanity check with create_engine un-patched: a postgresql:// URL
-        yields a real QueuePool engine (no connection is opened)."""
+        yields a real QueuePool engine (no connection is opened), sized to the
+        default 5 (matching Settings.db_pool_size's default)."""
         from app.database import _make_engine
 
         eng = _make_engine("postgresql://user:pass@localhost:5432/testdb")
         try:
             assert eng.pool.__class__.__name__ == "QueuePool"
-            assert eng.pool.size() == 20
+            assert eng.pool.size() == 5
             assert eng.dialect.name == "postgresql"
         finally:
             eng.dispose()
+
+    def test_make_engine_postgresql_honors_explicit_pool_size(self):
+        """Sanity check with create_engine un-patched: explicit pool_size is
+        honored on a real QueuePool (no connection is opened)."""
+        from app.database import _make_engine
+
+        eng = _make_engine(
+            "postgresql://user:pass@localhost:5432/testdb",
+            pool_size=8,
+            max_overflow=12,
+        )
+        try:
+            assert eng.pool.size() == 8
+            assert eng.pool._max_overflow == 12
+        finally:
+            eng.dispose()
+
+    def test_module_engine_uses_settings_pool_values(self):
+        """The module-level `engine` is built with settings.db_pool_size /
+        settings.db_max_overflow, not a hardcoded literal — this is what makes
+        DB_POOL_SIZE/DB_MAX_OVERFLOW an actual runtime knob."""
+        from app.config import settings
+        from app.database import engine as db_engine
+
+        if db_engine.dialect.name != "postgresql":
+            pytest.skip("module engine is sqlite in TESTING mode; pool sizing N/A")
+        assert db_engine.pool.size() == settings.db_pool_size

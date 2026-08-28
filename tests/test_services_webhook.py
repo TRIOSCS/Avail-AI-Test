@@ -161,6 +161,23 @@ def _make_notification(
     }
 
 
+class _FakeReplayRedis:
+    """Minimal redis stand-in implementing the SET NX EX slice the webhook replay cache
+    uses (mirrors ``FakeRedis`` in tests/test_outreach_rate_limiter.py)."""
+
+    def __init__(self, *, fail: bool = False):
+        self.store: dict[str, str] = {}
+        self.fail = fail
+
+    def set(self, key: str, value: str, nx: bool = False, ex: int | None = None):
+        if self.fail:
+            raise RuntimeError("redis down")
+        if nx and key in self.store:
+            return None
+        self.store[key] = value
+        return True
+
+
 def _make_message(
     msg_id: str = "msg-001",
     subject: str = "RE: RFQ LM317T",
@@ -1063,6 +1080,44 @@ class TestValidateNotifications:
         # Should be accepted again after expiry
         result2 = validate_notifications({"value": [notif.copy()]}, db_session)
         assert len(result2) == 1
+
+    def test_validate_replay_redis_rejects_duplicate(self, db_session, test_user, monkeypatch):
+        """Replay protection via the Redis SET NX EX path (shared across worker
+        processes) rejects a duplicate sub+resource within the window, without touching
+        the in-process fallback cache."""
+        fake_redis = _FakeReplayRedis()
+        monkeypatch.setattr("app.services.webhook_service._get_redis", lambda: fake_redis)
+
+        _make_subscription(db_session, test_user, sub_id="sub-val-redis", client_state="secret")
+        notif = _make_notification(
+            sub_id="sub-val-redis", client_state="secret", resource="Users('abc')/Messages('msg-redis')"
+        )
+
+        result1 = validate_notifications({"value": [notif.copy()]}, db_session)
+        assert len(result1) == 1
+
+        result2 = validate_notifications({"value": [notif.copy()]}, db_session)
+        assert result2 == []
+
+        # The Redis path handled it — the in-process fallback dict was never touched.
+        assert "sub-val-redis:Users('abc')/Messages('msg-redis')" not in _seen_notifications
+
+    def test_validate_replay_redis_error_falls_back_to_in_process(self, db_session, test_user, monkeypatch):
+        """A Redis SET error degrades to the in-process cache instead of failing open
+        (silently accepting every replay) or raising."""
+        fake_redis = _FakeReplayRedis(fail=True)
+        monkeypatch.setattr("app.services.webhook_service._get_redis", lambda: fake_redis)
+
+        _make_subscription(db_session, test_user, sub_id="sub-val-redis-err", client_state="secret")
+        notif = _make_notification(
+            sub_id="sub-val-redis-err", client_state="secret", resource="Users('abc')/Messages('msg-redis-err')"
+        )
+
+        result1 = validate_notifications({"value": [notif.copy()]}, db_session)
+        assert len(result1) == 1
+
+        result2 = validate_notifications({"value": [notif.copy()]}, db_session)
+        assert result2 == []
 
     def test_validate_timing_safe(self, db_session, test_user):
         """Verify that hmac.compare_digest is used for clientState comparison."""
