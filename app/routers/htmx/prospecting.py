@@ -21,6 +21,8 @@ from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
 from ...constants import (
+    PROSPECT_DISMISS_REASON_LABELS,
+    PROSPECT_DISMISS_REASONS,
     AccessKey,
     ProspectAccountStatus,
     UserRole,
@@ -492,6 +494,38 @@ async def claim_prospect_htmx(
         message=message,
         kind=kind,
         flt_status=form.get("flt_status", ""),
+    )
+
+
+@router.get("/v2/partials/prospecting/{prospect_id}/dismiss-form", response_class=HTMLResponse)
+async def dismiss_prospect_form(
+    request: Request,
+    prospect_id: int,
+    ctx: str = "grid",
+    flt_status: str = "",
+    user: User = Depends(require_buyer),
+    db: Session = Depends(get_db),
+):
+    """Modal body capturing a dismiss reason (audit M17), loaded into #modal-content by
+    the Dismiss button (grid + detail — mirrors the assign-form open-modal pattern).
+
+    ``ctx`` is "grid" (posts back to the in-grid card) or "detail" (posts back to
+    #main-content) so the dismiss response swaps the surface the action came from.
+    """
+    prospect = db.get(ProspectAccount, prospect_id)
+    if not prospect:
+        raise HTTPException(404, "Prospect not found")
+
+    return template_response(
+        "htmx/partials/prospecting/dismiss_modal.html",
+        {
+            "request": request,
+            "prospect": prospect,
+            "reasons": PROSPECT_DISMISS_REASONS,
+            "reason_labels": PROSPECT_DISMISS_REASON_LABELS,
+            "ctx": "detail" if ctx == "detail" else "grid",
+            "flt_status": flt_status,
+        },
     )
 
 

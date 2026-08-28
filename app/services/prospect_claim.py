@@ -15,7 +15,7 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.constants import ProspectAccountStatus
+from app.constants import PROSPECT_DISMISS_REASONS, ProspectAccountStatus
 from app.models import Company, User
 from app.models.crm import CustomerSite, SiteContact
 from app.models.prospect_account import ProspectAccount
@@ -333,10 +333,13 @@ def dismiss_prospect(prospect_id: int, user_id: int, db: Session, *, reason: str
     """Dismiss a SUGGESTED prospect out of the pool.
 
     The transition the dismiss button used to inline in the router (audit M17 — "keep
-    routers thin"): status -> DISMISSED, stamp who/when, and record the ``reason`` (defaults
-    to ``"other"``; the field is ``String(255)`` so it is trimmed). Claimed prospects use
-    Release instead — only a SUGGESTED prospect can be dismissed. Row is locked for update
-    so a concurrent claim/dismiss can't race the status.
+    routers thin"): status -> DISMISSED, stamp who/when, and record the ``reason``. The
+    column is a free-form ``String(255)`` (no migration), but ``reason`` is validated
+    against the closed ``PROSPECT_DISMISS_REASONS`` vocabulary here — anything outside it
+    (missing, stale client, tampered POST) safely falls back to ``"other"`` rather than
+    writing an arbitrary string. Claimed prospects use Release instead — only a SUGGESTED
+    prospect can be dismissed. Row is locked for update so a concurrent claim/dismiss
+    can't race the status.
 
     Returns: {prospect_id, company_name, status}
     Raises: LookupError if missing, ValueError if not SUGGESTED.
@@ -351,7 +354,8 @@ def dismiss_prospect(prospect_id: int, user_id: int, db: Session, *, reason: str
     prospect.status = ProspectAccountStatus.DISMISSED
     prospect.dismissed_by = user_id
     prospect.dismissed_at = datetime.now(UTC)
-    prospect.dismiss_reason = (reason or "other").strip()[:255]
+    reason = (reason or "").strip()
+    prospect.dismiss_reason = reason if reason in PROSPECT_DISMISS_REASONS else "other"
     db.commit()
 
     logger.info(

@@ -1,0 +1,41 @@
+{#
+  prospecting/dismiss_modal.html — Reason picker for dismissing a SUGGESTED prospect
+  (audit M17). Loaded into #modal-content by the "Dismiss" button (grid + detail),
+  replacing the old hx-confirm on that button.
+  Receives: prospect (ORM), reasons (tuple[str, ...] — PROSPECT_DISMISS_REASONS),
+            reason_labels (dict[str, str] — PROSPECT_DISMISS_REASON_LABELS),
+            ctx ("grid"|"detail"), flt_status (active grid filter, forwarded so the
+            card swap respects it).
+  Posts to the EXISTING /v2/partials/prospecting/<id>/dismiss endpoint with reason +
+  flt_status. Depends on: HTMX, Alpine.js ($dispatch close-modal), Tailwind CSS.
+#}
+{% from "htmx/partials/shared/_macros.html" import close_modal_on_success -%}
+{% set target = '#main-content' if ctx == 'detail' else '#prospect-' ~ prospect.id %}
+{% set swap = 'innerHTML' if ctx == 'detail' else 'outerHTML' %}
+<div class="p-4">
+  <h3 id="modal-title" class="text-sm font-semibold text-gray-900 mb-1">Dismiss account</h3>
+  <p class="text-secondary mb-3">
+    Dismiss <strong>{{ prospect.name }}</strong>? It leaves the suggested pool. Pick a reason.
+  </p>
+
+  <form hx-post="/v2/partials/prospecting/{{ prospect.id }}/dismiss"
+        hx-target="{{ target }}"
+        hx-swap="{{ swap }}"
+        hx-vals='{"flt_status": "{{ flt_status|default('') }}"}'
+        {{ close_modal_on_success() }}
+        data-loading-disable
+        class="space-y-3">
+    <div class="space-y-1.5">
+      {% for r in reasons %}
+      <label class="flex items-center gap-2 text-sm text-gray-700">
+        <input type="radio" name="reason" value="{{ r }}" {% if loop.first %}checked{% endif %} class="shrink-0">
+        {{ reason_labels.get(r, r) }}
+      </label>
+      {% endfor %}
+    </div>
+    <div class="flex justify-end gap-2 pt-1">
+      <button type="button" @click="$dispatch('close-modal')" class="btn-secondary btn-sm">Cancel</button>
+      <button type="submit" data-loading-disable class="btn-primary btn-sm">Dismiss</button>
+    </div>
+  </form>
+</div>

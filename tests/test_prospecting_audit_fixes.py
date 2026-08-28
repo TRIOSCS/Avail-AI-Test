@@ -263,12 +263,119 @@ class TestM17DismissService:
         with pytest.raises(ValueError):
             dismiss_prospect(p.id, test_user.id, db_session)
 
-    def test_dismiss_button_has_confirm(self):
+    def test_dismiss_accepts_every_closed_reason(self, db_session, test_user):
+        """Every value in PROSPECT_DISMISS_REASONS round-trips onto the row
+        unchanged."""
+        from app.constants import PROSPECT_DISMISS_REASONS
+        from app.services.prospect_claim import dismiss_prospect
+
+        for reason in PROSPECT_DISMISS_REASONS:
+            p = _prospect(db_session)
+            dismiss_prospect(p.id, test_user.id, db_session, reason=reason)
+            db_session.refresh(p)
+            assert p.dismiss_reason == reason
+
+    def test_dismiss_bad_reason_falls_back_to_other(self, db_session, test_user):
+        from app.services.prospect_claim import dismiss_prospect
+
+        p = _prospect(db_session)
+        dismiss_prospect(p.id, test_user.id, db_session, reason="<script>not-a-real-reason")
+        db_session.refresh(p)
+        assert p.dismiss_reason == "other"
+
+    def test_dismiss_missing_reason_falls_back_to_other(self, db_session, test_user):
+        from app.services.prospect_claim import dismiss_prospect
+
+        p = _prospect(db_session)
+        dismiss_prospect(p.id, test_user.id, db_session)  # reason omitted entirely
+        db_session.refresh(p)
+        assert p.dismiss_reason == "other"
+
+    def test_dismiss_button_no_longer_confirms_inline(self):
+        """The explicit reason modal REPLACES hx-confirm on the Dismiss button — it now
+        opens the dismiss-form modal instead of firing the POST directly with hx-
+        confirm.
+
+        (detail.html's Release button keeps its own unrelated hx-confirm.)
+        """
         from pathlib import Path
 
         for tmpl in ("_card.html", "detail.html"):
             html = Path(f"app/templates/htmx/partials/prospecting/{tmpl}").read_text()
-            assert "/dismiss" in html and "hx-confirm" in html
+            assert 'hx-post="/v2/partials/prospecting/{{ prospect.id }}/dismiss"' not in html
+            assert "/dismiss-form" in html
+            assert "open-modal" in html
+
+
+# ── M17 — dismiss-form modal: radios, ctx-driven target, flt_status forwarding ─
+
+
+class TestM17DismissModal:
+    def test_dismiss_form_renders_all_reasons_as_radios(self, client, db_session):
+        from app.constants import PROSPECT_DISMISS_REASONS
+
+        p = _prospect(db_session)
+        resp = client.get(f"/v2/partials/prospecting/{p.id}/dismiss-form")
+        assert resp.status_code == 200
+        for reason in PROSPECT_DISMISS_REASONS:
+            assert f'value="{reason}"' in resp.text
+        assert resp.text.count('type="radio"') == len(PROSPECT_DISMISS_REASONS)
+
+    def test_dismiss_form_missing_prospect_404s(self, client):
+        resp = client.get("/v2/partials/prospecting/999999/dismiss-form")
+        assert resp.status_code == 404
+
+    def test_dismiss_form_grid_ctx_targets_card_and_forwards_filter(self, client, db_session):
+        p = _prospect(db_session)
+        resp = client.get(f"/v2/partials/prospecting/{p.id}/dismiss-form?ctx=grid&flt_status=suggested")
+        assert resp.status_code == 200
+        assert f'hx-target="#prospect-{p.id}"' in resp.text
+        assert 'hx-swap="outerHTML"' in resp.text
+        assert f"/v2/partials/prospecting/{p.id}/dismiss" in resp.text
+        assert '"flt_status": "suggested"' in resp.text
+
+    def test_dismiss_form_detail_ctx_targets_main_content(self, client, db_session):
+        p = _prospect(db_session)
+        resp = client.get(f"/v2/partials/prospecting/{p.id}/dismiss-form?ctx=detail")
+        assert resp.status_code == 200
+        assert 'hx-target="#main-content"' in resp.text
+        assert 'hx-swap="innerHTML"' in resp.text
+
+    def test_dismiss_submit_grid_ctx_removes_card_when_filter_no_longer_matches(self, client, db_session):
+        """Dismissing under the 'suggested' filter flips the status away from it, so the
+        re-rendered response omits the card (audit M15/M17 card-removal-under-
+        filter)."""
+        p = _prospect(db_session)
+        resp = client.post(
+            f"/v2/partials/prospecting/{p.id}/dismiss",
+            data={"reason": "duplicate", "flt_status": "suggested"},
+        )
+        assert resp.status_code == 200
+        assert f'id="prospect-{p.id}"' not in resp.text
+        db_session.refresh(p)
+        assert p.dismiss_reason == "duplicate"
+
+    def test_dismiss_submit_grid_ctx_keeps_card_when_filter_matches(self, client, db_session):
+        """Filtering on the 'dismissed' pill: the freshly-dismissed card stays
+        visible."""
+        p = _prospect(db_session)
+        resp = client.post(
+            f"/v2/partials/prospecting/{p.id}/dismiss",
+            data={"reason": "bad_data", "flt_status": "dismissed"},
+        )
+        assert resp.status_code == 200
+        assert f'id="prospect-{p.id}"' in resp.text
+
+    def test_dismiss_submit_detail_ctx_targets_main_content(self, client, db_session):
+        p = _prospect(db_session)
+        resp = client.post(
+            f"/v2/partials/prospecting/{p.id}/dismiss",
+            data={"reason": "other", "flt_status": ""},
+            headers={"HX-Target": "main-content"},
+        )
+        assert resp.status_code == 200
+        # Detail render — page-readable wrapper, not the grid card partial.
+        assert "page-readable" in resp.text
 
 
 # ── M7 — enrich locks the row before the read-check-write ─────────────────────
