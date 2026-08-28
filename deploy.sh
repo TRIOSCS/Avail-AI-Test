@@ -186,44 +186,82 @@ rollback_app() {
     # scheduler — it must be re-tagged on its own. Recreate both together so
     # there's never a moment with a stale-app/fresh-scheduler (or vice versa)
     # mismatch, and so the exactly-one-scheduler invariant holds throughout.
-    RECREATE_TARGETS="app"
     if [ -n "$PREV_SCHEDULER_IMAGE_ID" ] && [ -n "$PREV_SCHEDULER_IMAGE_REF" ]; then
         echo "==> ROLLBACK: restoring previous scheduler image ${PREV_SCHEDULER_IMAGE_REF} -> ${PREV_SCHEDULER_IMAGE_ID}"
         if ! docker tag "$PREV_SCHEDULER_IMAGE_ID" "$PREV_SCHEDULER_IMAGE_REF"; then
             echo "==> ROLLBACK ERROR: could not re-tag the previous scheduler image — manual intervention required." >&2
             return 1
         fi
-        RECREATE_TARGETS="app scheduler"
-    else
-        # CRITICAL: no previous scheduler image to restore to means this is the
-        # first deploy of the scheduler split -- the app image we're about to
-        # restore predates RUN_SCHEDULER entirely, so it starts its own
-        # in-process scheduler unconditionally (today's pre-split behavior).
-        # Leaving the `scheduler` container running after that restore would
-        # mean TWO live schedulers -- exactly the failure mode this feature
-        # exists to prevent. Stop it BEFORE recreating app (not after), so
-        # there is never a window with both alive.
-        echo "==> ROLLBACK: no previous scheduler image recorded (first deploy of the split)." >&2
-        echo "==>           Stopping the scheduler container: the restored (pre-split) app image" >&2
-        echo "==>           runs its own scheduler unconditionally, so leaving scheduler running" >&2
-        echo "==>           too would mean two live schedulers." >&2
-        docker compose stop scheduler || true
+        docker compose up -d --force-recreate app scheduler || true
+        echo "==> ROLLBACK: waiting for the restored app to become healthy..."
+        RB_TRIES=0
+        RB_STATUS="unknown"
+        while [ $RB_TRIES -lt "$MAX_TRIES" ]; do
+            RB_CONTAINER="$(docker compose ps -q app 2>/dev/null || true)"
+            RB_STATUS="$(docker inspect --format='{{.State.Health.Status}}' "$RB_CONTAINER" 2>/dev/null || echo "unknown")"
+            if [ "$RB_STATUS" = "healthy" ]; then
+                echo "==> ROLLBACK: previous app version is healthy again."
+                return 0
+            fi
+            RB_TRIES=$((RB_TRIES + 1))
+            sleep 2
+        done
+        echo "==> ROLLBACK CRITICAL: restored app did NOT become healthy (last status: ${RB_STATUS}) — manual intervention required." >&2
+        return 1
     fi
-    docker compose up -d --force-recreate $RECREATE_TARGETS || true
-    echo "==> ROLLBACK: waiting for the restored app to become healthy..."
-    RB_TRIES=0
-    RB_STATUS="unknown"
-    while [ $RB_TRIES -lt "$MAX_TRIES" ]; do
-        RB_CONTAINER="$(docker compose ps -q app 2>/dev/null || true)"
-        RB_STATUS="$(docker inspect --format='{{.State.Health.Status}}' "$RB_CONTAINER" 2>/dev/null || echo "unknown")"
-        if [ "$RB_STATUS" = "healthy" ]; then
-            echo "==> ROLLBACK: previous app version is healthy again."
-            return 0
-        fi
-        RB_TRIES=$((RB_TRIES + 1))
-        sleep 2
-    done
-    echo "==> ROLLBACK CRITICAL: restored app did NOT become healthy (last status: ${RB_STATUS}) — manual intervention required." >&2
+
+    # CRITICAL (transition-deploy hazard, final review C1): no previous
+    # scheduler image exists, meaning this is the FIRST deploy of the
+    # scheduler split — PREV_APP_IMAGE predates RUN_SCHEDULER entirely (starts
+    # APScheduler unconditionally) AND predates the app's move to multiple
+    # uvicorn workers. `docker compose up` always uses the CURRENT compose
+    # file's `command:` for app (--workers 2) regardless of which image is
+    # tagged there — an image's own baked-in CMD is irrelevant once compose
+    # overrides it. Force-recreating app here would run the OLD
+    # unconditional-scheduler code under the NEW multi-worker command: an
+    # in-process scheduler in EVERY worker process, with the app healthcheck
+    # passing throughout (silent — nobody would notice without reading logs).
+    #
+    # Rejected alternative: synthesize a temporary compose override pinning
+    # app back to the old single-worker command and force-recreate under it.
+    # That trades this hazard for a different one — a hardcoded "known-old"
+    # command baked into deploy.sh that can silently go stale the next time
+    # app's command changes, applied automatically during an already-failed,
+    # unattended rollback. Refusing and handing off to a human is simpler and
+    # strictly safer: this is a ONE-TIME transitional case (once this deploy
+    # succeeds, PREV_SCHEDULER_IMAGE_ID is never empty again), and an obvious,
+    # loud outage beats a silent multi-scheduler one every time.
+    echo "==> ROLLBACK CRITICAL: cannot safely auto-recreate app on this transition deploy." >&2
+    echo "==>   No previous scheduler image exists, so the previous app image predates" >&2
+    echo "==>   RUN_SCHEDULER (unconditional in-process scheduler) while the CURRENT" >&2
+    echo "==>   compose file's app command runs --workers 2 — recreating app under that" >&2
+    echo "==>   combination would silently start a scheduler in EVERY worker process," >&2
+    echo "==>   with the healthcheck still passing throughout. Refusing." >&2
+    echo "==>" >&2
+    echo "==>   Stopping app (scheduler is already stopped) — the site is going DOWN." >&2
+    echo "==>   MANUAL RECOVERY REQUIRED:" >&2
+    echo "==>     1. git log --oneline -5   (identify the bad commit(s) on this host)" >&2
+    echo "==>     2. git revert <bad commit>   (or checkout the last known-good commit)" >&2
+    echo "==>     3. Re-run ./deploy.sh from that reverted state — a full clean deploy of" >&2
+    echo "==>        the pre-split shape, not a partial mix of old image + new command." >&2
+    docker compose stop app scheduler 2>/dev/null || true
+
+    # Verified, not assumed: confirm the end state really is zero schedulers
+    # running anywhere before returning, per the "at most ONE scheduler
+    # anywhere, verified by the script" requirement. `-a` (not just `ps -q`)
+    # so a container that failed to stop for some reason is still found.
+    echo "==> ROLLBACK: verifying app + scheduler are both stopped (zero schedulers running)..."
+    APP_ID="$(docker compose ps -aq app 2>/dev/null || true)"
+    SCHED_ID="$(docker compose ps -aq scheduler 2>/dev/null || true)"
+    APP_RUNNING="false"
+    [ -n "$APP_ID" ] && APP_RUNNING="$(docker inspect --format='{{.State.Running}}' "$APP_ID" 2>/dev/null || echo false)"
+    SCHED_RUNNING="false"
+    [ -n "$SCHED_ID" ] && SCHED_RUNNING="$(docker inspect --format='{{.State.Running}}' "$SCHED_ID" 2>/dev/null || echo false)"
+    if [ "$APP_RUNNING" = "true" ] || [ "$SCHED_RUNNING" = "true" ]; then
+        echo "==> ROLLBACK CRITICAL: app or scheduler is STILL running after stop (app=${APP_RUNNING}, scheduler=${SCHED_RUNNING}) — manual intervention required IMMEDIATELY." >&2
+        return 1
+    fi
+    echo "==> ROLLBACK: confirmed app and scheduler are both stopped — zero schedulers running. Manual recovery required (see above)."
     return 1
 }
 
@@ -328,11 +366,47 @@ echo "==> MATCH: scheduler build tag ($SCHEDULER_COMMIT)"
 # gate broken, etc.) and must not be left live.
 echo ""
 echo "==> Verifying exactly-one-scheduler invariant..."
-SCHED_LOG_COUNT=$(docker compose logs scheduler 2>/dev/null | grep -c "APScheduler configured" || true)
+
+# app must NEVER log this line (RUN_SCHEDULER=0 there — no code path reaches
+# it regardless of how long we wait), so this half stays a strict, immediate,
+# single check — no polling needed for a condition that can't legitimately be
+# "still arriving."
 APP_LOG_COUNT=$(docker compose logs app 2>/dev/null | grep -c "APScheduler configured" || true)
-echo "==> 'APScheduler configured' occurrences — scheduler: ${SCHED_LOG_COUNT:-0}, app: ${APP_LOG_COUNT:-0}"
-if [ "${SCHED_LOG_COUNT:-0}" -ne 1 ] || [ "${APP_LOG_COUNT:-0}" -ne 0 ]; then
-    echo "==> CRITICAL: exactly-one-scheduler invariant VIOLATED (scheduler=${SCHED_LOG_COUNT:-0}, app=${APP_LOG_COUNT:-0})." >&2
+if [ "${APP_LOG_COUNT:-0}" -ne 0 ]; then
+    echo "==> CRITICAL: exactly-one-scheduler invariant VIOLATED (app=${APP_LOG_COUNT:-0}, must be 0)." >&2
+    echo "==>           Two live schedulers double-send approval-notification emails (no cross-process" >&2
+    echo "==>           locking on that outbox) — this deploy MUST NOT stay live." >&2
+    echo "==> Attempting automatic rollback..."
+    if rollback_app; then
+        echo "==> Rollback complete: previous images restored and app healthy. Deploy FAILED."
+    else
+        echo "==> Rollback did NOT fully succeed — investigate immediately."
+    fi
+    exit 1
+fi
+
+# scheduler, unlike app, can legitimately take a while to reach this log line
+# — the alembic advisory lock may be waiting behind app's own migration, then
+# the full app import graph + seeds + register_all_jobs() (61 jobs) all run
+# before it logs. A single early snapshot (final review I1) reads a healthy-
+# but-still-booting scheduler as 0 occurrences: a false violation that
+# triggers an unnecessary rollback. Poll instead, with a bounded window —
+# declare victory the moment it reads exactly 1, and only declare a real
+# violation once the window is exhausted.
+SCHED_POLL_TRIES=0
+SCHED_POLL_MAX=12   # 12 x 10s = up to 120s
+SCHED_LOG_COUNT=0
+while [ $SCHED_POLL_TRIES -lt $SCHED_POLL_MAX ]; do
+    SCHED_LOG_COUNT=$(docker compose logs scheduler 2>/dev/null | grep -c "APScheduler configured" || true)
+    if [ "${SCHED_LOG_COUNT:-0}" -eq 1 ]; then
+        break
+    fi
+    SCHED_POLL_TRIES=$((SCHED_POLL_TRIES + 1))
+    sleep 10
+done
+echo "==> 'APScheduler configured' occurrences — scheduler: ${SCHED_LOG_COUNT:-0} (after ${SCHED_POLL_TRIES} x 10s poll(s)), app: ${APP_LOG_COUNT:-0}"
+if [ "${SCHED_LOG_COUNT:-0}" -ne 1 ]; then
+    echo "==> CRITICAL: exactly-one-scheduler invariant VIOLATED (scheduler=${SCHED_LOG_COUNT:-0}, must be 1) after waiting up to $((SCHED_POLL_MAX * 10))s." >&2
     echo "==>           Two live schedulers double-send approval-notification emails (no cross-process" >&2
     echo "==>           locking on that outbox) — this deploy MUST NOT stay live." >&2
     echo "==> Attempting automatic rollback..."
