@@ -468,7 +468,9 @@ def save_bid_reference(db: Session, *, list_id: int, bid_id: int, po_number: str
     against the accepted bid-back, entered by the trader once the customer confirms it
     verbally or in writing. AVAIL never validates or syncs this value against Acctivate
     (CLAUDE.md "Hard constraints" — nothing integrates with Acctivate, references only).
-    Blank input clears a previously-saved reference.
+    Blank input clears a previously-saved reference. Truncated to 100 chars server-side —
+    ``CustomerBid.po_number`` is ``String(100)``; SQLite tolerates an over-length value
+    but PG raises a DataError, so the cap has to live here, not just at the column.
 
     The caller (the router) has already gated ownership via ``_require_owner``; this
     still 404s if the bid does not exist or belongs to a different list (existence not
@@ -477,7 +479,7 @@ def save_bid_reference(db: Session, *, list_id: int, bid_id: int, po_number: str
     bid = db.get(CustomerBid, bid_id)
     if bid is None or bid.excess_list_id != list_id:
         raise HTTPException(404, f"Bid {bid_id} not found on list {list_id}")
-    bid.po_number = po_number.strip() or None
+    bid.po_number = po_number.strip()[:100] or None
     db.commit()
     db.refresh(bid)
     logger.info("Saved CustomerBid id={} po_number", bid.id)

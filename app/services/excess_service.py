@@ -1652,7 +1652,10 @@ def save_offer_reference(db: Session, *, offer_id: int, sales_order_number: str)
     A free-text record of the sales order the accepted offer was fulfilled under, cut in
     the ERP — reference only, AVAIL never validates or syncs it against Acctivate
     (CLAUDE.md "Hard constraints" — nothing integrates with Acctivate). Blank input
-    clears a previously-saved reference.
+    clears a previously-saved reference. Truncated to 100 chars server-side —
+    ``ExcessOffer.sales_order_number`` is ``String(100)``; SQLite tolerates an
+    over-length value but PG raises a DataError, so the cap has to live here, not just
+    at the column.
 
     The caller (the router) has already gated ownership via ``_require_owner``; this
     still 404s if the offer does not exist, mirroring ``award_offer``/``unaward_offer``'s
@@ -1661,7 +1664,7 @@ def save_offer_reference(db: Session, *, offer_id: int, sales_order_number: str)
     offer = db.get(ExcessOffer, offer_id)
     if not offer:
         raise HTTPException(404, f"ExcessOffer {offer_id} not found")
-    offer.sales_order_number = sales_order_number.strip() or None
+    offer.sales_order_number = sales_order_number.strip()[:100] or None
     _safe_commit(db, entity="excess offer reference")
     db.refresh(offer)
     logger.info("Saved ExcessOffer id={} sales_order_number", offer_id)

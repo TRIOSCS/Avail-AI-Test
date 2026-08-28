@@ -290,6 +290,33 @@ class TestBidReferenceRoute:
         db_session.refresh(bid)
         assert bid.po_number is None
 
+    def test_over_100_chars_is_truncated_to_100(
+        self, client, db_session: Session, posted_list: ExcessList, trader: User
+    ):
+        """``CustomerBid.po_number`` is ``String(100)``.
+
+        SQLite (this test's DB) doesn't
+        enforce that length, so an over-long value only DataErrors on real PG — this
+        exercises the server-side ``[:100]`` truncation in ``save_bid_reference`` that
+        guards against it directly, rather than depending on the column constraint.
+        """
+        from app.main import app
+
+        bid = _accepted_bid(db_session, posted_list, trader)
+        long_value = "P" * 150
+        expected = long_value[:100]
+        restore = _own(app, trader)
+        try:
+            resp = client.post(f"/api/resell/{posted_list.id}/bid/{bid.id}/reference", data={"po_number": long_value})
+        finally:
+            restore()
+        assert resp.status_code == 200
+        assert expected in resp.text
+        assert long_value not in resp.text
+        db_session.refresh(bid)
+        assert bid.po_number == expected
+        assert len(bid.po_number) == 100
+
 
 # ── Route: POST …/offers/{id}/reference ─────────────────────────────
 
@@ -312,6 +339,36 @@ class TestOfferReferenceRoute:
         db_session.refresh(offer)
         assert offer.sales_order_number == "SO-2026-0917"
 
+    def test_over_100_chars_is_truncated_to_100(
+        self, client, db_session: Session, posted_list: ExcessList, trader: User
+    ):
+        """``ExcessOffer.sales_order_number`` is ``String(100)``.
+
+        Mirrors the bid-route
+        truncation test above — same server-side ``[:100]`` cap in
+        ``save_offer_reference``, exercised directly rather than depending on PG's
+        column constraint (SQLite, this test's DB, doesn't enforce it).
+        """
+        from app.main import app
+
+        offer, _line = _won_offer(db_session, posted_list, trader)
+        long_value = "S" * 150
+        expected = long_value[:100]
+        restore = _own(app, trader)
+        try:
+            resp = client.post(
+                f"/api/resell/{posted_list.id}/offers/{offer.id}/reference",
+                data={"sales_order_number": long_value},
+            )
+        finally:
+            restore()
+        assert resp.status_code == 200
+        assert expected in resp.text
+        assert long_value not in resp.text
+        db_session.refresh(offer)
+        assert offer.sales_order_number == expected
+        assert len(offer.sales_order_number) == 100
+
     def test_non_owner_forbidden(self, client, db_session: Session, posted_list: ExcessList, trader: User):
         """The default client user (test_user) is not the list owner → 403."""
         offer, _line = _won_offer(db_session, posted_list, trader)
@@ -321,6 +378,47 @@ class TestOfferReferenceRoute:
         assert resp.status_code == 403
         db_session.refresh(offer)
         assert offer.sales_order_number is None
+
+    def test_cross_list_offer_id_404s_and_leaves_value_unchanged(
+        self, client, db_session: Session, posted_list: ExcessList, seller_company: Company, trader: User
+    ):
+        """Finding #32 pattern (mirrors ``resell_award_offer``/``resell_unaward_offer``,
+        see test_resell_award.py::test_award_route_wrong_list_id_404_nothing_mutated /
+        ::test_unaward_route_wrong_list_id_404_nothing_mutated): the owner of list A
+        posting to A's URL with an offer id that actually belongs to list B must 404 —
+        existence not revealed across lists, and the offer must not be mutated under the
+        wrong list's URL. This is the offer route's own inline cross-list guard (``offer
+        is None or offer.excess_list_id != list_id`` in ``resell_save_offer_reference``);
+        the bid-side twin lives in ``save_bid_reference`` and is already covered by
+        ``TestSaveBidReferenceService::test_404_bid_not_on_list``.
+        """
+        from app.main import app
+
+        other_list = ExcessList(
+            company_id=seller_company.id,
+            owner_id=trader.id,
+            title="ERP Refs Other List (cross-list target)",
+            status=ExcessListStatus.COLLECTING,
+        )
+        db_session.add(other_list)
+        db_session.flush()
+        db_session.add(ExcessLineItem(excess_list_id=other_list.id, part_number="ERP-OTHER", quantity=25))
+        db_session.commit()
+        db_session.refresh(other_list)
+
+        offer_on_b, _line_b = _won_offer(db_session, other_list, trader)
+        restore = _own(app, trader)
+        try:
+            resp = client.post(
+                f"/api/resell/{posted_list.id}/offers/{offer_on_b.id}/reference",
+                data={"sales_order_number": "SO-SHOULD-NOT-SAVE"},
+            )
+        finally:
+            restore()
+
+        assert resp.status_code == 404
+        db_session.refresh(offer_on_b)
+        assert offer_on_b.sales_order_number is None
 
 
 # ── Template: accepted-branch capture UI + next-step checklist ─────
