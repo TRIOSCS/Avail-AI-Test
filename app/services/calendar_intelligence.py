@@ -116,12 +116,12 @@ async def scan_calendar_events(token: str, user_id: int, db: Session, lookback_d
                 attendee_emails.append(email)
 
         # Organizer email
-        organizer_data = event.get("organizer", {}).get("emailAddress", {})
+        organizer_data = (event.get("organizer") or {}).get("emailAddress", {})
         organizer_email = (organizer_data.get("address") or "").strip().lower() or None
 
         # Start / end times
-        start_dt = _parse_graph_dt(event.get("start", {}).get("dateTime"))
-        end_dt = _parse_graph_dt(event.get("end", {}).get("dateTime"))
+        start_dt = _parse_graph_dt((event.get("start") or {}).get("dateTime"))
+        end_dt = _parse_graph_dt((event.get("end") or {}).get("dateTime"))
         if start_dt is None:
             continue  # Can't stamp occurred_at without a start time
         if end_dt is None:

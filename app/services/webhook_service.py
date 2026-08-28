@@ -28,7 +28,7 @@ from app.config import settings
 from app.constants import UserRole
 from app.models import ActivityLog, GraphSubscription, User
 
-# Graph webhook subscriptions for mail expire after max 3 days (4230 min)
+# Graph webhook subscriptions for mail expire after max 7 days (10,080 min)
 SUBSCRIPTION_LIFETIME_HOURS = 70  # ~3 days, renew before expiry
 
 # HTTP status codes returned by GraphClient.patch_json that confirm the
@@ -492,14 +492,14 @@ async def _handle_calendar_notification(notif: dict, token: str, user: User, db:
         return
 
     subject = (event.get("subject") or "").strip()
-    start_dt = _parse_graph_dt(event.get("start", {}).get("dateTime"))
-    end_dt = _parse_graph_dt(event.get("end", {}).get("dateTime"))
+    start_dt = _parse_graph_dt((event.get("start") or {}).get("dateTime"))
+    end_dt = _parse_graph_dt((event.get("end") or {}).get("dateTime"))
     if start_dt is None:
         return
     if end_dt is None:
         end_dt = start_dt
 
-    organizer_data = event.get("organizer", {}).get("emailAddress", {})
+    organizer_data = (event.get("organizer") or {}).get("emailAddress", {})
     organizer_email = (organizer_data.get("address") or "").strip().lower() or None
 
     attendee_emails = []

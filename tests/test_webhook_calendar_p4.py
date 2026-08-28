@@ -525,6 +525,41 @@ class TestHandleNotificationCalendar:
 
         mock_log_meeting.assert_not_called()
 
+    def test_calendar_notification_explicit_null_start_organizer_tolerated(self, db_session, test_user):
+        """A Graph event with EXPLICIT null start/organizer (not merely absent keys) is
+        skipped without raising, and the batch continues to process the next item."""
+        from app.services.webhook_service import handle_notification
+
+        cal_sub1 = _make_calendar_sub(db_session, test_user, sub_id="cal-null-001", client_state="cal-null-state-1")
+        cal_sub2 = _make_calendar_sub(db_session, test_user, sub_id="cal-null-002", client_state="cal-null-state-2")
+        null_item = self._validated_calendar_item(test_user, cal_sub1, resource="Users('u1')/Events('evt-null')")
+        ok_item = self._validated_calendar_item(test_user, cal_sub2, resource="Users('u1')/Events('evt-ok')")
+
+        null_event = _graph_event(event_id="evt-null")
+        null_event["start"] = None
+        null_event["organizer"] = None
+        null_event["end"] = None
+
+        async def mock_get_json(path, params=None):
+            if "evt-null" in path:
+                return null_event
+            return _graph_event(event_id="evt-ok")
+
+        mock_gc = MagicMock()
+        mock_gc.get_json = mock_get_json
+
+        with (
+            patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"),
+            patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc),
+            patch(_PATCH_LOG_MEETING, return_value=[MagicMock()]) as mock_log_meeting,
+        ):
+            _run(handle_notification({}, db_session, validated=[null_item, ok_item]))
+
+        # No start_dt means _handle_calendar_notification returns early for evt-null
+        # (nothing to stamp occurred_at with) without raising — the batch then
+        # continues on to evt-ok, which logs normally.
+        mock_log_meeting.assert_called_once()
+
     def test_mail_and_calendar_mixed_batch(self, db_session, test_user):
         """Mixed batch: mail items -> log_email_activity; calendar items ->
         log_meeting_activity. Also proves the mail branch's own

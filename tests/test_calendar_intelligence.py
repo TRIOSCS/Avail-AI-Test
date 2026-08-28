@@ -503,6 +503,33 @@ class TestScanCalendarEvents:
         assert result["events_scanned"] == 0
         assert result["activities_logged"] == 0
 
+    def test_scan_tolerates_explicit_null_start_and_organizer(self, db_session):
+        """An event with EXPLICIT null start/organizer (not merely absent keys) is
+        skipped without raising — the event is counted as scanned but not logged, since
+        there's no start_dt to stamp occurred_at with."""
+        event = self._graph_event(
+            event_id="graph-null-001",
+            subject="Malformed Event",
+            start_offset_h=-1,
+            attendee_emails=["someone@acme-scan.com"],
+        )
+        event["start"] = None
+        event["organizer"] = None
+        event["end"] = None
+
+        with patch("app.utils.graph_client.GraphClient") as MockGC:
+            mock_gc = MockGC.return_value
+            mock_gc.get_all_pages = AsyncMock(return_value=[event])
+
+            from app.services.calendar_intelligence import scan_calendar_events
+
+            result = asyncio.run(scan_calendar_events("token", None, db_session))
+
+        assert result["events_scanned"] == 1
+        assert result["activities_logged"] == 0
+        count = db_session.query(ActivityLog).filter(ActivityLog.external_id == "calendar-graph-null-001").count()
+        assert count == 0
+
 
 # ── Tests: calendar scan flag guard (FIX 3a) ─────────────────────────────────
 
