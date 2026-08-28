@@ -202,12 +202,18 @@ class TestAttribute:
         assert resp.status_code == 200
         assert f'data-activity="{a.id}"' in resp.text
 
-    def test_attribute_nonexistent_activity_is_friendly(self, admin_client, db_session):
+    def test_attribute_nonexistent_activity_is_friendly(self, admin_client, db_session, test_company):
         resp = admin_client.post(
             f"{CARD_URL}/999999/attribute",
-            data={"entity_type": "company", "entity_id": "1"},
+            data={"entity_type": "company", "entity_id": str(test_company.id)},
         )
         assert resp.status_code == 200
+        # Friendly toast naming the activity, not a 500 or bare error page.
+        trigger = resp.headers.get("HX-Trigger", "")
+        assert "Activity not found." in trigger
+        assert '"type": "error"' in trigger
+        # The card itself still renders (heading is always present, with rows or not).
+        assert "Unmatched Activity" in resp.text
 
 
 # ── (e) POST dismiss sets dismissed_at and removes the row ─────────────
@@ -228,3 +234,9 @@ class TestDismiss:
     def test_dismiss_nonexistent_is_friendly(self, admin_client, db_session):
         resp = admin_client.post(f"{CARD_URL}/999999/dismiss")
         assert resp.status_code == 200
+        # Friendly toast naming the activity, not a 500 or bare error page.
+        trigger = resp.headers.get("HX-Trigger", "")
+        assert "Activity not found." in trigger
+        assert '"type": "error"' in trigger
+        # The card itself still renders (heading is always present, with rows or not).
+        assert "Unmatched Activity" in resp.text
