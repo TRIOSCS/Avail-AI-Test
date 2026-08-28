@@ -502,12 +502,30 @@ def test_po_list_own_awaiting_po_gets_confirm_section(hub_client: TestClient, db
     assert f"line-{line.id}" in body
 
 
+def test_po_list_own_confirm_only_becomes_default_row(hub_client: TestClient, db_session: Session, test_user: User):
+    """A8 follow-up: before the split, own-confirm rows counted as `needs` and could
+    default-select — a buyer with nothing to decide but their own PO to confirm must
+    still land on that row on first load, not a blank pane."""
+    req, q, rq = _req_quote(db_session, test_user)
+    bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
+    line = _line(db_session, bp, rq, test_user, status=BuyPlanLineStatus.AWAITING_PO.value)
+    db_session.commit()
+
+    body = hub_client.get("/v2/partials/approvals/purchase-orders/list").text
+    assert "aw-default" in body
+    dispatch = body.split("aw-default")[1]
+    assert f"line-{line.id}" in dispatch
+    assert f"/v2/partials/approvals/po/{line.id}/pane" in dispatch
+
+
 def test_po_list_needs_approval_row_unmoved_by_confirm_split(
     hub_client: TestClient, db_session: Session, test_user: User
 ):
     """A8: a decide-eligible PENDING_VERIFY row still renders under "Needs your
     approval" even when the viewer also has an own-confirm row on the same list — the
-    two sections are disjoint and ordered needs-first, confirm-second."""
+    two sections are disjoint and ordered needs-first, confirm-second. The default row
+    still prefers a decide-eligible row over an own-confirm row (needs-present case
+    unchanged by the A8 follow-up fallback)."""
     req, q, rq = _req_quote(db_session, test_user)
     bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
     verify_line = _pending_verify_line(db_session, bp, rq, test_user)
@@ -523,6 +541,10 @@ def test_po_list_needs_approval_row_unmoved_by_confirm_split(
     confirm_row_idx = body.index(f"line-{confirm_line.id}")
     assert needs_idx < verify_row_idx < confirm_idx  # decide-eligible row IN the needs section
     assert confirm_idx < confirm_row_idx  # own-confirm row IN the confirm section, below it
+
+    dispatch = body.split("aw-default")[1]
+    assert f"line-{verify_line.id}" in dispatch  # default still prefers the decide-eligible row
+    assert f"line-{confirm_line.id}" not in dispatch
 
 
 def test_po_badge_unchanged_by_confirm_split(hub_client: TestClient, db_session: Session, test_user: User):

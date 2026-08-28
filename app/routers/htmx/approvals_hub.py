@@ -1395,7 +1395,11 @@ async def approvals_workspace_list(
     needs = [r for r in rows if r.needs_approval]
     own_confirm = [r for r in rows if r.own_confirm]
     rest = [r for r in rows if not r.needs_approval and not r.own_confirm]
-    default_row = needs[0] if needs else None
+    # A8 follow-up: before the split, own-confirm rows were part of `needs`, so a buyer
+    # with nothing to decide but their own PO to confirm still landed on that row on
+    # first load. Preserve that landing: fall back to the oldest own-confirm row when
+    # there's nothing to decide.
+    default_row = needs[0] if needs else (own_confirm[0] if own_confirm else None)
     select_key = _normalize_select(select, resolved)
     if select_key:
         default_row = _selected_row(db, user, rows, resolved, select_key) or default_row
