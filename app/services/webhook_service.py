@@ -461,6 +461,11 @@ async def _handle_calendar_notification(notif: dict, token: str, user: User, db:
     personal/internal meeting created). The external_id dedup key
     ("calendar-{graph_event_id}") is shared with the daily scan, so a webhook
     notification and a later poll of the same event can never double-log it.
+
+    Note: an unmatched-attendee meeting isn't lost — the daily scan's unlinked
+    fallback backfills it (latency only). But that scan is a 30-day LOOKBACK
+    (see scan_calendar_events), so a far-future meeting only gets backfilled
+    once its start time has passed into that window.
     """
     from app.services.activity_service import log_meeting_activity
     from app.services.calendar_intelligence import _parse_graph_dt
