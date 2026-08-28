@@ -11,7 +11,7 @@ Status key: ⬜ todo · 🔵 building · ✅ done+deployed
 - ✅ **All 9 HIGH** (4 dead controls + 5 slow-sync hangs) done + live.
 - ✅ **All 7 slow-sync** → background+poll/SSE; **all 7 CSV exports** (shared helper + CSV-injection security fix); **6 empty states**; the dead-control mediums; **bulk actions** (resell per-line, sightings assign+refresh); **density D/E/F + toolbars L/M/N + prospecting/CRM bars**.
 - 🔵 **In flight (final cleanup):** dossier Live-market sort (wire the orphaned `/v2/partials/search/filter`) + buy-plans hub `<title>` disambiguation.
-- ⏸ **Deferred (decision-adjacent, NOT autonomous):** prospecting bulk claim/dismiss (build with idea **O**); approvals bulk-approve (approval-adjacent — respects "leave Approvals unchanged"); resell demote-triage-cards-to-KPI (would undo the recent triage-card filter fix — skip); parts dead undo-archive toast (LOW nit, parts/list.html allowlist-sensitive — low value).
+- ⏸ **Deferred (decision-adjacent, NOT autonomous):** prospecting bulk claim/dismiss (build with idea **O**); ~~approvals bulk-approve (approval-adjacent — respects "leave Approvals unchanged")~~ **CLOSED 2026-08-28 (dropped, Decision H — Deal Sheet j/k + auto-advance covers it)**; resell demote-triage-cards-to-KPI (would undo the recent triage-card filter fix — skip); parts dead undo-archive toast (LOW nit, parts/list.html allowlist-sensitive — low value).
 
 ## 🔴 HIGH (9)
 
@@ -64,7 +64,7 @@ Status key: ⬜ todo · 🔵 building · ✅ done+deployed
 - ⬜ Approvals Halted lane always rendered (min-h-120) even empty → dead 4th column. `approvals/_surface_pipeline.html:55,75-88`
 - ⬜ Sightings: no bulk "Assign to buyer" though `POST /…/batch-assign` exists (orphaned). `table.html:358`, `sightings.py:1157`
 - ⬜ Resell: no CSV export of collected offers / outreach tracker. `resell/_offers.html:67-199`
-- ⬜ Approvals: no multi-select bulk-approve on pending queues. `approvals/_tab_buy_plan.html:24-61`
+- ~~⬜ Approvals: no multi-select bulk-approve on pending queues. `approvals/_tab_buy_plan.html:24-61`~~ **CLOSED 2026-08-28 (dropped, Decision H — Deal Sheet j/k + auto-advance covers it)**
 - ⬜ Requisitions list: no CSV export. `requisitions/list.html:24`
 - ⬜ Vendors list / contacts: no CSV export or bulk actions. `vendors/list.html:18`
 - ⬜ Two pages both titled "Approvals" (/v2/approvals vs /v2/buy-plans) — give buy-plans hub its own `<title>`. `buy_plans/hub.html:12`
