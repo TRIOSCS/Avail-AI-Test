@@ -56,6 +56,7 @@
             <th class="text-left">Part</th>
             <th class="text-right">Qty</th>
             <th class="text-left">Condition</th>
+            <th class="text-right">Ask</th>
             <th class="text-right">Best offer</th>
             <th class="text-right">Our offer</th>
           </tr>
@@ -75,6 +76,14 @@
             </td>
             <td class="text-right tabular-nums">{{ "{:,}".format(item.quantity) }}</td>
             <td>{{ item.condition or '—' }}</td>
+            <td class="text-right tabular-nums">
+              {# R5: Ask — this whole tab is owner-only (route-enforced), so no
+                 template-level gate is needed here (unlike the shared Lines/compare
+                 surfaces, which a non-owner can also reach). #}
+              {% if item.asking_price is not none %}
+              <span class="tabular-nums">${{ "{:,.4f}".format(item.asking_price|float) }}</span>
+              {% else %}<span class="text-gray-400">—</span>{% endif %}
+            </td>
             <td class="text-right tabular-nums">
               {% if item.best_offer_unit_price is not none %}
               <span class="font-semibold text-emerald-600">${{ "{:,.4f}".format(item.best_offer_unit_price|float) }}</span>

@@ -29,7 +29,7 @@
     </div>
     {# The search input targets the ROWS container only — it must never swap itself
        away mid-typing (finding #17). #}
-    <input type="search" name="q" value="{{ q }}" placeholder="Search lists…"
+    <input type="search" name="q" value="{{ q }}" placeholder="Search by part or manufacturer…"
            aria-label="Search resell lists"
            hx-get="/v2/partials/resell/list-rows?lens={{ lens }}{% if stage %}&stage={{ stage }}{% endif %}{% if needs %}&needs={{ needs }}{% endif %}"
            hx-target="#resell-list-rows"

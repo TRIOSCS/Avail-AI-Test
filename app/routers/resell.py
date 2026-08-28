@@ -229,16 +229,77 @@ def _display_title(el: ExcessList, *, can_see_customer: bool) -> str:
     return f"Excess listing #{el.id}"
 
 
+def _row_signal(total: int, manufacturers: list[str], condition_summary: str | None) -> str | None:
+    """Format the non-owner row content signal (R4): '12 lines · Xilinx, TI · New'.
+
+    NON-IDENTIFYING only — line count, top distinct manufacturers, and a condition
+    summary. Never seller/customer identity, never coverage/offer_count/needs (those
+    stay owner-only nulls, unchanged by this task). Returns None for an empty list
+    (nothing to summarize yet).
+    """
+    if total <= 0:
+        return None
+    parts = [f"{total} line{'s' if total != 1 else ''}"]
+    if manufacturers:
+        parts.append(", ".join(manufacturers))
+    if condition_summary:
+        parts.append(condition_summary)
+    return " · ".join(parts)
+
+
+def _row_signal_data(db: Session, ids: list[int]) -> dict[int, dict]:
+    """One grouped query over ExcessLineItem for the page's list ids (no N+1).
+
+    Per-list manufacturer + condition tallies, reduced to the top-3 distinct
+    manufacturers (by line count) and a condition summary (the single shared condition,
+    or "Mixed" when the list carries more than one). Feeds ``_row_signal`` — the
+    non-owner row content signal (R4). Purely non-identifying: manufacturer/condition
+    are already part-level facts a non-owner sees once they open the list, not seller
+    identity.
+    """
+    if not ids:
+        return {}
+    rows = db.execute(
+        select(
+            ExcessLineItem.excess_list_id,
+            ExcessLineItem.manufacturer,
+            ExcessLineItem.condition,
+            func.count(ExcessLineItem.id),
+        )
+        .where(ExcessLineItem.excess_list_id.in_(ids))
+        .group_by(ExcessLineItem.excess_list_id, ExcessLineItem.manufacturer, ExcessLineItem.condition)
+    ).all()
+    by_list: dict[int, dict] = {}
+    for lid, manufacturer, condition, n in rows:
+        mfr_counts, cond_counts = by_list.setdefault(lid, ({}, {}))
+        n = int(n or 0)
+        if manufacturer:
+            mfr_counts[manufacturer] = mfr_counts.get(manufacturer, 0) + n
+        if condition:
+            cond_counts[condition] = cond_counts.get(condition, 0) + n
+
+    result: dict[int, dict] = {}
+    for lid, (mfr_counts, cond_counts) in by_list.items():
+        top_manufacturers = [m for m, _ in sorted(mfr_counts.items(), key=lambda kv: -kv[1])[:3]]
+        condition_summary = next(iter(cond_counts)) if len(cond_counts) == 1 else ("Mixed" if cond_counts else None)
+        result[lid] = {"manufacturers": top_manufacturers, "condition_summary": condition_summary}
+    return result
+
+
 def _list_cards(db: Session, lists: list[ExcessList], *, can_see_customer: bool) -> list[dict]:
     """Project many ExcessLists into left-list rows in a FIXED number of queries.
 
     Was one line-items ``.all()`` PLUS one filtered offer-count query PER list (~2N
     queries for N lists, re-run on every filter keystroke) — SQLite-masked, bit on live
-    PG. Now: one grouped coverage query (total + offered-line count per list) and one
-    grouped unactioned-offer-count query, keyed by ``excess_list_id``. ``can_see_customer``
-    gates the seller name (False for the offerer-facing "Open to Me" lens — pure whitelist,
-    never leak the customer); the same gate swaps the free-text ``title`` for a neutral
-    label (``_display_title``). Company is eager-loaded by the caller's query.
+    PG. Now: one grouped coverage query (total + offered-line count per list), one grouped
+    manufacturer/condition query (``_row_signal_data`` — the R4 non-owner content signal),
+    and one grouped unactioned-offer-count query, keyed by ``excess_list_id``.
+    ``can_see_customer`` gates the seller name (False for the offerer-facing "Open to Me"
+    lens — pure whitelist, never leak the customer); the same gate swaps the free-text
+    ``title`` for a neutral label (``_display_title``). Company is eager-loaded by the
+    caller's query. ``row_signal`` is computed for every card regardless of
+    ``can_see_customer`` — it is non-identifying and a later lens (the manager "All" view)
+    reuses it for non-owner cards.
     """
     ids = [el.id for el in lists]
     if not ids:
@@ -257,6 +318,7 @@ def _list_cards(db: Session, lists: list[ExcessList], *, can_see_customer: bool)
             .all()
         )
     }
+    row_signal_data = _row_signal_data(db, ids)
     offer_counts: dict[int, int] = {
         lid: int(n or 0)
         for lid, n in (
@@ -273,11 +335,17 @@ def _list_cards(db: Session, lists: list[ExcessList], *, can_see_customer: bool)
     cards = []
     for el in lists:
         covered, total = coverage.get(el.id, (0, 0))
+        signal = row_signal_data.get(el.id, {})
         cards.append(
             {
                 "list": el,
                 "display_title": _display_title(el, can_see_customer=can_see_customer),
                 "customer_name": (el.company.name if (can_see_customer and el.company) else None),
+                # R4: non-identifying row content signal for the non-owner card — line
+                # count, top-3 manufacturers, condition summary. Computed for every card
+                # (cheap, non-identifying); the template shows it only on the non-owner
+                # branch (where customer_name is None).
+                "row_signal": _row_signal(total, signal.get("manufacturers", []), signal.get("condition_summary")),
                 # Offer coverage + count are OWNER-PRIVATE (D2): a non-owner (the "Open to
                 # Me" lens) must not learn how many lines already have offers or how many
                 # bids are in — same competitive leak the per-line offer badge hides. Null

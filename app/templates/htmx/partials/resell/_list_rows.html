@@ -4,7 +4,7 @@
   container and never the filter bar / input the user is typing in (finding #17,
   the sightings/knowledge/parts pattern). The "Load more" row replaces itself with
   the next page (htmx click-to-load), keeping the query-level page cap.
-  Receives: cards [{list, display_title, customer_name, coverage_filled,
+  Receives: cards [{list, display_title, customer_name, row_signal, coverage_filled,
             coverage_total, offer_count, hours_until, is_live, close_at_display}],
             lens, stage, needs, q, has_more, next_offset, offset (empty state
             renders only on the offset-0 page), can_see_customer (owner-only
@@ -28,6 +28,10 @@
       <p class="text-sm font-semibold text-gray-900 truncate">{{ c.display_title }}</p>
       {% if c.customer_name %}
       <p class="text-secondary truncate mt-0.5">{{ c.customer_name }}</p>
+      {% elif c.row_signal %}
+      {# R4: non-identifying content signal replaces the bare "Anonymized posting"
+         placeholder — line count, top manufacturers, condition (never identity). #}
+      <p class="text-secondary truncate mt-0.5">{{ c.row_signal }}</p>
       {% else %}
       <p class="text-secondary truncate mt-0.5 italic">Anonymized posting</p>
       {% endif %}
