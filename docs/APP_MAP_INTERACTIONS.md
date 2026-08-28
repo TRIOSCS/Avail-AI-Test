@@ -1850,7 +1850,35 @@ the emailed expiry — so the editor default, the preview cell, and the real out
 agree. `< 1` day → 400 (must be in the future); unparseable → 400 (invalid date). Blank/omitted
 fields are left unchanged (edit-in-place). Ownership is scoped through `get_quote_for_user`
 (SALES sees only own reqs → 404 otherwise). Errors surface via the global `htmx:responseError`
-toast with no swap, so the modal stays open to fix and retry.
+toast with no swap, so the modal stays open to fix and retry. (The Preview route above was
+superseded by Phase-3 Tranche B — see below; it now renders the real email body, not a
+standalone summary table.)
+
+**Phase-3 Tranche B (send dialog, honest preview, detail preflight, seeding, customer-safe
+copy).** The old one-click `hx-confirm` Send button (`quotes/detail.html`,
+`requisitions/tabs/build_quote.html`) now opens a **send dialog**
+(`GET /v2/partials/quotes/{id}/send-dialog` → `quotes/_send_dialog.html`) with editable
+recipient email/name, an optional comma-separated CC (threaded into the Graph payload as
+`ccRecipients` via `build_sendmail_payload`'s `extra_message_fields`), and the same
+`quote_preflight` advisories; on success it swaps `#main-content` and toasts "Quote {number}
+sent to {recipient}" (`set_toast`), and on any failure — DNC block, `QuoteSendError`, or a
+genuine 5xx — it stays open with the error toast visible (`hx-on::after-request` gates the
+close on both `successful` AND the absence of the error path's `HX-Reswap: none` header).
+**Preview** (`POST /v2/partials/quotes/{id}/preview`) now renders `_build_quote_email_html`
+— the SAME builder `send_quote_email` calls — inside a sandboxed iframe, so preview and send
+can never drift; the subject line is `quote_send.build_quote_subject(quote)`, the one place
+it's built. `quote_preflight` also gained a 4th check, **pricing** (a quoted line at
+$0/unset sell, or at-or-under its cost), and now renders as an amber banner directly on the
+quote detail page for drafts (not just the Build-Quote tab). Sell-price seeding — last-quoted
+price wins, else cost × `DEFAULT_MARKUP_PCT` — is now ONE rule, `quote_builder_service.
+seed_sell_price()`, called by the Build-Quote tab AND all three quote-line-creation routes
+(offer-select create-quote, add-offer-to-quote, add-offers-to-draft-quote) so a line's seeded
+price can't differ by which path created it. Quote detail also gained a **"Copy for
+customer"** button beside the existing "Copy Table" — it copies only MPN/Description/
+Manufacturer/Qty/Sell (relabeled "Price"), never the Cost or Margin % cells, guarded by
+`tests/test_quote_copy_table_header.py`. Both copy buttons now call `showToast()` directly
+(exported as `window.showToast` in `htmx_app.js` for inline Alpine handlers) instead of
+dispatching a `toast` CustomEvent.
 
 ## 6. Buy Plan Workflow
 

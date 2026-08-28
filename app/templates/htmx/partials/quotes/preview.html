@@ -1,7 +1,10 @@
-{# preview.html — Quote email preview before sending.
-   Receives: quote (Quote with quote_lines loaded).
-   Called by: htmx_views.py preview_quote route.
-   Depends on: Tailwind CSS with brand palette.
+{# preview.html — Quote email preview shell (Phase-3 B2).
+   Renders the EXACT html the Send button emails (_build_quote_email_html,
+   quote_send.py) inside a sandboxed iframe — no second email template, no
+   hand-rolled table/notes/status markup. This IS the send-path output.
+   Receives: quote, email_html (str — the built email body), to_email (str, may be
+             ""), to_display (str — "Name <email>" or just the email/"" ), subject.
+   Called by: routers/htmx/quotes.py preview_quote route.
 #}
 <div class="max-w-3xl mx-auto">
   <div class="bg-white rounded-lg shadow border border-gray-200 p-6">
@@ -10,80 +13,22 @@
       <span class="text-sm text-gray-600">{{ quote.quote_number }}</span>
     </div>
 
-    {# Quote header info #}
-    <div class="bg-gray-50 rounded-lg p-4 mb-4 text-sm">
-      <div class="grid grid-cols-2 gap-3">
-        <div>
-          <p class="text-xs text-gray-600">Status</p>
-          <p class="font-medium text-gray-900">{{ quote.status|title }}</p>
-        </div>
-        {% if quote.payment_terms %}
-        <div>
-          <p class="text-xs text-gray-600">Payment Terms</p>
-          <p class="text-gray-900">{{ quote.payment_terms }}</p>
-        </div>
-        {% endif %}
-        {% if quote.shipping_terms %}
-        <div>
-          <p class="text-xs text-gray-600">Shipping Terms</p>
-          <p class="text-gray-900">{{ quote.shipping_terms }}</p>
-        </div>
-        {% endif %}
-        {% if valid_until_date %}
-        <div>
-          <p class="text-xs text-gray-600">Valid Until</p>
-          <p class="text-gray-900">{{ valid_until_date.strftime('%B %d, %Y') }}</p>
-        </div>
-        {% endif %}
-        {% if quote.subtotal %}
-        <div>
-          <p class="text-xs text-gray-600">Subtotal</p>
-          <p class="font-medium text-gray-900">${{ "%.2f"|format(quote.subtotal) }}</p>
-        </div>
-        {% endif %}
-      </div>
+    {# Header strip: To / Subject, mirroring what the Send button actually emails. #}
+    <div class="bg-gray-50 rounded-lg p-4 mb-4 text-sm space-y-1">
+      {% if to_email %}
+      <p><span class="text-gray-600">To:</span> <span class="font-medium text-gray-900">{{ to_display }}</span></p>
+      {% else %}
+      <p class="text-amber-700 font-medium">No recipient resolved — add a customer contact email before sending.</p>
+      {% endif %}
+      <p><span class="text-gray-600">Subject:</span> <span class="font-medium text-gray-900">{{ subject }}</span></p>
     </div>
 
-    {# Line items table #}
-    {% if quote.quote_lines %}
-    <table class="min-w-full divide-y divide-gray-200 mb-4">
-      <thead class="bg-gray-50">
-        <tr>
-          <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">MPN</th>
-          <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
-          <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Mfr</th>
-          <th class="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Qty</th>
-          <th class="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Sell Price</th>
-          <th class="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Line Total</th>
-        </tr>
-      </thead>
-      <tbody class="divide-y divide-gray-200">
-        {% for line in quote.quote_lines %}
-        <tr>
-          <td class="px-3 py-2 text-sm font-mono text-gray-900">{{ line.mpn or '—' }}</td>
-          <td class="px-3 py-2 text-sm text-gray-600">{{ line|part_description or '—' }}</td>
-          <td class="px-3 py-2 text-sm text-gray-600">{{ line.manufacturer or '—' }}</td>
-          <td class="px-3 py-2 text-sm text-right text-gray-900">{{ "{:,}".format(line.qty) if line.qty else '—' }}</td>
-          <td class="px-3 py-2 text-sm text-right text-gray-900">{{ "$%.4f"|format(line.sell_price) if line.sell_price else '—' }}</td>
-          <td class="px-3 py-2 text-sm text-right font-medium text-gray-900">
-            {% if line.qty and line.sell_price %}${{ "%.2f"|format(line.qty * line.sell_price) }}{% else %}—{% endif %}
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    {% else %}
-    <p class="text-sm text-gray-400 text-center py-4">No line items on this quote.</p>
-    {% endif %}
+    <iframe srcdoc="{{ email_html | e }}"
+            sandbox
+            class="w-full border border-gray-200 rounded-lg"
+            style="min-height:70vh"></iframe>
 
-    {% if quote.notes %}
-    <div class="bg-amber-50 rounded border border-amber-200 p-3 mb-4">
-      <p class="text-xs text-amber-700 font-medium mb-1">Notes</p>
-      <p class="text-sm text-amber-800">{{ quote.notes }}</p>
-    </div>
-    {% endif %}
-
-    <div class="flex items-center gap-3 pt-2 border-t border-gray-200">
+    <div class="flex items-center gap-3 pt-4 mt-4 border-t border-gray-200">
       <button hx-get="/v2/partials/quotes/{{ quote.id }}"
               hx-target="#main-content"
               class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">

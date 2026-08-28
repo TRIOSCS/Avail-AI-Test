@@ -33,7 +33,8 @@ from ....models.intelligence import ChangeLog
 from ....services.activity_service import log_activity as _log_activity
 from ....services.ai_offer_service import parse_offer_form_rows, save_form_parsed_offers
 from ....services.offer_qualification import apply_qualification, normalize_offer_condition
-from ....services.quote_builder_service import recalc_quote_totals
+from ....services.pricing_history import preload_last_quoted_prices
+from ....services.quote_builder_service import recalc_quote_totals, seed_sell_price
 from ....services.status_machine import require_valid_transition
 from ....utils.normalization import normalize_mpn_key
 from ....vendor_utils import normalize_vendor_name
@@ -257,8 +258,18 @@ async def create_quote_from_offers(
     db.add(quote)
     db.flush()
 
+    # Preload pricing history once for the batch (avoids an N+1 preload per offer) — the
+    # same seed_sell_price rule the Build-Quote tab and the other two quote-line creation
+    # routes use: last-quoted price wins, else cost × DEFAULT_MARKUP_PCT.
+    try:
+        quoted_prices = preload_last_quoted_prices(db)
+    except Exception as e:
+        logger.warning("Pricing history unavailable seeding quote {}: {} — sells fall back to markup", quote_number, e)
+        quoted_prices = {}
+
     for o in offers:
-        sell_price = float(o.unit_price or 0)
+        cost = float(o.unit_price or 0)
+        sell, margin_pct = seed_sell_price(db, o.mpn, cost, last_quoted=quoted_prices)
 
         line = QuoteLine(
             quote_id=quote.id,
@@ -266,9 +277,9 @@ async def create_quote_from_offers(
             mpn=o.mpn or "",
             manufacturer=o.manufacturer or "",
             qty=o.qty_available or 1,
-            cost_price=sell_price,  # Default cost = sell, buyer adjusts
-            sell_price=sell_price,
-            margin_pct=0.0,
+            cost_price=cost,
+            sell_price=sell,
+            margin_pct=margin_pct,
         )
         db.add(line)
 

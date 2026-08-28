@@ -179,5 +179,6 @@ class TestLineMutationsRecalcTotals:
         )
         assert resp.status_code == 200
         db_session.refresh(draft_quote)
-        # add-offer seeds sell_price=0 (buyer prices later); cost = 0.50 * 1000 = 500.
+        # add-offer seeds sell via seed_sell_price (B4: last-quoted/markup, buyer adjusts);
+        # cost = 0.50 * 1000 = 500 either way.
         assert draft_quote.total_cost == pytest.approx(500.0)

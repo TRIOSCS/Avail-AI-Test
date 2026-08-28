@@ -17,6 +17,7 @@ from datetime import UTC, date, datetime, timedelta
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from loguru import logger
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, joinedload
 
 from ...constants import (
@@ -35,7 +36,9 @@ from ...models import (
     User,
 )
 from ...services.crm_service import quote_base_number, revision_quote_number
-from ...services.quote_builder_service import recalc_quote_totals
+from ...services.pricing_history import preload_last_quoted_prices
+from ...services.quote_builder_service import recalc_quote_totals, seed_sell_price
+from ...services.quote_preflight import quote_preflight
 from ...services.quote_requisitions import (
     link_quote_to_requisitions,
     requisition_ids_for_quote,
@@ -44,13 +47,15 @@ from ...services.quote_requisitions import (
 from ...services.quote_send import (
     QuoteSendDNCBlocked,
     QuoteSendError,
+    _build_quote_email_html,
+    build_quote_subject,
     quote_valid_until,
     send_quote_email,
     validity_days_from_valid_until,
 )
 from ...services.status_machine import require_valid_transition
 from ...template_env import template_response
-from ._shared import _base_ctx, _parse_date_safe, toast_error_response
+from ._shared import _base_ctx, _parse_date_safe, set_toast, toast_error_response
 
 router = APIRouter(tags=["htmx-views"])
 
@@ -65,12 +70,36 @@ async def preview_quote(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Render quote email preview before sending."""
+    """Render the quote email preview — the EXACT html the Send button would email.
+
+    Renders _build_quote_email_html (quote_send.py), the single home of the email
+    builder, so preview and send can never drift (Task B2). Recipient resolution mirrors
+    send_quote_email's (site.contact_email/contact_name) — no override here since this
+    button posts no body. A site with no resolvable contact email still renders (200):
+    the shell shows a "no recipient resolved" note instead of a To: line, same as the
+    JSON preview endpoint's no-recipient handling (routers/crm/quotes.py:358).
+    """
     quote = get_quote_for_user(db, user, quote_id, options=[joinedload(Quote.quote_lines)])
+
+    site = db.get(CustomerSite, quote.customer_site_id) if quote.customer_site_id else None
+    to_email = (site.contact_email or "").strip() if site else ""
+    to_name = ((site.contact_name if site else "") or "").strip()
+    company_name = site.company.name if site and site.company else ""
+
+    email_html = _build_quote_email_html(quote, to_name, company_name, user)
+    subject = build_quote_subject(quote)
+    to_display = f"{to_name} <{to_email}>" if to_name else to_email
 
     return template_response(
         "htmx/partials/quotes/preview.html",
-        {"request": request, "quote": quote, "valid_until_date": quote_valid_until(quote)},
+        {
+            "request": request,
+            "quote": quote,
+            "email_html": email_html,
+            "to_email": to_email,
+            "to_display": to_display,
+            "subject": subject,
+        },
     )
 
 
@@ -304,6 +333,9 @@ async def quote_detail_partial(
             "lines": lines,
             "offers": offers,
             "contributing_reqs": requisitions_for_quote(db, quote.id),
+            # Advisory pre-send checks (DNC / non-US COO / MPN drift). Only meaningful
+            # pre-send, so scoped to drafts — never blocks (see services/quote_preflight.py).
+            "preflight_warnings": [w.to_dict() for w in quote_preflight(db, quote)] if quote.status == "draft" else [],
         }
     )
     return template_response("htmx/partials/quotes/detail.html", ctx)
@@ -426,15 +458,17 @@ async def add_offer_to_quote(
             status_code=403,
             detail={"error": "offer does not belong to this quote's requisition"},
         )
+    cost = float(offer.unit_price) if offer.unit_price else 0
+    sell, margin_pct = seed_sell_price(db, offer.mpn, cost)
     line = QuoteLine(
         quote_id=quote_id,
         offer_id=offer_id,
         mpn=offer.mpn,
         manufacturer=offer.manufacturer,
         qty=offer.qty_available or 0,
-        cost_price=float(offer.unit_price) if offer.unit_price else 0,
-        sell_price=0,
-        margin_pct=0,
+        cost_price=cost,
+        sell_price=sell,
+        margin_pct=margin_pct,
     )
     db.add(line)
     recalc_quote_totals(db, quote)
@@ -445,10 +479,47 @@ async def add_offer_to_quote(
     return template_response("htmx/partials/quotes/line_row.html", ctx)
 
 
+@router.get("/v2/partials/quotes/{quote_id}/send-dialog", response_class=HTMLResponse)
+async def send_quote_dialog(
+    request: Request,
+    quote_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render the Send Quote dialog (Task 4/B1): editable recipient + CC + preflight.
+
+    Loaded into #modal-content by $dispatch('open-modal', {url: ...}) from the quote
+    detail / Build-Quote action bars — replaces the old hx-confirm. Recipient resolution
+    mirrors send_quote_email's default (site.contact_email/contact_name), prefilled as
+    editable override_email/override_name inputs so the sender can redirect the quote or
+    add a CC without leaving the dialog. The subject reuses build_quote_subject (Task 3)
+    and preflight_warnings reuses quote_preflight (Task 1) so neither can drift from what
+    the detail page and the real send show.
+    """
+    quote = get_quote_for_user(db, user, quote_id)
+    site = db.get(CustomerSite, quote.customer_site_id) if quote.customer_site_id else None
+    to_email = (site.contact_email or "").strip() if site else ""
+    to_name = ((site.contact_name if site else "") or "").strip()
+    return template_response(
+        "htmx/partials/quotes/_send_dialog.html",
+        {
+            "request": request,
+            "quote": quote,
+            "to_email": to_email,
+            "to_name": to_name,
+            "subject": build_quote_subject(quote),
+            "preflight_warnings": [w.to_dict() for w in quote_preflight(db, quote)],
+        },
+    )
+
+
 @router.post("/v2/partials/quotes/{quote_id}/send", response_class=HTMLResponse)
 async def send_quote_htmx(
     request: Request,
     quote_id: int,
+    override_email: str | None = Form(None),
+    override_name: str | None = Form(None),
+    cc: str | None = Form(None),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -457,6 +528,10 @@ async def send_quote_htmx(
     Delegates to the canonical quote-send service so this button actually emails the
     customer (captures Graph ids, writes an outbound ActivityLog, hard-blocks DNC). In
     TESTING the service skips the real Graph call but still marks the quote sent.
+
+    override_email/override_name/cc (Task 4/B1) come from the send dialog and are all
+    optional — a request with none of them (the legacy hx-confirm button, or any other
+    caller) resolves the recipient exactly as before.
     """
     quote = get_quote_for_user(db, user, quote_id)
     testing = os.environ.get("TESTING") == "1"
@@ -468,7 +543,16 @@ async def send_quote_htmx(
 
         token = await require_fresh_token(request, db)
     try:
-        await send_quote_email(db, quote, user, token=token, testing=testing)
+        result = await send_quote_email(
+            db,
+            quote,
+            user,
+            token=token,
+            override_email=override_email,
+            override_name=override_name,
+            cc=cc,
+            testing=testing,
+        )
     except QuoteSendDNCBlocked:
         # Surface the failure as a toast WITHOUT swapping — the Send buttons
         # (quotes/detail.html, requisitions/tabs/build_quote.html) target #main-content,
@@ -478,7 +562,8 @@ async def send_quote_htmx(
         return toast_error_response("This recipient is do-not-contact — quote not sent.")
     except QuoteSendError as exc:
         return toast_error_response(exc.detail)
-    return await quote_detail_partial(request, quote_id, user, db)
+    resp = await quote_detail_partial(request, quote_id, user, db)
+    return set_toast(resp, f"Quote {quote.quote_number} sent to {result.sent_to}", "success")
 
 
 @router.post("/v2/partials/quotes/{quote_id}/result", response_class=HTMLResponse)
@@ -629,11 +714,24 @@ async def add_offers_to_draft_quote(
         raise HTTPException(400, "Can only add to draft quotes")
 
     offers = db.query(Offer).filter(Offer.id.in_(offer_ids), Offer.requisition_id == req_id).all()
+
+    # Preload pricing history once for the batch (avoids an N+1 preload per offer) — the
+    # same seed_sell_price rule the Build-Quote tab and the other two quote-line creation
+    # routes use: last-quoted price wins, else cost × DEFAULT_MARKUP_PCT.
+    try:
+        quoted_prices = preload_last_quoted_prices(db)
+    except SQLAlchemyError as e:
+        logger.warning(
+            "Pricing history unavailable seeding quote {}: {} — sells fall back to markup", quote.quote_number, e
+        )
+        quoted_prices = {}
+
     for o in offers:
         existing = db.query(QuoteLine).filter(QuoteLine.quote_id == quote_id, QuoteLine.offer_id == o.id).first()
         if existing:
             continue
-        sell_price = float(o.unit_price or 0)
+        cost = float(o.unit_price or 0)
+        sell, margin_pct = seed_sell_price(db, o.mpn, cost, last_quoted=quoted_prices)
         qty = o.qty_available or 1
         line = QuoteLine(
             quote_id=quote.id,
@@ -641,9 +739,9 @@ async def add_offers_to_draft_quote(
             mpn=o.mpn or "",
             manufacturer=o.manufacturer or "",
             qty=qty,
-            cost_price=sell_price,
-            sell_price=sell_price,
-            margin_pct=0.0,
+            cost_price=cost,
+            sell_price=sell,
+            margin_pct=margin_pct,
         )
         db.add(line)
 

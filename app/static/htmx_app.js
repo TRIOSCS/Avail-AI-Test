@@ -87,6 +87,9 @@ function showToast(message, type = 'info') {
     toast.type = type;
     toast.show = true;
 }
+// Exposed so inline Alpine handlers in Jinja templates (evaluated outside this
+// module's scope) can call it directly — same convention as postJSON/postForm below.
+window.showToast = showToast;
 
 // Append to a capped (last-10) Alpine store log used by trouble tickets.
 function pushCappedLog(storeName, entry) {

@@ -101,6 +101,16 @@ def validity_days_from_valid_until(quote: Quote, target: date) -> int:
     return (target - quote_expiry_anchor(quote)).days
 
 
+def build_quote_subject(quote: Quote) -> str:
+    """The canonical quote email subject line — the SINGLE place it is built.
+
+    Used by send_quote_email (the real send) AND the HTMX preview
+    (routers/htmx/quotes.py) so the two can never drift. Task 4's send dialog reuses
+    this too.
+    """
+    return f"Quote {quote.quote_number} — Trio Supply Chain Solutions"
+
+
 async def send_quote_email(
     db: Session,
     quote: Quote,
@@ -109,6 +119,7 @@ async def send_quote_email(
     token: str,
     override_email: str | None = None,
     override_name: str | None = None,
+    cc: str | None = None,
     testing: bool = False,
 ) -> SendQuoteResult:
     """Email ``quote`` to the customer and record the send.
@@ -116,6 +127,11 @@ async def send_quote_email(
     Resolves the recipient (override else the site contact), hard-blocks DNC recipients,
     sends via Graph (skipped under ``testing``), captures the Graph message ids, advances
     the quote→SENT and requisition→QUOTED, writes an outbound ActivityLog, and commits.
+
+    ``cc`` (Task 4/B1) is an optional comma-separated address string from the send dialog;
+    trimmed minimally (blank/whitespace → no CC) and threaded into the Graph payload as
+    ``ccRecipients`` — never validated against DNC (CC is an internal-side addition, not
+    the customer recipient the DNC hard-block below protects).
 
     Raises QuoteSendDNCBlocked (recipient on DNC) or QuoteSendError (no/invalid recipient,
     Graph error) — neither mutates the quote status.
@@ -138,7 +154,7 @@ async def send_quote_email(
 
     # 3. Build the branded HTML body.
     html = _build_quote_email_html(quote, to_name, company_name, user)
-    subject = f"Quote {quote.quote_number} — Trio Supply Chain Solutions"
+    subject = build_quote_subject(quote)
 
     # 4. Send via Graph + capture the sent-message ids (skipped in TESTING).
     graph_message_id = None
@@ -147,11 +163,21 @@ async def send_quote_email(
         from ..utils.graph_client import GraphClient, build_sendmail_payload
 
         gc = GraphClient(token)
+        # Minimal trim/validate, matching the brief: blank → no CC. Multiple addresses
+        # (comma-separated, the natural shape for a CC field) are split and passed
+        # through as-is — same idiom as email_service.py's extra_message_fields use
+        # (ccRecipients isn't a build_sendmail_payload param, so it rides in as an extra
+        # top-level message field rather than growing that helper's signature).
+        cc_addresses = [addr.strip() for addr in (cc or "").split(",") if addr.strip()]
+        extra_fields = (
+            {"ccRecipients": [{"emailAddress": {"address": addr}} for addr in cc_addresses]} if cc_addresses else None
+        )
         payload = build_sendmail_payload(
             subject,
             html,
             [{"address": to_email, "name": to_name}],
             save_to_sent="true",
+            extra_message_fields=extra_fields,
         )
         result = await gc.post_json("/me/sendMail", payload, raise_on_error=False)
         if "error" in result:

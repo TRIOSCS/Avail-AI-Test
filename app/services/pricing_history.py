@@ -125,6 +125,10 @@ def preload_last_quoted_prices(db: Session) -> dict[str, dict]:
     for q in quotes:
         date_str = quote_date_iso(q)
         for item in q.line_items or []:
+            # Malformed legacy line_items can carry a non-dict entry — skip it rather
+            # than raise (mirrors the same guard in quote_preflight._quote_line_pricing).
+            if not isinstance(item, dict):
+                continue
             entry = {
                 "sell_price": item.get("sell_price"),
                 "margin_pct": item.get("margin_pct"),
