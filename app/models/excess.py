@@ -173,6 +173,10 @@ class ExcessOffer(Base):
     take_all_total_price = Column(Numeric(12, 4), nullable=True)  # lump sum, take_all only
     status = Column(String(20), default=ExcessOfferStatus.OPEN)  # see constants.ExcessOfferStatus
     notes = Column(Text, nullable=True)
+    # ERP reference only (C3, migration 216) — the sales order number this accepted
+    # offer was fulfilled under, cut in the ERP. AVAIL never owns the SO lifecycle;
+    # this is a free-text pointer back to it, not validated or synced.
+    sales_order_number = Column(String(100), nullable=True)
     created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC), server_default=func.now())
     updated_at = Column(UTCDateTime, onupdate=lambda: datetime.now(UTC), server_default=func.now())
 
@@ -267,6 +271,10 @@ class CustomerBid(Base):
     responded_at = Column(UTCDateTime, nullable=True)
     responded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     notes = Column(Text, nullable=True)
+    # ERP reference only (C3, migration 216) — the customer's PO number issued against
+    # this accepted bid-back, cut in the ERP. AVAIL never owns the PO lifecycle; this is
+    # a free-text pointer back to it, not validated or synced.
+    po_number = Column(String(100), nullable=True)
     created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC), server_default=func.now())
     updated_at = Column(UTCDateTime, onupdate=lambda: datetime.now(UTC), server_default=func.now())
 
