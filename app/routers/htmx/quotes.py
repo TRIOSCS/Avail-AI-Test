@@ -47,6 +47,8 @@ from ...services.quote_requisitions import (
 from ...services.quote_send import (
     QuoteSendDNCBlocked,
     QuoteSendError,
+    _build_quote_email_html,
+    build_quote_subject,
     quote_valid_until,
     send_quote_email,
     validity_days_from_valid_until,
@@ -68,12 +70,36 @@ async def preview_quote(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Render quote email preview before sending."""
+    """Render the quote email preview — the EXACT html the Send button would email.
+
+    Renders _build_quote_email_html (quote_send.py), the single home of the email
+    builder, so preview and send can never drift (Task B2). Recipient resolution mirrors
+    send_quote_email's (site.contact_email/contact_name) — no override here since this
+    button posts no body. A site with no resolvable contact email still renders (200):
+    the shell shows a "no recipient resolved" note instead of a To: line, same as the
+    JSON preview endpoint's no-recipient handling (routers/crm/quotes.py:358).
+    """
     quote = get_quote_for_user(db, user, quote_id, options=[joinedload(Quote.quote_lines)])
+
+    site = db.get(CustomerSite, quote.customer_site_id) if quote.customer_site_id else None
+    to_email = (site.contact_email or "").strip() if site else ""
+    to_name = ((site.contact_name if site else "") or "").strip()
+    company_name = site.company.name if site and site.company else ""
+
+    email_html = _build_quote_email_html(quote, to_name, company_name, user)
+    subject = build_quote_subject(quote)
+    to_display = f"{to_name} <{to_email}>" if to_name else to_email
 
     return template_response(
         "htmx/partials/quotes/preview.html",
-        {"request": request, "quote": quote, "valid_until_date": quote_valid_until(quote)},
+        {
+            "request": request,
+            "quote": quote,
+            "email_html": email_html,
+            "to_email": to_email,
+            "to_display": to_display,
+            "subject": subject,
+        },
     )
 
 

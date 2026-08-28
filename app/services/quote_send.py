@@ -101,6 +101,16 @@ def validity_days_from_valid_until(quote: Quote, target: date) -> int:
     return (target - quote_expiry_anchor(quote)).days
 
 
+def build_quote_subject(quote: Quote) -> str:
+    """The canonical quote email subject line — the SINGLE place it is built.
+
+    Used by send_quote_email (the real send) AND the HTMX preview
+    (routers/htmx/quotes.py) so the two can never drift. Task 4's send dialog reuses
+    this too.
+    """
+    return f"Quote {quote.quote_number} — Trio Supply Chain Solutions"
+
+
 async def send_quote_email(
     db: Session,
     quote: Quote,
@@ -138,7 +148,7 @@ async def send_quote_email(
 
     # 3. Build the branded HTML body.
     html = _build_quote_email_html(quote, to_name, company_name, user)
-    subject = f"Quote {quote.quote_number} — Trio Supply Chain Solutions"
+    subject = build_quote_subject(quote)
 
     # 4. Send via Graph + capture the sent-message ids (skipped in TESTING).
     graph_message_id = None
