@@ -36,6 +36,7 @@ from ...models import (
 )
 from ...services.crm_service import quote_base_number, revision_quote_number
 from ...services.quote_builder_service import recalc_quote_totals
+from ...services.quote_preflight import quote_preflight
 from ...services.quote_requisitions import (
     link_quote_to_requisitions,
     requisition_ids_for_quote,
@@ -304,6 +305,9 @@ async def quote_detail_partial(
             "lines": lines,
             "offers": offers,
             "contributing_reqs": requisitions_for_quote(db, quote.id),
+            # Advisory pre-send checks (DNC / non-US COO / MPN drift). Only meaningful
+            # pre-send, so scoped to drafts — never blocks (see services/quote_preflight.py).
+            "preflight_warnings": [w.to_dict() for w in quote_preflight(db, quote)] if quote.status == "draft" else [],
         }
     )
     return template_response("htmx/partials/quotes/detail.html", ctx)
