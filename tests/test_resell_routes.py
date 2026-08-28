@@ -1220,7 +1220,7 @@ def test_list_cards_batched_coverage_and_offer_count(db_session, trader_user, te
     )
     db_session.commit()
 
-    cards = _list_cards(db_session, [el], can_see_customer=True)
+    cards = _list_cards(db_session, [el], user_id=trader_user.id)
     assert len(cards) == 1
     card = cards[0]
     assert card["coverage_total"] == 2
@@ -1233,7 +1233,7 @@ def test_list_cards_empty_input():
     """No lists → no cards, no queries."""
     from app.routers.resell import _list_cards
 
-    assert _list_cards(None, [], can_see_customer=True) == []
+    assert _list_cards(None, [], user_id=1) == []
 
 
 # ── Triage cards: offers-to-review / take-all now filter (dead-control fix) ──

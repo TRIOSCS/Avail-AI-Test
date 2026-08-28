@@ -8,7 +8,9 @@
   typed in, stays outside the swapped region), and the "Load more" row pages further
   rows in at the query level.
   Receives: the _list_rows_context dict (cards, lens, stage, needs, q, has_more,
-            next_offset, can_see_customer, can_post, user).
+            next_offset, can_see_customer, can_post, user). can_see_customer is a
+            per-lens default only — _list_rows.html reads each card's OWN
+            can_see_customer for display (the manager "All" lens mixes rows).
   Called by: resell.resell_lists.
 #}
 {% from "htmx/partials/shared/_macros.html" import filter_pill %}

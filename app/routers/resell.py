@@ -45,7 +45,7 @@ from ..constants import (
     OfferLineMatchStatus,
 )
 from ..database import get_db
-from ..dependencies import require_access, require_fresh_token
+from ..dependencies import is_manager_or_admin, require_access, require_fresh_token
 from ..file_utils import ParseError, parse_tabular_file
 from ..models import Company, User, VendorCard, VendorResponse
 from ..models.excess import CustomerBid, ExcessLineItem, ExcessList, ExcessOffer, ExcessOfferLine, ExcessOutreach
@@ -286,7 +286,7 @@ def _row_signal_data(db: Session, ids: list[int]) -> dict[int, dict]:
     return result
 
 
-def _list_cards(db: Session, lists: list[ExcessList], *, can_see_customer: bool) -> list[dict]:
+def _list_cards(db: Session, lists: list[ExcessList], *, user_id: int) -> list[dict]:
     """Project many ExcessLists into left-list rows in a FIXED number of queries.
 
     Was one line-items ``.all()`` PLUS one filtered offer-count query PER list (~2N
@@ -294,12 +294,18 @@ def _list_cards(db: Session, lists: list[ExcessList], *, can_see_customer: bool)
     PG. Now: one grouped coverage query (total + offered-line count per list), one grouped
     manufacturer/condition query (``_row_signal_data`` — the R4 non-owner content signal),
     and one grouped unactioned-offer-count query, keyed by ``excess_list_id``.
-    ``can_see_customer`` gates the seller name (False for the offerer-facing "Open to Me"
-    lens — pure whitelist, never leak the customer); the same gate swaps the free-text
-    ``title`` for a neutral label (``_display_title``). Company is eager-loaded by the
-    caller's query. ``row_signal`` is computed for every card regardless of
-    ``can_see_customer`` — it is non-identifying and a later lens (the manager "All" view)
-    reuses it for non-owner cards.
+
+    ``can_see_customer`` is computed PER CARD (``el.owner_id == user_id``), not as a
+    single page-level flag — required by the manager "All" lens (C4, Decision G), which
+    mixes the viewer's own lists with every other POSTED list in ONE render: the
+    viewer's own cards must show full identity/coverage/offer data while every foreign
+    card in the SAME render stays anonymized, exactly like the "Open to Me" lens. For
+    "mine" and "open" the per-card value collapses to the old page-level constant (every
+    row in "mine" is owned, every row in "open" is not), so their rendered output is
+    byte-for-byte unchanged. The seller name and free-text ``title`` (``_display_title``)
+    are both gated on this same per-card flag. Company is eager-loaded by the caller's
+    query. ``row_signal`` is computed for every card regardless of ``can_see_customer`` —
+    it is non-identifying and IS the "All" lens's foreign-card content signal.
     """
     ids = [el.id for el in lists]
     if not ids:
@@ -334,11 +340,16 @@ def _list_cards(db: Session, lists: list[ExcessList], *, can_see_customer: bool)
 
     cards = []
     for el in lists:
+        can_see_customer = el.owner_id == user_id
         covered, total = coverage.get(el.id, (0, 0))
         signal = row_signal_data.get(el.id, {})
         cards.append(
             {
                 "list": el,
+                # Per-card gate, consumed directly by _list_rows.html (badge merge +
+                # coverage/offer-count section) instead of the page-level context value —
+                # the "All" lens mixes owned and foreign rows in one render.
+                "can_see_customer": can_see_customer,
                 "display_title": _display_title(el, can_see_customer=can_see_customer),
                 "customer_name": (el.company.name if (can_see_customer and el.company) else None),
                 # R4: non-identifying row content signal for the non-owner card — line
@@ -347,10 +358,11 @@ def _list_cards(db: Session, lists: list[ExcessList], *, can_see_customer: bool)
                 # branch (where customer_name is None).
                 "row_signal": _row_signal(total, signal.get("manufacturers", []), signal.get("condition_summary")),
                 # Offer coverage + count are OWNER-PRIVATE (D2): a non-owner (the "Open to
-                # Me" lens) must not learn how many lines already have offers or how many
-                # bids are in — same competitive leak the per-line offer badge hides. Null
-                # them here so the data never reaches the template (defense-in-depth with
-                # the ``can_see_customer`` gate around the meter/badge in _lists.html).
+                # Me" lens, or a foreign card in the manager "All" lens) must not learn how
+                # many lines already have offers or how many bids are in — same competitive
+                # leak the per-line offer badge hides. Null them here so the data never
+                # reaches the template (defense-in-depth with the ``can_see_customer`` gate
+                # around the meter/badge in _list_rows.html).
                 "coverage_filled": covered if can_see_customer else None,
                 "coverage_total": total if can_see_customer else None,
                 "offer_count": offer_counts.get(el.id, 0) if can_see_customer else None,
@@ -440,6 +452,22 @@ def _require_owner(el: ExcessList, user: User) -> None:
         raise HTTPException(403, "Only the list owner can edit it")
 
 
+def _normalize_lens(lens: str, user: User) -> str:
+    """Validate the requested left-list lens, authorizing ``all`` (C4, Decision G).
+
+    ``mine``/``open`` are open to everyone (existing behavior; an unrecognized value
+    falls back to ``mine``). ``all`` — every POSTED list tenant-wide, a manager/admin
+    oversight lens — additionally requires ``is_manager_or_admin``; a non-manager
+    requesting it silently falls back to ``open`` (the lens it already has, not an
+    error and not a leak) rather than ``mine``, since ``all`` is shaped like ``open``
+    (many lists the requester doesn't own) and ``mine`` would silently narrow what
+    they asked to see.
+    """
+    if lens == "all":
+        return "all" if is_manager_or_admin(user) else "open"
+    return lens if lens in ("mine", "open") else "mine"
+
+
 def _detail_context(
     request: Request, db: Session, el: ExcessList, user: User, *, items: list[ExcessLineItem] | None = None
 ) -> dict:
@@ -521,7 +549,7 @@ async def resell_workspace(
     db: Session = Depends(get_db),
 ):
     """Split-panel Resell workspace shell: lens pills + stat strip + lists."""
-    lens = lens if lens in ("mine", "open") else "mine"
+    lens = _normalize_lens(lens, user)
     needs = needs if needs in ("offers", "take_all") else ""
     # The active triage token drives the single-highlight ring. The offer-based cards
     # (offers/take_all) live in the ``needs`` dimension; the status cards in ``stage`` —
@@ -539,6 +567,8 @@ async def resell_workspace(
             "q": q,
             "stats": _stat_strip(db, user),
             "can_post": excess_service.can_post(user),
+            # Gates the "All" lens pill (C4, Decision G) — manager/admin oversight only.
+            "is_manager": is_manager_or_admin(user),
         },
     )
 
@@ -569,6 +599,12 @@ def _list_rows_context(
     ``lens=mine`` → lists this user owns (seller identity visible).
     ``lens=open`` → posted lists owned by OTHERS that this user may offer on
     (customer-anonymized — pure whitelist, never the seller).
+    ``lens=all`` → EVERY posted list tenant-wide (manager/admin oversight, C4, Decision
+    G) — the caller's own rows AND everyone else's in one render; ``_list_cards``
+    decides per row whether the viewer may see identity (``el.owner_id == user.id``),
+    so a manager's own cards render full data while every foreign card stays
+    anonymized exactly like ``open``. ``_normalize_lens`` already downgrades a
+    non-manager's ``all`` request to ``open`` before this runs.
 
     ``stage`` filters on list STATUS (open/collecting/…). ``needs`` is the offer-based
     triage dimension the status filter can't express: ``needs=offers`` → lists with ≥1
@@ -579,7 +615,7 @@ def _list_rows_context(
     Rows are paged at the query level (``_LIST_PAGE_SIZE`` per page, ``offset`` from the
     "Load more" reveal); ``has_more``/``next_offset`` drive the Load-more row.
     """
-    lens = lens if lens in ("mine", "open") else "mine"
+    lens = _normalize_lens(lens, user)
     needs = needs if needs in ("offers", "take_all") else ""
     # Eager-load company so the per-card seller-name render (mine lens) doesn't lazy-load
     # one company per list (M8: kill the N+1s in the left list).
@@ -591,6 +627,18 @@ def _list_rows_context(
             ExcessList.owner_id != user.id,
             ExcessList.status.in_([s.value for s in _POSTED_STATUSES]),
         )
+        can_see_customer = False
+    elif lens == "all":
+        # Manager oversight (C4, Decision G): every POSTED list tenant-wide, no owner
+        # filter. Identity is still per-card gated below (_list_cards renders the
+        # viewer's own rows in full and everyone else's anonymized). The page-level
+        # ``can_see_customer`` stays False here — same as ``open`` — because this lens
+        # is MOSTLY foreign rows and every guard below (``needs`` reset, the
+        # open/collecting merge, part-match-only search) exists to keep the offer-
+        # existence oracle (D2) off the anonymized majority; the manager's own subset
+        # trades a little precision (no needs filter, no stage split, no title search)
+        # for one uniform, leak-safe query shape rather than a second code path.
+        query = query.filter(ExcessList.status.in_([s.value for s in _POSTED_STATUSES]))
         can_see_customer = False
     else:
         query = query.filter(ExcessList.owner_id == user.id)
@@ -604,6 +652,7 @@ def _list_rows_context(
     # competitive signal the coverage meter / amber badge / offer-count chip are hidden from
     # non-owners to protect. Gate it on the one predicate (``can_see_customer``) everywhere:
     # for a non-owner the filter never runs and the passed-through state never reflects it.
+    # The "all" lens shares the same gate (it is mostly foreign rows too).
     if not can_see_customer:
         needs = ""
 
@@ -639,13 +688,15 @@ def _list_rows_context(
             offer_lists = offer_lists.filter(ExcessOffer.scope == ExcessOfferScope.TAKE_ALL)
         query = query.filter(ExcessList.id.in_(offer_lists))
     if q:
-        if lens == "open":
+        if lens in ("open", "all"):
             # #10: a non-owner must NOT be able to search the free-text title — traders name
             # lists after the customer ("Acme Corp — surplus"), so title search is a
             # de-anonymization oracle (a hit/miss confirms the hidden customer name). Match
             # on PART IDENTITY instead: normalized MPN (query normalized the same way the
             # column is) or manufacturer — both indexed (models/excess.py) — via a subquery
             # on excess_list_id. The title ILIKE stays for the owner's mine lens only.
+            # "all" shares this branch (C4): it is mostly foreign rows too, so a raw title
+            # search would leak the same hidden customer text for them.
             conds = [ExcessLineItem.manufacturer.ilike(f"%{escape_like(q)}%", escape="\\")]
             norm_q = normalize_mpn_key(q)
             if norm_q:
@@ -666,7 +717,7 @@ def _list_rows_context(
     )
     has_more = len(lists) > _LIST_PAGE_SIZE
     lists = lists[:_LIST_PAGE_SIZE]
-    cards = _list_cards(db, lists, can_see_customer=can_see_customer)
+    cards = _list_cards(db, lists, user_id=user.id)
 
     return {
         "request": request,

@@ -4,8 +4,10 @@
   to Me) + a stat-card triage strip (each card filters the list). Built entirely
   from shared components — splitPanel(), stat_card, filter_pill — so it reads
   native (spec §"The management page").
-  Receives: lens ('mine'|'open'), stage, needs ('offers'|'take_all'|''),
-            active_filter (the active triage token), q, stats (dict), user, can_post.
+  Receives: lens ('mine'|'open'|'all'), stage, needs ('offers'|'take_all'|''),
+            active_filter (the active triage token), q, stats (dict), user, can_post,
+            is_manager (gates the "All" lens pill — C4, Decision G: manager/admin
+            oversight over every posted list, identity still per-card hidden).
   Called by: resell.resell_workspace.
   Depends on: shared/_macros.html, partials/resell/_lists.html, splitPanel JS.
 #}
@@ -18,7 +20,10 @@
   {# ── Header: lens switch + new-list ─────────────────────────────── #}
   <div class="flex items-center justify-between gap-3 mb-4 flex-shrink-0">
     <div class="flex items-center gap-2">
-      {% for l, label in [('mine', 'My Lists'), ('open', 'Open to Me')] %}
+      {# "All" (C4, Decision G) is manager/admin-only oversight over every posted list —
+         identity stays per-card hidden (own rows full, everyone else's anonymized),
+         same as the "Open to Me" lens. #}
+      {% for l, label in [('mine', 'My Lists'), ('open', 'Open to Me')] + ([('all', 'All')] if is_manager else []) %}
       {# Alpine-reactive highlight so the active pill flips before the server swap
          returns, then stays correct after the re-rendered shell re-inits x-data. #}
       <button hx-get="/v2/partials/resell/lists?lens={{ l }}"
@@ -49,7 +54,8 @@
   {# ── Triage strip ───────────────────────────────────────────────
      Each card is a one-click filter into the list — the team glance
      (spec §"Aggregate & triage"). Hidden under the offerer lens (those are
-     other people's deals — no owner counters).
+     other people's deals — no owner counters); shown under "All" too (C4) since
+     it stays scoped to the viewer's own lists there — see the "My lists" label.
 
      Two filter dimensions: the status cards (open/bid_out/awarded) filter on list
      STATUS; the offer-based cards (offers/take_all) filter on the `needs` dimension —
@@ -57,8 +63,14 @@
      express them. Each card carries a UNIQUE `token`, so the active-ring highlights
      exactly one (the old empty `stage=''` on both offer cards double-lit them and reset
      the list to "All"). #}
-  <div x-show="lens === 'mine'" x-cloak
-       class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 mb-3 flex-shrink-0">
+  <div x-show="lens === 'mine' || lens === 'all'" x-cloak class="mb-3 flex-shrink-0">
+    {# The strip is ALWAYS scoped to the viewer's own lists (never team-wide) — under
+       the "All" lens that needs a label, or the numbers here read as if they cover
+       every posted list the lens is now showing below. #}
+    {% if lens == 'all' %}
+    <p class="text-[11px] font-medium text-gray-400 uppercase tracking-wide mb-1">My lists</p>
+    {% endif %}
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
     {% set glance = [
       ('open', 'stage=live', 'Open', stats.open, 'Open + collecting offers'),
       ('offers', 'needs=offers', 'Offers to review', stats.offers_to_review, 'New, unactioned'),
@@ -85,6 +97,7 @@
       <p class="text-[11px] text-gray-400 leading-tight truncate" title="{{ sub }}">{{ sub }}</p>
     </button>
     {% endfor %}
+    </div>
   </div>
 
   {# ── Split panel: lists (left) + detail (right) ─────────────────── #}

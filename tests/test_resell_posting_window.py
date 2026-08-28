@@ -259,7 +259,7 @@ def test_resolved_list_card_is_not_live_no_overdue(db_session: Session):
     db_session.add(el)
     db_session.commit()
 
-    cards = _list_cards(db_session, [el], can_see_customer=True)
+    cards = _list_cards(db_session, [el], user_id=owner.id)
     card = cards[0]
     assert card["is_live"] is False
     assert card["close_at_display"] is not None
@@ -292,7 +292,7 @@ def test_future_deadline_non_live_list_has_no_closed_label(db_session: Session):
     db_session.add_all([draft, awarded])
     db_session.commit()
 
-    cards = {c["list"].id: c for c in _list_cards(db_session, [draft, awarded], can_see_customer=True)}
+    cards = {c["list"].id: c for c in _list_cards(db_session, [draft, awarded], user_id=owner.id)}
     assert cards[draft.id]["is_live"] is False
     assert cards[draft.id]["close_at_display"] is None
     assert cards[awarded.id]["is_live"] is False
@@ -312,7 +312,7 @@ def test_live_list_card_is_live(db_session: Session):
     db_session.add(el)
     db_session.commit()
 
-    card = _list_cards(db_session, [el], can_see_customer=True)[0]
+    card = _list_cards(db_session, [el], user_id=owner.id)[0]
     assert card["is_live"] is True
 
 
