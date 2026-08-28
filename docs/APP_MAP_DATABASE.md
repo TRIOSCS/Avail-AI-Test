@@ -948,6 +948,7 @@ Model: `VendorContactAttachment` (`app/models/vendors.py`).
 - scope: per_line | take_all; take_all_total_price (lump, take_all only)
 - status: open -> won -> lost -> withdrawn (late = post-close, queued); `valid_until` dropped (migration 201, D6 dead column)
 - ix_excess_offers_vendor_card on offerer_vendor_card_id (migration 200) — the buyer-affinity last-bid / who-to-offer history queries + award win-hook all filter/join on the canonical buyer card
+- sales_order_number (String(100), nullable, migration 216) — reference-only ERP SO number captured against a won offer; never validated/synced (nothing integrates with Acctivate)
 
 **`excess_offer_lines`** — Per-line rows of a per_line offer (incl. the unmatched queue)
 - offer_id -> excess_offers (CASCADE), excess_line_item_id -> excess_line_items (nullable, SET NULL)
@@ -958,6 +959,7 @@ Model: `VendorContactAttachment` (`app/models/vendors.py`).
 - excess_list_id -> excess_lists (CASCADE), owner_id -> users
 - status: draft -> sent -> accepted/rejected; revision (int, default 1); notes
 - One per assembly; the clean PDF + summary render from `bid_back_export_context`
+- po_number (String(100), nullable, migration 216) — reference-only customer PO number captured on acceptance; never validated/synced (nothing integrates with Acctivate)
 
 **`customer_bid_lines`** — Per-line priced rows of a customer bid (Chunk E)
 - customer_bid_id -> customer_bids (CASCADE), excess_line_item_id -> excess_line_items (SET NULL)
