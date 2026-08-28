@@ -244,8 +244,17 @@ class TestParseConfirmationGate:
     ):
         bp, line = _line_assigned_to_other(db_session, test_user, other_buyer)
 
+        prefill = {
+            "po_number": "PO-99123",
+            "estimated_ship_date": None,
+            "payment_method": None,
+            "serial_numbers": None,
+            "warnings": [],
+        }
         with patch(
-            "app.routers.htmx.approvals_hub.parse_po_confirmation", new_callable=AsyncMock, return_value=None
+            "app.routers.htmx.approvals_hub.parse_po_confirmation",
+            new_callable=AsyncMock,
+            return_value=prefill,
         ) as mock_parse:
             resp = manager_client.post(
                 f"/v2/partials/approvals/po/{line.id}/parse-confirmation",
@@ -253,3 +262,8 @@ class TestParseConfirmationGate:
             )
         assert resp.status_code == 200
         mock_parse.assert_called_once()
+        # A manager may act for the buyer through this gate: the route re-renders the
+        # pane with the AI-filled banner and the mocked parse result's PO number
+        # actually landed in the confirm-form field — not just a 200 with no content.
+        assert "AI-filled from your paste" in resp.text
+        assert 'value="PO-99123"' in resp.text
