@@ -7710,9 +7710,10 @@ company, db)` (else a `forbidden` card) and a per-user `check_rate_limit(user.id
 "account_summary", limit=5, window_seconds=60)` (else `throttled`), then calls
 `account_summary_service.generate_account_summary`. That service pools context
 across **sibling accounts** — `company_utils.find_sibling_companies(db, company,
-cap=5)` returns other active `Company` rows sharing the exact same
-`normalized_name` — the policy-allowed duplicates that auto-dedup deliberately
-skips because their `account_owner_id` differs. Pooling is **read-only**: sites,
+cap=5)` applies no owner filter, returning every other active `Company` row
+sharing the exact same `normalized_name`; such rows persist unmerged because
+auto-dedup's merge step skips pairs whose `account_owner_id` differs, not
+because of any filter in this function. Pooling is **read-only**: sites,
 contacts, requisitions, activity, and commercial stats are gathered across
 `[company_id] + sibling_ids` to brief Claude, but sibling rows are never merged or
 written. `_account_summary_card.html` surfaces an amber banner listing each pooled

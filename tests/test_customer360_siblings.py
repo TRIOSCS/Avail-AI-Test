@@ -110,8 +110,13 @@ class TestAccountSummaryPanel:
             "next_steps": ["Call the buyer"],
             "sibling_accounts": [{"id": 9, "name": "Sib Co", "owner": "Pat"}],
         }
-        with patch(
-            "app.services.account_summary_service.generate_account_summary", new_callable=AsyncMock, return_value=fake
+        with (
+            patch(
+                "app.services.account_summary_service.generate_account_summary",
+                new_callable=AsyncMock,
+                return_value=fake,
+            ),
+            patch("app.routers.htmx.insights_views.check_rate_limit", return_value=True),
         ):
             resp = client.post(
                 f"/v2/partials/customers/{test_company.id}/account-summary", headers={"HX-Request": "true"}
@@ -124,8 +129,13 @@ class TestAccountSummaryPanel:
     def test_post_ai_unavailable_friendly(self, client, db_session, test_company, test_user):
         test_company.account_owner_id = test_user.id
         db_session.commit()
-        with patch(
-            "app.services.account_summary_service.generate_account_summary", new_callable=AsyncMock, return_value={}
+        with (
+            patch(
+                "app.services.account_summary_service.generate_account_summary",
+                new_callable=AsyncMock,
+                return_value={},
+            ),
+            patch("app.routers.htmx.insights_views.check_rate_limit", return_value=True),
         ):
             resp = client.post(
                 f"/v2/partials/customers/{test_company.id}/account-summary", headers={"HX-Request": "true"}
