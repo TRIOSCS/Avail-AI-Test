@@ -10,6 +10,10 @@ Covers the Redis pub/sub path added to app.services.sse_broker.SSEBroker:
   dependency exists in this repo (checked: not in requirements.txt, not importable), so
   the fake is scoped to exactly the surface _redis_reader calls (pubsub/subscribe/
   listen/unsubscribe/aclose, publish)
+- self-healing: a mid-stream drop reconnects and resumes delivery instead of ending the
+  reader task; a listener started before Redis was reachable attaches once it recovers;
+  cancellation during the reconnect backoff sleep exits promptly; local (same-process)
+  delivery via publish()'s fallback keeps working for the whole outage window
 - a true two-instance cross-process check, gated on INTEGRATION_REDIS_URL — same
   convention as tests/integration/test_redis_integration.py (conftest.py blanks
   REDIS_URL for isolation, so a dedicated var carries the live server URL in CI)
@@ -19,7 +23,9 @@ Depends on: app.services.sse_broker, app.utils.json_helpers, tests.conftest
 """
 
 import asyncio
+import contextlib
 import os
+import time
 
 os.environ["TESTING"] = "1"
 
@@ -200,6 +206,200 @@ async def test_listen_reader_task_survives_unrelated_channel_noise():
 
     msg = await asyncio.wait_for(consume_task, timeout=2)
     assert msg == {"event": "real", "data": "x"}
+
+    await gen.aclose()
+
+
+# ── Self-healing: reconnect after a drop / late Redis recovery ─────────
+
+
+class _DropOncePubSub:
+    """Pubsub double whose FIRST generation delivers exactly one message, then raises a
+    simulated connection drop — exercising _redis_reader's reconnect path end-to-end.
+
+    Every later generation (post-reconnect) reads normally from the same shared queue.
+    ``ConnectionError`` is a real builtin subclassing ``OSError``, so it's caught by
+    _redis_reader's ``except (redis.RedisError, OSError)`` exactly like a genuine
+    redis-py connection error would be.
+    """
+
+    def __init__(self, fake_redis: "_FlakyFakeRedis", channel_queue: asyncio.Queue):
+        self._generation = fake_redis.subscribe_count
+        self._channel_queue = channel_queue
+        self.subscribed = False
+        self.closed = False
+
+    async def subscribe(self, _channel):
+        self.subscribed = True
+
+    async def listen(self):
+        if self._generation == 1:
+            msg = await self._channel_queue.get()
+            yield msg
+            raise ConnectionError("simulated mid-stream drop")
+        while True:
+            msg = await self._channel_queue.get()
+            yield msg
+
+    async def unsubscribe(self, _channel=None):
+        pass
+
+    async def aclose(self):
+        self.closed = True
+
+
+class _FlakyFakeRedis:
+    """Fake whose pubsub drops the connection once (generation 1) then works normally
+    (generation 2+) — the "fails once then works" double the fix-round brief asked
+    for."""
+
+    def __init__(self):
+        self.channel_queue: asyncio.Queue = asyncio.Queue()
+        self.subscribe_count = 0
+
+    def pubsub(self):
+        self.subscribe_count += 1
+        return _DropOncePubSub(self, self.channel_queue)
+
+    async def publish(self, channel: str, payload: str):
+        await self.channel_queue.put({"type": "message", "channel": channel, "data": payload})
+
+
+async def test_reader_reconnects_after_mid_stream_drop_and_resumes_delivery(monkeypatch):
+    """Finding (a): a mid-stream RedisError/OSError must not end the reader task — it
+    must reconnect and resume relaying, instead of leaving the listener's queue silent
+    for the rest of the SSE connection."""
+    import app.services.sse_broker as sse_broker_module
+
+    monkeypatch.setattr(sse_broker_module, "_READER_BACKOFF_SCHEDULE_S", (0.01, 0.01, 0.01, 0.01))
+
+    b = SSEBroker()
+    fake_redis = _FlakyFakeRedis()
+
+    async def _fake_get_redis():
+        return fake_redis  # always "available" -- only the pubsub stream itself drops
+
+    b._get_redis = _fake_get_redis
+
+    gen = b.listen("flaky-chan")
+    received = []
+
+    async def _consume_two():
+        async for msg in gen:
+            received.append(msg)
+            if len(received) == 2:
+                return
+
+    consume_task = asyncio.create_task(_consume_two())
+    await asyncio.sleep(0)  # let listen() spawn the reader and subscribe (generation 1)
+
+    await fake_redis.publish("sse:flaky-chan", json.dumps({"event": "one", "data": "1"}))
+    # generation 1 delivers "one", then raises on its next read -- the simulated drop.
+    # The reader reconnects (generation 2) and "two" is only deliverable after that.
+    await fake_redis.publish("sse:flaky-chan", json.dumps({"event": "two", "data": "2"}))
+
+    await asyncio.wait_for(consume_task, timeout=3)
+    assert received == [{"event": "one", "data": "1"}, {"event": "two", "data": "2"}]
+    assert fake_redis.subscribe_count == 2  # one initial connect + one reconnect
+
+    await gen.aclose()
+
+
+async def test_listener_started_during_outage_attaches_after_recovery(monkeypatch):
+    """Finding (b): listen() must not evaluate _get_redis() only once at entry — a
+    listener that starts while Redis is down (no client yet) must still attach once
+    Redis recovers, instead of staying cross-process-deaf for the life of the
+    connection."""
+    import app.services.sse_broker as sse_broker_module
+
+    monkeypatch.setattr(sse_broker_module, "_READER_BACKOFF_SCHEDULE_S", (0.01, 0.01, 0.01, 0.01))
+
+    b = SSEBroker()
+    fake_redis = _FakeRedis()
+    calls = 0
+
+    async def _fake_get_redis():
+        nonlocal calls
+        calls += 1
+        # First few calls simulate the outage (no client yet); recovers after that.
+        return None if calls <= 2 else fake_redis
+
+    b._get_redis = _fake_get_redis
+
+    gen = b.listen("recovers-chan")
+    consume_task = asyncio.create_task(gen.__anext__())
+    await asyncio.sleep(0.1)  # let the reader retry through the simulated outage
+
+    await fake_redis.publish("sse:recovers-chan", json.dumps({"event": "e", "data": "d"}))
+
+    msg = await asyncio.wait_for(consume_task, timeout=3)
+    assert msg == {"event": "e", "data": "d"}
+    assert calls > 2  # it kept retrying instead of giving up after the first None
+
+    await gen.aclose()
+
+
+async def test_reader_cancellation_during_backoff_exits_promptly():
+    """A listener disconnecting while the reader is mid-backoff must not block cleanup —
+    asyncio.sleep responds to task cancellation immediately, so listen()'s finally never
+    waits out a pending backoff (uses the REAL 1s-first-step schedule, unpatched, so a
+    regression back to a blocking/uncancellable wait would show up as a slow test, not a
+    silent pass).
+
+    No message is ever delivered here (Redis is never available), so the listener's own
+    ``gen.__anext__()`` is permanently parked at ``await q.get()`` — cancelling that
+    *task* (not calling ``gen.aclose()``, which would race a still-pending anext()) is
+    what simulates the SSE request handler being torn down mid-connection; the
+    CancelledError it raises drives the exact same listen()-finally cleanup chain.
+    """
+    b = SSEBroker()
+
+    async def _fake_get_redis():
+        return None  # Redis never available -- reader stays parked in its backoff loop
+
+    b._get_redis = _fake_get_redis
+
+    gen = b.listen("never-connects-chan")
+    consume_task = asyncio.create_task(gen.__anext__())
+    await asyncio.sleep(0)  # let listen() spawn the reader; it's now sleeping its ~1s backoff
+
+    start = time.monotonic()
+    consume_task.cancel()  # simulates the SSE client disconnecting mid-backoff
+    with contextlib.suppress(asyncio.CancelledError):
+        await consume_task
+    elapsed = time.monotonic() - start
+
+    assert elapsed < 0.5  # nowhere near the ~1s backoff -- cancellation was immediate
+
+
+async def test_publish_during_outage_reaches_local_listener_same_process():
+    """Local fallback must keep working for the whole outage window: publish() falls
+    back to _publish_local() when Redis is unavailable, and that write lands on the SAME
+    queue listen() reads from (subscribe() registers one queue regardless of Redis
+    status) — so a listener in THIS process is never silent during an outage. A listener
+    in a *different* worker process would still miss it (no Redis to relay through);
+    that loss is the accepted, now explicitly-scoped, remainder of the outage risk."""
+    b = SSEBroker()
+
+    async def _fake_get_redis():
+        return None  # Redis unavailable for the whole test
+
+    b._get_redis = _fake_get_redis
+
+    gen = b.listen("outage-chan")
+    received = []
+
+    async def _consumer():
+        async for msg in gen:
+            received.append(msg)
+            break
+
+    async def _producer():
+        await asyncio.sleep(0)
+        await b.publish("outage-chan", "still-here", "payload")
+
+    await asyncio.gather(_consumer(), _producer())
+    assert received == [{"event": "still-here", "data": "payload"}]
 
     await gen.aclose()
 
