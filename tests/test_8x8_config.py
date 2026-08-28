@@ -23,7 +23,7 @@ def test_settings_loads_8x8_fields():
         assert s.eight_by_eight_pbx_id == ""
         assert s.eight_by_eight_timezone == "America/Los_Angeles"
         assert s.eight_by_eight_enabled is False
-        assert s.eight_by_eight_poll_interval_minutes == 30
+        assert s.eight_by_eight_poll_interval_minutes == 5
 
 
 def test_user_has_8x8_extension_column():
