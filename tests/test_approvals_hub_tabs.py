@@ -905,6 +905,29 @@ def test_export_anchor_threads_q_scope_show_closed(hub_client: TestClient, db_se
     assert "/v2/partials/approvals/prepayments/export?scope=mine&show_closed=true&q=acme" in r.text
 
 
+@pytest.mark.parametrize("tab", ["sales-orders", "buy-plans"])
+@pytest.mark.parametrize("qs", ["", "?show_closed=true"])
+def test_export_tooltip_generic_for_so_bp_tabs(hub_client: TestClient, tab: str, qs: str):
+    """A6 fix (review finding 1): SO/BP export ignores show_closed by design — it's
+    still the full plan tracking list either way — so its tooltip must never claim a
+    live-only or closed-only download it doesn't actually deliver."""
+    html = hub_client.get(f"/v2/partials/approvals/{tab}/list{qs}").text
+    assert 'title="Download this list as a CSV file"' in html
+    assert "resolved/closed history" not in html
+    assert "live rows shown below" not in html
+
+
+@pytest.mark.parametrize("tab", ["prepayments", "purchase-orders"])
+def test_export_tooltip_live_vs_closed_for_prepayments_and_po(hub_client: TestClient, tab: str):
+    """A6: on the two tabs where show_closed actually changes what's exported, the
+    tooltip says which one this click downloads."""
+    live_html = hub_client.get(f"/v2/partials/approvals/{tab}/list").text
+    assert 'title="Download the live rows shown below as a CSV file"' in live_html
+
+    closed_html = hub_client.get(f"/v2/partials/approvals/{tab}/list?show_closed=true").text
+    assert 'title="Download the resolved/closed history shown below as a CSV file"' in closed_html
+
+
 # ── Origination + hub home (unchanged homes) ─────────────────────────────
 
 

@@ -96,13 +96,16 @@
   </a>
   {% endif %}
   {# Export CSV — a REAL browser download (hx-boost=false opts out of nav-boost). A6:
-     q/show_closed ride along so the CSV can never drift from what's on screen — Live
-     streams the same live rows the list renders, Closed streams the resolved history;
-     the tooltip says which one this click downloads. #}
+     q/show_closed ride along so the CSV can never drift from what's on screen — on
+     prepayments/purchase-orders, Live streams the same live rows the list renders and
+     Closed streams the resolved history, so the tooltip there says which one this click
+     downloads. Sales Orders / Buy Plans export ignores show_closed by design (still the
+     full plan tracking list, live+closed together) — its tooltip stays generic so it
+     never promises a closed-only download it doesn't deliver. #}
   <a hx-boost="false"
      href="/v2/partials/approvals/{{ tab }}/export?scope={{ scope }}&show_closed={{ 'true' if show_closed else 'false' }}{% if q %}&q={{ q|urlencode }}{% endif %}"
      class="btn-secondary btn-sm flex-shrink-0 whitespace-nowrap"
-     title="{{ 'Download the resolved/closed history shown below as a CSV file' if show_closed else 'Download the live rows shown below as a CSV file' }}">Export CSV</a>
+     title="{% if tab in ('sales-orders', 'buy-plans') %}Download this list as a CSV file{% elif show_closed %}Download the resolved/closed history shown below as a CSV file{% else %}Download the live rows shown below as a CSV file{% endif %}">Export CSV</a>
 </form>
 
 {# Row wrapper is a role="button" DIV, not a <button>: the copy chip inside it is a
