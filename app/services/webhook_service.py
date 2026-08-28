@@ -79,9 +79,9 @@ def _active_subscription(db: Session, user_id: int, resource: str | None = None)
     Graph *resource*.
 
     The single existing-row query behind both create_* paths and
-    ``ensure_all_users_subscribed``. NOTE: the mail create path deliberately passes no
-    resource (its historical check matches ANY active row for the user); every other
-    caller filters by resource.
+    ``ensure_all_users_subscribed``. Every caller filters by resource so an active
+    subscription for one resource (e.g. calendar) never blocks creation of another
+    (e.g. mail).
     """
     q = db.query(GraphSubscription).filter(
         GraphSubscription.user_id == user_id,
@@ -101,14 +101,16 @@ async def _create_graph_subscription(
     webhook_path: str,
     err_label: str,
     created_log: str,
+    change_type: str = "created",
 ) -> GraphSubscription | None:
     """POST a new Graph webhook subscription and persist its GraphSubscription row.
 
     The shared tail of ``create_mail_subscription`` / ``create_teams_subscription`` —
-    identical apart from the resource, webhook path, and log wording (*err_label*
-    prefixes the failure logs; *created_log* is a format template taking
-    ``sub_id``/``email``/``expiration``). Callers have already taken the per-user
-    lock and checked for an existing active row.
+    identical apart from the resource, webhook path, log wording (*err_label* prefixes
+    the failure logs; *created_log* is a format template taking
+    ``sub_id``/``email``/``expiration``), and the Graph ``changeType`` (*change_type*,
+    defaults to ``"created"`` — existing callers are unaffected). Callers have already
+    taken the per-user lock and checked for an existing active row.
     """
     from app.utils.graph_client import GraphClient
 
@@ -116,7 +118,7 @@ async def _create_graph_subscription(
     expiration = datetime.now(UTC) + timedelta(hours=SUBSCRIPTION_LIFETIME_HOURS)
 
     payload = {
-        "changeType": "created",
+        "changeType": change_type,
         "notificationUrl": f"{settings.app_url}{webhook_path}",
         "resource": resource,
         "expirationDateTime": expiration.strftime("%Y-%m-%dT%H:%M:%S.0000000Z"),
@@ -139,7 +141,7 @@ async def _create_graph_subscription(
         user_id=user.id,
         subscription_id=sub_id,
         resource=resource,
-        change_type="created",
+        change_type=change_type,
         expiration_dt=expiration,
         client_state=client_state,
     )
@@ -165,8 +167,9 @@ async def create_mail_subscription(user: User, db: Session) -> GraphSubscription
     # Serialize subscription creation per-user to avoid duplicate active rows
     db.query(User).filter(User.id == user.id).with_for_update().first()
 
-    # Check for existing active subscription
-    existing = _active_subscription(db, user.id)
+    # Check for existing active subscription, scoped to the mail resource so an
+    # active subscription for another resource (e.g. calendar) never blocks this one.
+    existing = _active_subscription(db, user.id, resource="/me/messages")
     if existing:
         logger.debug(f"Active subscription exists for {user.email}: {existing.subscription_id}")
         return existing
