@@ -133,6 +133,10 @@
 {% endmacro %}
 
 <div class="flex-1 min-h-0 md:overflow-y-auto">
+  {# A7: stalled rows (no configured approver) get their own group, carved out of
+     other_rows, between "Needs your approval" and "Everything else". #}
+  {% set stalled_rows = other_rows | selectattr('stalled') | list %}
+  {% set rest_rows = other_rows | rejectattr('stalled') | list %}
   {% if needs_rows %}
   <div class="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-accent-600">Needs your approval</div>
   {# data-aw-needs: the auto-advance hook — after a decide, the split selects the
@@ -141,10 +145,16 @@
     {% for row in needs_rows %}{{ list_row(row) }}{% endfor %}
   </div>
   {% endif %}
-  {% if other_rows %}
-  {% if needs_rows %}<div class="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Everything else</div>{% endif %}
+  {% if stalled_rows %}
+  <div class="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-amber-600">Stalled — no approver</div>
+  <div class="divide-y divide-line-subtle border-b border-line-base">
+    {% for row in stalled_rows %}{{ list_row(row) }}{% endfor %}
+  </div>
+  {% endif %}
+  {% if rest_rows %}
+  {% if needs_rows or stalled_rows %}<div class="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Everything else</div>{% endif %}
   <div class="divide-y divide-line-subtle">
-    {% for row in other_rows %}{{ list_row(row) }}{% endfor %}
+    {% for row in rest_rows %}{{ list_row(row) }}{% endfor %}
   </div>
   {% endif %}
   {% if not needs_rows and not other_rows %}

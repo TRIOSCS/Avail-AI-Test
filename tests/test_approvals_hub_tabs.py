@@ -423,6 +423,38 @@ def test_so_list_age_on_every_row(hub_client: TestClient, db_session: Session, t
     assert "just now" in txt or "m ago" in txt or "h ago" in txt or "now" in txt.lower()
 
 
+def test_so_list_stalled_pending_plan_warns(hub_client: TestClient, db_session: Session, test_user: User):
+    """A7: stalled_ids is no longer gated to the Buy Plans lens — a PENDING plan with no
+    eligible approver must warn on the SALES ORDERS tab list too, not just Buy Plans."""
+    req, q, _ = _req_quote(db_session, test_user)
+    _plan(db_session, req, q, status=BuyPlanStatus.PENDING.value)
+    # Nobody holds the buy-plan approval right → the pending plan is stalled.
+    test_user.can_approve_buy_plans = False
+    db_session.commit()
+
+    body = hub_client.get("/v2/partials/approvals/sales-orders/list").text
+    assert "No approver configured — stalled" in body
+
+
+def test_so_list_stalled_group_header_present_only_when_stalled(
+    hub_client: TestClient, db_session: Session, test_user: User
+):
+    """A7: a "Stalled — no approver" group renders between "Needs your approval" and
+    "Everything else" when any row is stalled, and is absent otherwise."""
+    req, q, _ = _req_quote(db_session, test_user)
+    _plan(db_session, req, q, status=BuyPlanStatus.PENDING.value)
+    test_user.can_approve_buy_plans = False
+    db_session.commit()
+
+    stalled_body = hub_client.get("/v2/partials/approvals/sales-orders/list").text
+    assert "Stalled — no approver" in stalled_body
+
+    test_user.can_approve_buy_plans = True
+    db_session.commit()
+    clear_body = hub_client.get("/v2/partials/approvals/sales-orders/list").text
+    assert "Stalled — no approver" not in clear_body
+
+
 # ── Purchase Orders list ─────────────────────────────────────────────────
 
 

@@ -1426,17 +1426,17 @@ def _plan_rows(db: Session, user: User, *, lens: str, q: str, scope: str, show_c
         ).all():
             ages[pid] = submitted_at or created_at
 
-    # Stall detection (2.5, Buy Plans lens): a PENDING plan with no configured
-    # approver sits invisibly — surface plan_needs_approver_reason on its row.
+    # Stall detection (2.5, A7: both plan lenses): a PENDING plan with no configured
+    # approver sits invisibly — surface plan_needs_approver_reason on its row regardless
+    # of which lens (Sales Orders / Buy Plans) is viewing it; both read the same rows.
     stalled_ids: set[int] = set()
-    if lens == "buy-plans":
-        from ...services.buyplan_workflow import plan_needs_approver_reason
+    from ...services.buyplan_workflow import plan_needs_approver_reason
 
-        pending_ids = [t.plan_id for t in tracking if t.status == BuyPlanStatus.PENDING.value]
-        if pending_ids:
-            for plan in db.execute(select(BuyPlan).where(BuyPlan.id.in_(pending_ids))).scalars():
-                if plan_needs_approver_reason(plan, db):
-                    stalled_ids.add(plan.id)
+    pending_ids = [t.plan_id for t in tracking if t.status == BuyPlanStatus.PENDING.value]
+    if pending_ids:
+        for plan in db.execute(select(BuyPlan).where(BuyPlan.id.in_(pending_ids))).scalars():
+            if plan_needs_approver_reason(plan, db):
+                stalled_ids.add(plan.id)
 
     rows = [
         WorkspaceRow(
