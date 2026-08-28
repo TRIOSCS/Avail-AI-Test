@@ -508,3 +508,22 @@ def test_preload_card_id_dedup():
     result = _preload_last_quoted_prices(db)
     # First quote's price should win for card key
     assert result["card:42"]["sell_price"] == 3.00
+
+
+def test_preload_skips_non_dict_line_items_entry():
+    """B4 fix-round-1: a malformed legacy line_items entry (e.g. a bare string, not a
+    dict) must be skipped rather than raise — and healthy entries on the same and other
+    quotes still get picked up."""
+    q = MagicMock()
+    q.line_items = ["not-a-dict", {"mpn": "LM317T", "sell_price": 2.50, "margin_pct": 15.0}]
+    q.quote_number = "Q-2026-0100"
+    q.sent_at = datetime(2026, 2, 1, tzinfo=UTC)
+    q.created_at = datetime(2026, 1, 28, tzinfo=UTC)
+    q.result = "won"
+    db = MagicMock()
+    db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [q]
+
+    result = _preload_last_quoted_prices(db)  # must not raise
+
+    assert "LM317T" in result
+    assert result["LM317T"]["sell_price"] == 2.50
