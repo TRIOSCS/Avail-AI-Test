@@ -361,3 +361,124 @@ def test_prepay_without_line_still_renders_pane(hub_client: TestClient, db_sessi
     r = hub_client.get(f"/v2/partials/approvals/prepayments/{pp.id}/pane")
     assert r.status_code == 200
     assert "WireVendor" in r.text
+
+
+# ── Origin threading: mark-paid / unmark-paid / resend from the workspace pane ──
+
+
+def _approved_pp(db: Session, user: User):
+    """A decided prepayment: request APPROVED (terminal), Prepayment approved with a
+    live pay_token — the state the pane's money-loop actions operate on."""
+    bp, line, pp, ar = _prepay_on_line(db, user)
+    ar.status = ApprovalRequestStatus.APPROVED.value
+    ar.resolved_at = datetime.now(UTC)
+    pp.status = PrepaymentStatus.APPROVED.value
+    pp.approved_at = datetime.now(UTC)
+    pp.pay_token = "tok-live-1"
+    db.commit()
+    return bp, line, pp, ar
+
+
+def test_mark_paid_modal_get_threads_workspace_origin(hub_client: TestClient, db_session: Session, test_user: User):
+    _bp, _line, pp, _ar = _approved_pp(db_session, test_user)
+    body = hub_client.get(f"/v2/partials/prepayments/{pp.id}/mark-paid?origin=approvals_workspace").text
+    assert "#aw-pane" in body  # the form targets the workspace pane…
+    assert "name='origin'" in body and "approvals_workspace" in body  # …and posts the origin back
+
+
+def test_mark_paid_modal_get_defaults_to_hub_body(hub_client: TestClient, db_session: Session, test_user: User):
+    _bp, _line, pp, _ar = _approved_pp(db_session, test_user)
+    body = hub_client.get(f"/v2/partials/prepayments/{pp.id}/mark-paid").text
+    assert "#ap-hub-body" in body  # unchanged default surface
+    assert "#aw-pane" not in body
+
+
+def test_mark_paid_origin_workspace_rerenders_pane(hub_client: TestClient, db_session: Session, test_user: User):
+    _bp, _line, pp, _ar = _approved_pp(db_session, test_user)
+    r = hub_client.post(
+        f"/v2/partials/prepayments/{pp.id}/mark-paid",
+        data={"wire_reference": "FT-ORIGIN-1", "origin": "approvals_workspace"},
+    )
+    assert r.status_code == 200, r.text
+    assert 'id="aw-pane-body"' in r.text  # the prepayment PANE, not a tab body
+    trig = r.headers.get("HX-Trigger", "")
+    assert "awListRefresh" in trig and "showToast" in trig  # list nudge MERGED with the toast
+    db_session.expire_all()
+    assert pp.status == PrepaymentStatus.PAID.value
+
+
+def test_mark_paid_default_origin_rerenders_tab_body(hub_client: TestClient, db_session: Session, test_user: User):
+    _bp, _line, pp, _ar = _approved_pp(db_session, test_user)
+    r = hub_client.post(f"/v2/partials/prepayments/{pp.id}/mark-paid", data={"wire_reference": "FT-ORIGIN-2"})
+    assert r.status_code == 200, r.text
+    assert "/v2/partials/approvals/prepayments/list" in r.text  # the hub tab body (split view)
+
+
+def test_unmark_paid_origin_workspace_rerenders_pane(hub_client: TestClient, db_session: Session, test_user: User):
+    test_user.role = "manager"  # unmark is manager/admin-only
+    _bp, _line, pp, _ar = _approved_pp(db_session, test_user)
+    pp.status = PrepaymentStatus.PAID.value
+    pp.paid_at = datetime.now(UTC)
+    pp.pay_token = None
+    db_session.commit()
+
+    r = hub_client.post(
+        f"/v2/partials/prepayments/{pp.id}/unmark-paid",
+        data={"origin": "approvals_workspace"},
+    )
+    assert r.status_code == 200, r.text
+    assert 'id="aw-pane-body"' in r.text
+    assert "awListRefresh" in r.headers.get("HX-Trigger", "")
+    db_session.expire_all()
+    assert pp.status == PrepaymentStatus.APPROVED.value
+
+
+def test_resend_origin_workspace_rerenders_pane(hub_client: TestClient, db_session: Session, test_user: User):
+    _bp, _line, pp, _ar = _approved_pp(db_session, test_user)
+    with patch("app.services.prepayment_notifications.run_prepayment_notify_bg", new_callable=AsyncMock) as bg:
+        r = hub_client.post(
+            f"/v2/partials/prepayments/{pp.id}/resend-pay-link",
+            data={"origin": "approvals_workspace"},
+        )
+    assert r.status_code == 200, r.text
+    assert 'id="aw-pane-body"' in r.text
+    assert "awListRefresh" in r.headers.get("HX-Trigger", "")
+    assert bg.called
+
+
+# ── Pane lifecycle action buttons (approved / paid branches) ─────────────
+
+
+def test_pane_approved_offers_mark_paid_and_resend(hub_client: TestClient, db_session: Session, test_user: User):
+    _bp, _line, pp, _ar = _approved_pp(db_session, test_user)
+    body = hub_client.get(f"/v2/partials/approvals/prepayments/{pp.id}/pane").text
+    assert f"/v2/partials/prepayments/{pp.id}/mark-paid?origin=approvals_workspace" in body
+    assert f"/v2/partials/prepayments/{pp.id}/resend-pay-link" in body
+    assert "hx-confirm" in body  # resend asks before re-emailing accounting
+    assert f"/v2/partials/prepayments/{pp.id}/unmark-paid" not in body  # not paid yet
+
+
+def test_pane_paid_offers_undo_for_manager_only(hub_client: TestClient, db_session: Session, test_user: User):
+    _bp, _line, pp, _ar = _approved_pp(db_session, test_user)
+    pp.status = PrepaymentStatus.PAID.value
+    pp.paid_at = datetime.now(UTC)
+    pp.pay_token = None
+    db_session.commit()
+
+    body = hub_client.get(f"/v2/partials/approvals/prepayments/{pp.id}/pane").text
+    assert f"/v2/partials/prepayments/{pp.id}/unmark-paid" not in body  # buyer: no undo
+
+    test_user.role = "manager"
+    db_session.commit()
+    body = hub_client.get(f"/v2/partials/approvals/prepayments/{pp.id}/pane").text
+    assert f"/v2/partials/prepayments/{pp.id}/unmark-paid" in body
+    assert "stops working" in body  # the hx-confirm warns the old emailed link dies
+    assert f"/v2/partials/prepayments/{pp.id}/mark-paid" not in body  # paid: no re-mark
+
+
+def test_pane_requested_has_no_lifecycle_buttons(hub_client: TestClient, db_session: Session, test_user: User):
+    _bp, _line, pp, _ar = _prepay_on_line(db_session, test_user)
+    body = hub_client.get(f"/v2/partials/approvals/prepayments/{pp.id}/pane").text
+    assert "/mark-paid" not in body
+    assert "/resend-pay-link" not in body
+    assert "/unmark-paid" not in body

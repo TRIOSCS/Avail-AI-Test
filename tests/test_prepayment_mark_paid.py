@@ -9,6 +9,8 @@ Plus the routers/prepayments.py HTMX fallback:
     in-app (paid_via=in_app, paid_by_id set); a restricted non-owner is 404;
   - POST /v2/partials/prepayments/{id}/unmark-paid — a manager reverts paid→approved, clears
     the paid fields, re-mints pay_token; a non-manager is 403.
+  - POST /v2/partials/prepayments/{id}/resend-pay-link — re-send the OK-TO-WIRE email for
+    an APPROVED prepayment without re-minting pay_token; non-approved is 400.
 The paid fan-out (run_prepayment_notify_bg) is suppressed under TESTING, so no notify work
 runs here.
 
@@ -19,6 +21,7 @@ Depends on: app.services.prepayment_service (mark_prepayment_paid),
 """
 
 from decimal import Decimal
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -265,3 +268,103 @@ def test_mark_paid_twice_is_rejected(db_session: Session, approved_prepay: Prepa
             db_session, pp, wire_reference="WIRE-2", paid_amount=Decimal("20002.38"), paid_via="in_app"
         )
     assert pp.wire_reference == "WIRE-1"  # the second call never overwrote it
+
+
+# ── Resend pay link (approved-only re-send of the OK-TO-WIRE email) ───────────
+
+_RUNNER = "app.services.prepayment_notifications.run_prepayment_notify_bg"
+
+
+def test_resend_pay_link_notifies_without_reminting_token(db_session: Session):
+    manager = _make_user(db_session, role="manager")
+    pp = _approved_prepay_on_plan(db_session, manager)  # pay_token="tok-approved-1"
+
+    with _client_as(db_session, manager) as c, patch(_RUNNER, new_callable=AsyncMock) as bg:
+        r = c.post(
+            f"/v2/partials/prepayments/{pp.id}/resend-pay-link",
+            data={},
+            headers={"HX-Request": "true"},
+        )
+    assert r.status_code == 200, r.text
+    assert "showToast" in r.headers.get("HX-Trigger", "")
+
+    # The OK-TO-WIRE notifier was dispatched through the background runner. (Patching
+    # the runner is the proven wiring pattern — under TESTING the real runner closes
+    # its coroutine without executing it, so patching only the notifier records
+    # nothing; see tests/test_prepayment_notify_wiring.py.)
+    assert bg.called
+    assert bg.call_args.args[0].__name__ == "notify_prepayment_approved"
+    assert bg.call_args.args[1] == pp.id
+
+    db_session.refresh(pp)
+    assert pp.pay_token == "tok-approved-1"  # NOT re-minted — the emailed link stays valid
+    assert pp.status == PrepaymentStatus.APPROVED.value
+
+
+def test_resend_pay_link_paid_is_400_and_never_notifies(db_session: Session):
+    """A paid prepayment's pay_token is spent (None) — notify_prepayment_approved would
+    email a link-less OK-TO-WIRE.
+
+    The route must 400 BEFORE dispatching.
+    """
+    manager = _make_user(db_session, role="manager")
+    pp = _approved_prepay_on_plan(db_session, manager)
+    mark_prepayment_paid(
+        db_session,
+        pp,
+        wire_reference="WIRE-1",
+        paid_amount=Decimal("20002.38"),
+        paid_via="in_app",
+        paid_by_id=manager.id,
+    )
+
+    with _client_as(db_session, manager) as c, patch(_RUNNER, new_callable=AsyncMock) as bg:
+        r = c.post(
+            f"/v2/partials/prepayments/{pp.id}/resend-pay-link",
+            data={},
+            headers={"HX-Request": "true"},
+        )
+    assert r.status_code == 400
+    assert not bg.called
+
+
+def test_resend_pay_link_requested_is_400(db_session: Session):
+    manager = _make_user(db_session, role="manager")
+    pp = _prepay(db_session, status=PrepaymentStatus.REQUESTED.value, pay_token=None)
+
+    with _client_as(db_session, manager) as c, patch(_RUNNER, new_callable=AsyncMock) as bg:
+        r = c.post(
+            f"/v2/partials/prepayments/{pp.id}/resend-pay-link",
+            data={},
+            headers={"HX-Request": "true"},
+        )
+    assert r.status_code == 400
+    assert not bg.called
+
+
+def test_resend_pay_link_restricted_non_owner_404(db_session: Session):
+    """Same access gate as mark-paid: a restricted role (sales) that doesn't own the
+    plan is 404'd by _require_mark_paid_access."""
+    owner = _make_user(db_session, role="buyer")
+    pp = _approved_prepay_on_plan(db_session, owner)
+    intruder = _make_user(db_session, role="sales")
+
+    with _client_as(db_session, intruder) as c, patch(_RUNNER, new_callable=AsyncMock) as bg:
+        r = c.post(
+            f"/v2/partials/prepayments/{pp.id}/resend-pay-link",
+            data={},
+            headers={"HX-Request": "true"},
+        )
+    assert r.status_code == 404
+    assert not bg.called
+
+
+def test_resend_pay_link_missing_404(db_session: Session):
+    manager = _make_user(db_session, role="manager")
+    with _client_as(db_session, manager) as c:
+        r = c.post(
+            "/v2/partials/prepayments/999999/resend-pay-link",
+            data={},
+            headers={"HX-Request": "true"},
+        )
+    assert r.status_code == 404

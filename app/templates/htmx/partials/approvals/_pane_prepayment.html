@@ -9,8 +9,9 @@
   reference; void shows the stand-down reason. Decides post the EXISTING
   prepay-requests/{id}/decide route with origin=approvals_workspace.
   Receives: pp (Prepayment), plan, line, user, open_request (ApprovalRequest|None),
-            can_decide (bool), beneficiary (str), prepay_methods (list[(val,label)]),
-            method_label, pp_stale_token.
+            can_decide (bool), can_undo_paid (bool — manager/admin, mirrors the
+            unmark-paid route's 403), beneficiary (str),
+            prepay_methods (list[(val,label)]), method_label, pp_stale_token.
   Called by: htmx/approvals_hub.py render_prepayment_pane.
   Depends on: HTMX, Alpine.js, Tailwind; shared copy_chip + age_chip macros.
 #}
@@ -104,15 +105,43 @@
     Awaiting a prepayment approver.
   </div>
   {% elif pp.status == 'approved' %}
-  <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
-    OK to pay — {{ method_label }} · approved{% if pp.approved_at %} {{ pp.approved_at | fmtdate('%b %d, %Y') }}{% endif %}.
-    Accounting confirms via the pay link.
+  <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800 space-y-2">
+    <div>
+      OK to pay — {{ method_label }} · approved{% if pp.approved_at %} {{ pp.approved_at | fmtdate('%b %d, %Y') }}{% endif %}.
+      Accounting confirms via the pay link.
+    </div>
+    {# Money-loop actions. Anyone who can SEE this pane already cleared the routes'
+       access gate (_require_mark_paid_access = manager/admin OR plan access — and this
+       pane required plan access to render). Mark paid opens the in-app fallback modal
+       (origin threads the workspace surface); Resend re-emails the SAME live pay link
+       — the token is NOT re-minted. Explicit hx-target — never inherit. #}
+    <div class="flex items-center gap-1.5">
+      <button type="button"
+              @click="$dispatch('open-modal', {url: '/v2/partials/prepayments/{{ pp.id }}/mark-paid?origin=approvals_workspace'})"
+              class="btn-primary btn-sm">Mark paid</button>
+      <form hx-post="/v2/partials/prepayments/{{ pp.id }}/resend-pay-link"
+            hx-target="#aw-pane" hx-swap="innerHTML"
+            hx-confirm="Resend the OK-TO-WIRE email with the pay link to accounting?">
+        <input type="hidden" name="origin" value="approvals_workspace">
+        <button type="submit" data-loading-disable class="btn btn-secondary btn-sm">Resend pay link</button>
+      </form>
+    </div>
   </div>
   {% elif pp.status == 'paid' %}
   <div class="rounded-lg border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-800">
     Paid{% if pp.paid_at %} · {{ pp.paid_at | fmtdate('%b %d, %Y') }}{% endif %}{% if pp.paid_by_label %} · by {{ pp.paid_by_label }}{% endif %}
     {% if pp.wire_reference %}
     <div class="mt-1 flex items-center gap-1.5">Wire reference {{ copy_chip(pp.wire_reference) }}</div>
+    {% endif %}
+    {% if can_undo_paid %}
+    {# Manager/admin-only correction — the flag mirrors the route's 403. Loud confirm:
+       undo re-mints the single-use token, so the link in the ALREADY-SENT email dies. #}
+    <form class="mt-2" hx-post="/v2/partials/prepayments/{{ pp.id }}/unmark-paid"
+          hx-target="#aw-pane" hx-swap="innerHTML"
+          hx-confirm="Reverse this payment? The prepayment returns to approved and the pay link already emailed to accounting stops working — a fresh link is minted.">
+      <input type="hidden" name="origin" value="approvals_workspace">
+      <button type="submit" data-loading-disable class="btn-danger btn-sm">Undo paid</button>
+    </form>
     {% endif %}
   </div>
   {% elif pp.status == 'void' %}

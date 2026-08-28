@@ -7,7 +7,9 @@
   (form-encoded) to /v2/partials/prepayments/{id}/mark-paid, which marks the prepayment paid
   (paid_via=in_app), re-renders the Prepayment tab body into #ap-hub-body, and toasts. The
   modal closes on any 2xx.
-  Receives: pp (Prepayment), amount (Decimal, prefill), scope ('all'|'mine').
+  Receives: pp (Prepayment), amount (Decimal, prefill), scope ('all'|'mine'),
+            origin ('approvals_workspace'|'' — threads the caller's surface: workspace
+            origin re-renders the prepayment pane into #aw-pane, default the tab body).
   Depends on: HTMX, Alpine.js ($dispatch close-modal), Tailwind CSS.
 #}
 {% from "htmx/partials/shared/_macros.html" import close_modal_on_success -%}
@@ -25,13 +27,14 @@
   </div>
 
   <form hx-post='/v2/partials/prepayments/{{ pp.id }}/mark-paid'
-        hx-target='#ap-hub-body'
+        hx-target='{% if origin == "approvals_workspace" %}#aw-pane{% else %}#ap-hub-body{% endif %}'
         hx-swap='innerHTML'
         hx-push-url='false'
         {{ close_modal_on_success() }}
         data-loading-disable
         class='space-y-3'>
     <input type='hidden' name='scope' value='{{ scope }}'>
+    <input type='hidden' name='origin' value='{{ origin }}'>
 
     <div class='flex gap-2'>
       <div class='flex-1'>

@@ -46,6 +46,7 @@ from ...models.approvals import ApprovalRequest, ApprovalStep, ApprovalStepRecip
 from ...rate_limit import check_rate_limit
 from ...services.approvals.po_queue import build_po_queue_view
 from ...services.approvals.queue import (
+    approved_unpaid_rows,
     buy_plan_tracking_rows,
     pending_rows_for_gate,
     resolved_rows_for_gate,
@@ -898,7 +899,7 @@ def render_prepayment_pane(request: Request, user: User, db: Session, prepayment
     gate as render_plan_pane / render_po_pane): a restricted non-owner 404s.
     """
     from ...constants import PREPAYMENT_METHODS, ApprovalSubjectType
-    from ...dependencies import get_buyplan_for_user
+    from ...dependencies import get_buyplan_for_user, is_manager_or_admin
     from ...models.quality_plan import Prepayment
     from ...services.approvals.queue import _beneficiary
     from ...services.stale_guard import stale_token
@@ -959,6 +960,10 @@ def render_prepayment_pane(request: Request, user: User, db: Session, prepayment
             ],
             "method_label": (pp.payment_method or "").upper() or "—",
             "pp_stale_token": stale_token(pp),
+            # Undo-paid is a manager/admin oversight action — this flag MUST mirror the
+            # unmark-paid route's is_manager_or_admin 403 so the button never renders
+            # where the POST would refuse.
+            "can_undo_paid": is_manager_or_admin(user),
             # Notes + attachments (2.4): the prepayment's own thread.
             **_notes_ctx(db, user, plan_id=pp.buy_plan_id, prepayment_id=pp.id),
         }
@@ -1570,7 +1575,13 @@ def _prepayment_rows(db: Session, user: User, *, q: str, scope: str, show_closed
     if show_closed:
         source = resolved_rows_for_gate(db, ApprovalGateType.PREPAYMENT, scope=scope, user=user)
     else:
+        # Live = open requests (decidable) + the approved-but-unwired window (its
+        # requests are terminal, so pending_rows_for_gate can never surface it — yet
+        # mark-paid / resend live exactly there). Dedupe on the prepayment id
+        # defensively: one row per prepayment, the REQUESTED row winning.
         source = pending_rows_for_gate(db, user, ApprovalGateType.PREPAYMENT, scope=scope)
+        seen = {vm.subject_id for vm in source if vm.subject_id is not None}
+        source = source + [vm for vm in approved_unpaid_rows(db, user, scope=scope) if vm.subject_id not in seen]
 
     for vm in source:
         if vm.subject_id is None:
@@ -1598,7 +1609,16 @@ def _prepayment_rows(db: Session, user: User, *, q: str, scope: str, show_closed
                 closed=show_closed,
             )
         )
-    return [r for r in rows if _matches(q, r.title, r.subtitle, r.copy_number)]
+    rows = [r for r in rows if _matches(q, r.title, r.subtitle, r.copy_number)]
+    if show_closed:
+        return rows  # the resolved audit feed keeps its coalesce order untouched
+    # Live: decidable rows keep their oldest-first source order; everything else
+    # (waiting-on-someone-else requests + the approved-unwired window) renders
+    # newest-first — the _plan_rows house idiom (id desc off the row key), which
+    # avoids mixing naive/aware datetimes in a sort key.
+    needs = [r for r in rows if r.needs_approval]
+    rest = sorted((r for r in rows if not r.needs_approval), key=lambda r: -int(r.key.split("-")[1]))
+    return needs + rest
 
 
 # ── CSV export (kept from the 3-tab console; legacy tab keys alias) ─────

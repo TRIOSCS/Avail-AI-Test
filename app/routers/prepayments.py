@@ -51,13 +51,14 @@ _PAYMENT_METHOD_CHOICES: list[tuple[str, str]] = [
 _TRUTHY = {"true", "on", "1", "yes"}
 
 
-def _cod_guard_response(message: str) -> HTMLResponse:
-    """The friendly 400 for a blocked prepayment request (COD line / bad method).
+def _form_error_response(message: str) -> HTMLResponse:
+    """The friendly 400 for a refused prepayment request (COD line, bad method, bad
+    amount, duplicate pending, no eligible approver).
 
-    A small inline partial (rendered into the modal body via response-targets or read
-    by tests) + a toast, with a REAL 400 status so callers and tests see the refusal —
-    unlike ``toast_error_response``'s 200-no-swap, this is a hard guard, not a
-    transient service error.
+    A small inline partial (rendered into the modal's #pp-modal-error via the
+    response-targets ext's hx-target-4xx) + a toast, with a REAL 400 status. Never
+    ``toast_error_response`` here: that returns 200, and close_modal_on_success closes
+    the modal on any 2xx — the buyer's input would be eaten.
     """
     resp = HTMLResponse(
         f'<div class="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">{message}</div>',
@@ -129,8 +130,9 @@ async def prepayment_request_create(
     """HTMX create: parse the request form, spawn the prepayment + approval, toast success.
 
     On a service ValueError (line not on plan / no cut PO / duplicate pending) or
-    NoEligibleApproverError, roll back and return an error toast so the modal surfaces the
-    reason instead of a silent no-op.
+    NoEligibleApproverError, roll back and return the inline 400 partial (rendered into
+    the modal's #pp-modal-error via hx-target-4xx) — a real 4xx keeps the modal open
+    with input intact, where the old 200 error toast closed it.
 
     On success, re-render the caller's surface (threaded via ``origin``, mirroring the
     verify-po / resource routes): ``approvals_hub`` → the PO Approval tab body into
@@ -141,18 +143,18 @@ async def prepayment_request_create(
     try:
         amount = Decimal(total_incl_fees)
     except (InvalidOperation, TypeError):
-        return toast_error_response("Enter a valid prepayment amount.")
+        return _form_error_response("Enter a valid prepayment amount.")
 
     # Method must be one of the frozen prepayment methods (COD is not in the list — a
     # forged/stale form can't smuggle it in).
     if payment_method and payment_method not in {m.value for m in PREPAYMENT_METHODS}:
-        return _cod_guard_response("That payment method can't be prepaid — pick wire, PayPal, credit card, or ACH.")
+        return _form_error_response("That payment method can't be prepaid — pick wire, PayPal, credit card, or ACH.")
 
     # COD guard (spec §8): a COD line has nothing to pay in advance. Enforced HERE, in
     # the router, BEFORE create_prepayment — prepayment_service.py stays untouched.
     guard_line = db.get(BuyPlanLine, buy_plan_line_id)
     if guard_line is not None and guard_line.payment_method == PaymentMethod.COD.value:
-        return _cod_guard_response(
+        return _form_error_response(
             "This PO is COD — payment happens on delivery, so there's nothing to pay in advance."
         )
 
@@ -175,10 +177,10 @@ async def prepayment_request_create(
         db.commit()
     except NoEligibleApproverError as exc:
         db.rollback()
-        return toast_error_response(str(exc))
+        return _form_error_response(str(exc))
     except ValueError as exc:
         db.rollback()
-        return toast_error_response(str(exc))
+        return _form_error_response(str(exc))
 
     # Notify accounting/AP (email + Teams) that a prepayment was requested — DO NOT PAY YET.
     # Fire-and-forget: the runner isolates every error so a failed notice never breaks the
@@ -236,11 +238,29 @@ def _render_prepayment_tab(request: Request, user, db: Session, scope: str) -> H
     return render_tab_body(request, user, db, "prepayment", scope)
 
 
+def _lifecycle_rerender(
+    request: Request, user, db: Session, pp: Prepayment, *, origin: str, scope: str
+) -> HTMLResponse:
+    """Post-action surface re-render for the mark-paid / unmark-paid / resend POSTs,
+    mirroring prepayment_request_create's origin threading: ``approvals_workspace`` →
+    the prepayment detail pane into #aw-pane + an awListRefresh nudge (the workspace
+    list repaints itself); anything else → #ap-hub-body, the Prepayments hub-tab body
+    (the unchanged default)."""
+    if origin == "approvals_workspace":
+        from .htmx.approvals_hub import render_prepayment_pane
+
+        resp = render_prepayment_pane(request, user, db, pp.id)
+        resp.headers["HX-Trigger"] = "awListRefresh"
+        return resp
+    return _render_prepayment_tab(request, user, db, scope)
+
+
 @router.get("/v2/partials/prepayments/{prepayment_id}/mark-paid", response_class=HTMLResponse)
 def prepayment_mark_paid_modal(
     request: Request,
     prepayment_id: int,
     scope: str = "all",
+    origin: str = "",
     db: Session = Depends(get_db),
     current_user=Depends(require_user),
 ):
@@ -263,6 +283,7 @@ def prepayment_mark_paid_modal(
         "pp": pp,
         "amount": pp.total_incl_fees,
         "scope": "mine" if scope == "mine" else "all",
+        "origin": origin if origin == "approvals_workspace" else "",
     }
     return template_response("htmx/partials/prepayments/mark_paid_modal.html", ctx)
 
@@ -274,6 +295,7 @@ async def prepayment_mark_paid(
     wire_reference: str | None = Form(None),
     paid_amount: str | None = Form(None),
     scope: str = Form("all"),
+    origin: str = Form(""),
     db: Session = Depends(get_db),
     current_user=Depends(require_user),
 ):
@@ -305,7 +327,7 @@ async def prepayment_mark_paid(
     except ValueError as exc:
         return toast_error_response(str(exc))
 
-    resp = _render_prepayment_tab(request, current_user, db, scope)
+    resp = _lifecycle_rerender(request, current_user, db, pp, origin=origin, scope=scope)
     set_toast(resp, "Prepayment marked paid.", "success", merge=True)
     return resp
 
@@ -315,6 +337,7 @@ async def prepayment_unmark_paid(
     request: Request,
     prepayment_id: int,
     scope: str = Form("all"),
+    origin: str = Form(""),
     db: Session = Depends(get_db),
     current_user=Depends(require_user),
 ):
@@ -333,6 +356,42 @@ async def prepayment_unmark_paid(
     except ValueError as exc:
         return toast_error_response(str(exc))
 
-    resp = _render_prepayment_tab(request, current_user, db, scope)
+    resp = _lifecycle_rerender(request, current_user, db, pp, origin=origin, scope=scope)
     set_toast(resp, "Payment reversed — prepayment returned to approved.", "success", merge=True)
+    return resp
+
+
+@router.post("/v2/partials/prepayments/{prepayment_id}/resend-pay-link", response_class=HTMLResponse)
+async def prepayment_resend_pay_link(
+    request: Request,
+    prepayment_id: int,
+    scope: str = Form("all"),
+    origin: str = Form(""),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_user),
+):
+    """Re-send the OK-TO-WIRE accounting email for an APPROVED prepayment (the pay link
+    got lost or accounting never saw it).
+
+    Same access gate as mark-paid (manager/admin or the plan owner). The live single-use
+    ``pay_token`` is NOT re-minted — the originally-emailed link keeps working; the notice
+    simply embeds it again (notify_prepayment_approved reads the token live via
+    _confirm_url). Approved-only, hard 400 otherwise: a requested prepayment is not yet
+    authorized, and a paid/void one has a SPENT token — resending would email a link-less
+    OK-TO-WIRE. Router-thin: no service function, only the existing fire-and-forget
+    notifier runner.
+    """
+    pp = db.get(Prepayment, prepayment_id)
+    if pp is None:
+        raise HTTPException(status_code=404, detail="Prepayment not found")
+    _require_mark_paid_access(db, current_user, pp)
+    if pp.status != PrepaymentStatus.APPROVED.value:
+        raise HTTPException(status_code=400, detail="Only an approved prepayment's pay link can be resent.")
+
+    from ..services.prepayment_notifications import notify_prepayment_approved, run_prepayment_notify_bg
+
+    await run_prepayment_notify_bg(notify_prepayment_approved, pp.id)
+
+    resp = _lifecycle_rerender(request, current_user, db, pp, origin=origin, scope=scope)
+    set_toast(resp, "OK-to-wire email resent to accounting.", "success", merge=True)
     return resp

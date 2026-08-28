@@ -34,6 +34,7 @@ from app.models.quotes import Quote
 from app.models.sourcing import Requisition
 from app.models.vendors import VendorCard
 from app.services.approvals.queue import (
+    approved_unpaid_rows,
     pending_count_for_gate,
     pending_rows_for_gate,
     resolved_rows_for_gate,
@@ -539,3 +540,77 @@ def test_routed_request_via_service_is_actionable(db_session: Session) -> None:
     rows = pending_rows_for_gate(db_session, me, ApprovalGateType.BUY_PLAN)
     assert len(rows) == 1
     assert rows[0].can_act is True
+
+
+# ── approved_unpaid_rows (the live approved-but-unwired window) ──────────
+
+
+def test_approved_unpaid_rows_surface_approved_prepayments(db_session: Session) -> None:
+    me = _user(db_session)
+    bp = _bp(db_session, me)
+    pp = _prepay(db_session, bp, me)
+    pp.status = "approved"
+    pp.pay_token = "tok-live"
+    _seed(
+        db_session,
+        ApprovalGateType.PREPAYMENT,
+        subject_type=ApprovalSubjectType.PREPAYMENT,
+        subject_id=pp.id,
+        status=ApprovalRequestStatus.APPROVED,
+        requester=me,
+        owner=me,
+        resolved_at=datetime.now(UTC),
+    )
+    db_session.commit()
+
+    rows = approved_unpaid_rows(db_session, me)
+    assert len(rows) == 1
+    vm = rows[0]
+    assert vm.subject_id == pp.id
+    assert vm.can_act is False  # nothing to decide — a tracking row, never Needs-approval
+    assert vm.prepay_status == "approved"
+    assert vm.beneficiary == "Acme Components"
+    assert vm.amount == Decimal("2500.00")
+
+
+def test_approved_unpaid_rows_skip_paid_void_requested(db_session: Session) -> None:
+    me = _user(db_session)
+    bp = _bp(db_session, me)
+    for pp_status in ("paid", "void", "requested"):
+        pp = _prepay(db_session, bp, me)
+        pp.status = pp_status
+        _seed(
+            db_session,
+            ApprovalGateType.PREPAYMENT,
+            subject_type=ApprovalSubjectType.PREPAYMENT,
+            subject_id=pp.id,
+            status=ApprovalRequestStatus.APPROVED,
+            requester=me,
+            resolved_at=datetime.now(UTC),
+        )
+    db_session.commit()
+    assert approved_unpaid_rows(db_session, me) == []
+
+
+def test_approved_unpaid_rows_scope_mine(db_session: Session) -> None:
+    me = _user(db_session)
+    other = _user(db_session, name="Other")
+    bp = _bp(db_session, me)
+    for owner in (me, other):
+        pp = _prepay(db_session, bp, owner)
+        pp.status = "approved"
+        _seed(
+            db_session,
+            ApprovalGateType.PREPAYMENT,
+            subject_type=ApprovalSubjectType.PREPAYMENT,
+            subject_id=pp.id,
+            status=ApprovalRequestStatus.APPROVED,
+            requester=owner,
+            owner=owner,
+            resolved_at=datetime.now(UTC),
+        )
+    db_session.commit()
+    assert len(approved_unpaid_rows(db_session, me, scope="all")) == 2
+    mine = approved_unpaid_rows(db_session, me, scope="mine")
+    assert len(mine) == 1
+    assert mine[0].requester_name == "Approver"  # _user's default name — my row, not Other's

@@ -1956,6 +1956,17 @@ buyplan_workflow/ (state machine — package: buyplan_approval.py owns submit/ap
     |                      the entered amount swings >5% from the PO line total (#2); prepayment_request_create reads
     |                      origin and re-renders the RIGHT surface (approvals_hub → po-approval tab body into
     |                      #ap-hub-body @hub_scope; else → plan detail into #main-content) instead of a blank toast (#12).
+    |  Prepay money loop:  approved pane offers Mark paid (opens mark_paid_modal via open-modal,
+    |                      origin=approvals_workspace) + Resend pay link (POST .../resend-pay-link —
+    |                      approved-only 400 guard, token NOT re-minted, notify_prepayment_approved re-fired);
+    |                      paid pane offers manager/admin-only Undo paid (unmark-paid, re-mints token — old
+    |                      emailed link dies, hx-confirm warns). All three POSTs + the mark-paid modal GET
+    |                      thread origin: approvals_workspace re-renders the prepayment pane into #aw-pane +
+    |                      awListRefresh; default = Prepayments tab body. Live lens: approved-but-unpaid rows
+    |                      (queue.approved_unpaid_rows, terminal request + Prepayment.status='approved') merge
+    |                      into the live list under Everything else, newest-first, deduped per prepayment.
+    |                      Request-modal refusals are inline 400s into #pp-modal-error (hx-target-4xx) — the
+    |                      modal keeps the buyer's input.
     |  Backorder (Ph3):    resource_line already reopens a COMPLETED plan (RESOURCEABLE_LINE_STATUSES includes
     |                      verified); when a cancel fires on a plan that WAS completed, resource_line returns
     |                      was_completed=True (computed pre-reopen) which is threaded to
