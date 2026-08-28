@@ -1,6 +1,8 @@
 {# Individual lead card — shows vendor, confidence, safety, qty/price, and quick actions.
-   Included in a loop from sourcing/results.html. Clickable to navigate to lead detail.
-   Called by: partials/sourcing/results.html, htmx_views.lead_status_update (card swap)
+   Included in a loop from sourcing/results.html and sourcing/queue.html. Clickable to
+   navigate to lead detail.
+   Called by: partials/sourcing/results.html, partials/sourcing/queue.html,
+     htmx_views.lead_status_update (card swap)
    Depends on: partials/shared/source_badge.html
    Context vars: lead (SourcingLead), lead_sighting_data (dict keyed by lead.id) #}
 {% from "htmx/partials/shared/_macros.html" import status_badge, risk_badge %}

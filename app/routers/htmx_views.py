@@ -219,6 +219,7 @@ async def v2_shell(request: Request, partial: str = "", db: Session = Depends(ge
 @router.get("/v2/materials/{card_id:int}", response_class=HTMLResponse)
 @router.get("/v2/follow-ups", response_class=HTMLResponse)
 @router.get("/v2/offers/review-queue", response_class=HTMLResponse)
+@router.get("/v2/leads/queue", response_class=HTMLResponse)
 @router.get("/v2/crm", response_class=HTMLResponse)
 @router.get("/v2/sightings", response_class=HTMLResponse)
 @router.get("/v2/trouble-tickets", response_class=HTMLResponse)
@@ -247,6 +248,10 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         # "/offers" only appears in the review-queue full page — no collision with other
         # view segments, so its position here is not load-bearing.
         "offers",
+        # "/leads" only appears in the cross-req leads-queue full page (/v2/leads/queue)
+        # — no collision with other view segments, so its position here is not
+        # load-bearing either.
+        "leads",
         "trouble-tickets",
         "my-day",
         "crm",
@@ -310,6 +315,13 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         # Sightings workspace quick-links. Its own canonical page so a pushed/bookmarked
         # /v2/offers/review-queue reloads straight into the queue instead of 404ing.
         partial_url = "/v2/partials/offers/review-queue"
+    elif current_view == "leads":
+        # Cross-requisition buyer leads queue — surfaced from the Sightings workspace
+        # quick-links (third anchor). Its own canonical page so a pushed/bookmarked
+        # /v2/leads/queue reloads straight into the queue instead of 404ing. Thread
+        # ?status= through so a reload/bookmark keeps the selected buyer_status chip.
+        status_qs = request.query_params.get("status", "").strip()
+        partial_url = f"/v2/partials/leads/queue?status={quote(status_qs)}" if status_qs else "/v2/partials/leads/queue"
     elif current_view == "resell":
         partial_url = "/v2/partials/resell/workspace"
     elif current_view == "my-day":

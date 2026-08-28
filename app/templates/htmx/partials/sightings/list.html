@@ -35,8 +35,9 @@
 </div>
 
 {# ── Workspace quick-links ────────────────────────────────────
-   Entry points to the two buyer queues that have no bottom-nav tab of their own —
-   the offer review queue and the cross-requisition follow-up queue. Each nav-swaps
+   Entry points to the three buyer queues that have no bottom-nav tab of their own —
+   the offer review queue, the cross-requisition follow-up queue, and the
+   cross-requisition leads queue. Each nav-swaps
    #main-content (not the table) and pushes its own canonical URL so a refresh/bookmark
    lands on the same page; the pending count rides along (computed once in
    sightings_workspace, off the hot table-refresh path). #}
@@ -66,6 +67,18 @@
     </svg>
     Follow-ups
     {% if follow_up_count %}<span class="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500 text-white text-[11px] font-semibold">{{ follow_up_count }}</span>{% endif %}
+  </a>
+  <a href="/v2/leads/queue"
+     hx-get="/v2/partials/leads/queue"
+     hx-target="#main-content"
+     hx-push-url="/v2/leads/queue"
+     class="btn btn-sm btn-secondary inline-flex items-center gap-1.5"
+     title="Cross-requisition buyer leads awaiting follow-up">
+    <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+      <path stroke-linecap="round" stroke-linejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
+    </svg>
+    Leads
   </a>
 </div>
 

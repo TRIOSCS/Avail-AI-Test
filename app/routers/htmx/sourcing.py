@@ -16,6 +16,7 @@ from datetime import UTC, datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from loguru import logger
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ...database import get_db
@@ -26,6 +27,7 @@ from ...dependencies import (
 )
 from ...models import (
     Requirement,
+    Requisition,
     Sighting,
     User,
 )
@@ -567,3 +569,86 @@ async def lead_panel_partial(
     """
     ctx = _lead_detail_ctx(request, user, db, lead_id)
     return template_response("htmx/partials/sourcing/lead_panel.html", ctx)
+
+
+@router.get("/v2/partials/leads/queue", response_class=HTMLResponse)
+async def leads_queue_partial(
+    request: Request,
+    status: str = "all",
+    page: int = Query(1, ge=1),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Cross-requisition buyer leads queue — HTML partial.
+
+    Creator-scope EXACTLY mirrors the JSON endpoint (GET /api/leads/queue,
+    requirements.py:843-861): join Requisition, filter Requisition.created_by ==
+    user.id, optional buyer_status filter, order by updated_at desc. Unlike the JSON
+    endpoint (flat list, capped at 200), this paginates and groups the page of leads by
+    requisition then by requirement — a requisition can carry many MPNs — so a buyer
+    works one deal's leads together instead of scrolling a flat cross-req list.
+    """
+    from ...models.sourcing_lead import SourcingLead
+
+    where_clauses = [Requisition.created_by == user.id]
+    if status and status != "all":
+        where_clauses.append(SourcingLead.buyer_status == status)
+
+    per_page = 25
+    total = (
+        db.scalar(
+            select(func.count(SourcingLead.id))
+            .select_from(SourcingLead)
+            .join(Requisition, SourcingLead.requisition_id == Requisition.id)
+            .where(*where_clauses)
+        )
+        or 0
+    )
+    leads = db.scalars(
+        select(SourcingLead)
+        .join(Requisition, SourcingLead.requisition_id == Requisition.id)
+        .where(*where_clauses)
+        .order_by(SourcingLead.updated_at.desc())
+        .offset((page - 1) * per_page)
+        .limit(per_page)
+    ).all()
+
+    # Group the page into requisition -> requirement -> leads, preserving the
+    # updated_at-desc order the query already returned. Merge per-requirement
+    # _lead_sighting_data lookups into one dict keyed by lead.id (unique across
+    # requirements) so lead_card.html's single ``lead_sighting_data`` context var
+    # covers every card on the page regardless of which requirement it belongs to.
+    groups: list[dict] = []
+    req_index: dict[int, dict] = {}
+    lead_sighting_data: dict[int, dict] = {}
+    for ld in leads:
+        rq_group = req_index.get(ld.requisition_id)
+        if rq_group is None:
+            rq_group = {"requisition": ld.requisition, "requirement_groups": [], "_by_requirement": {}}
+            req_index[ld.requisition_id] = rq_group
+            groups.append(rq_group)
+        rq_sub = rq_group["_by_requirement"].get(ld.requirement_id)
+        if rq_sub is None:
+            rq_sub = {"requirement": ld.requirement, "leads": []}
+            rq_group["_by_requirement"][ld.requirement_id] = rq_sub
+            rq_group["requirement_groups"].append(rq_sub)
+        rq_sub["leads"].append(ld)
+
+    for rq_group in groups:
+        del rq_group["_by_requirement"]
+        for rq_sub in rq_group["requirement_groups"]:
+            lead_sighting_data.update(_lead_sighting_data(db, rq_sub["requirement"].id, rq_sub["leads"]))
+
+    ctx = _base_ctx(request, user, "leads")
+    ctx.update(
+        {
+            "groups": groups,
+            "lead_sighting_data": lead_sighting_data,
+            "total": total,
+            "page": page,
+            "total_pages": max(1, (total + per_page - 1) // per_page),
+            "per_page": per_page,
+            "f_status": status,
+        }
+    )
+    return template_response("htmx/partials/sourcing/queue.html", ctx)
