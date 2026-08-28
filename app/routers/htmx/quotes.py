@@ -17,6 +17,7 @@ from datetime import UTC, date, datetime, timedelta
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from loguru import logger
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, joinedload
 
 from ...constants import (
@@ -35,7 +36,8 @@ from ...models import (
     User,
 )
 from ...services.crm_service import quote_base_number, revision_quote_number
-from ...services.quote_builder_service import recalc_quote_totals
+from ...services.pricing_history import preload_last_quoted_prices
+from ...services.quote_builder_service import recalc_quote_totals, seed_sell_price
 from ...services.quote_preflight import quote_preflight
 from ...services.quote_requisitions import (
     link_quote_to_requisitions,
@@ -430,15 +432,17 @@ async def add_offer_to_quote(
             status_code=403,
             detail={"error": "offer does not belong to this quote's requisition"},
         )
+    cost = float(offer.unit_price) if offer.unit_price else 0
+    sell, margin_pct = seed_sell_price(db, offer.mpn, cost)
     line = QuoteLine(
         quote_id=quote_id,
         offer_id=offer_id,
         mpn=offer.mpn,
         manufacturer=offer.manufacturer,
         qty=offer.qty_available or 0,
-        cost_price=float(offer.unit_price) if offer.unit_price else 0,
-        sell_price=0,
-        margin_pct=0,
+        cost_price=cost,
+        sell_price=sell,
+        margin_pct=margin_pct,
     )
     db.add(line)
     recalc_quote_totals(db, quote)
@@ -633,11 +637,24 @@ async def add_offers_to_draft_quote(
         raise HTTPException(400, "Can only add to draft quotes")
 
     offers = db.query(Offer).filter(Offer.id.in_(offer_ids), Offer.requisition_id == req_id).all()
+
+    # Preload pricing history once for the batch (avoids an N+1 preload per offer) — the
+    # same seed_sell_price rule the Build-Quote tab and the other two quote-line creation
+    # routes use: last-quoted price wins, else cost × DEFAULT_MARKUP_PCT.
+    try:
+        quoted_prices = preload_last_quoted_prices(db)
+    except SQLAlchemyError as e:
+        logger.warning(
+            "Pricing history unavailable seeding quote {}: {} — sells fall back to markup", quote.quote_number, e
+        )
+        quoted_prices = {}
+
     for o in offers:
         existing = db.query(QuoteLine).filter(QuoteLine.quote_id == quote_id, QuoteLine.offer_id == o.id).first()
         if existing:
             continue
-        sell_price = float(o.unit_price or 0)
+        cost = float(o.unit_price or 0)
+        sell, margin_pct = seed_sell_price(db, o.mpn, cost, last_quoted=quoted_prices)
         qty = o.qty_available or 1
         line = QuoteLine(
             quote_id=quote.id,
@@ -645,9 +662,9 @@ async def add_offers_to_draft_quote(
             mpn=o.mpn or "",
             manufacturer=o.manufacturer or "",
             qty=qty,
-            cost_price=sell_price,
-            sell_price=sell_price,
-            margin_pct=0.0,
+            cost_price=cost,
+            sell_price=sell,
+            margin_pct=margin_pct,
         )
         db.add(line)
 

@@ -15,6 +15,7 @@ def test_create_quote_from_offers_populates_line_items_json(client, db_session, 
     Otherwise the customer receives an empty line-item table.
     """
     from app.models import Quote
+    from app.services.quote_builder_service import DEFAULT_MARKUP_PCT
 
     resp = client.post(
         f"/v2/partials/requisitions/{test_requisition.id}/create-quote",
@@ -30,7 +31,10 @@ def test_create_quote_from_offers_populates_line_items_json(client, db_session, 
     assert len(quote.line_items) == 1
     li = quote.line_items[0]
     assert li["mpn"] == "LM317T"
-    assert li["sell_price"] == 0.50
+    # B4: sell is seeded (no pricing history for this MPN yet) = cost x DEFAULT_MARKUP_PCT,
+    # not sell == cost (0.50) like before seed_sell_price existed.
+    expected_sell = round(0.50 * (1 + DEFAULT_MARKUP_PCT / 100.0), 4)
+    assert li["sell_price"] == expected_sell
     assert li["qty"] == 1000
     assert li["offer_id"] == test_offer.id
     assert "manufacturer" in li

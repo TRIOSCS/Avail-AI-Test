@@ -242,6 +242,56 @@ def get_builder_data(
     return lines
 
 
+def seed_sell_price(
+    db: Session,
+    mpn: str | None,
+    cost: float | None,
+    *,
+    markup_pct: float = DEFAULT_MARKUP_PCT,
+    last_quoted: dict[str, dict] | None = None,
+) -> tuple[float | None, float | None]:
+    """Seed a sell price + margin_pct for ONE new quote line — THE ONE seeding rule.
+
+    Last-quoted price for *mpn* wins when pricing history exists
+    (``preload_last_quoted_prices``); otherwise falls back to ``cost * (1 + markup_pct /
+    100)``. Returns ``(sell, margin_pct)`` — margin_pct computed the SAME way
+    ``margin_guardrail`` / ``quote_export_context`` already do (``(sell - cost) / sell *
+    100``), never a new formula. Returns ``(None, None)`` when there is neither history nor
+    a cost to seed from.
+
+    *last_quoted* lets a caller looping over many lines preload once
+    (``preload_last_quoted_prices``) and pass the SAME dict to every call, avoiding an N+1
+    query per line; omit it for a one-off call and this loads it itself (best-effort — a
+    lookup failure falls through to the markup branch, same as ``build_quote_tab_data``).
+
+    Extracted from ``build_quote_tab_data``'s inline seeding math (the ONE place this rule
+    used to live) so the Build-Quote tab AND the three quote-line creation routes (offer-
+    select create-quote, add-offer-to-quote, add-offers-to-draft-quote) compute it once.
+    """
+    if last_quoted is None:
+        try:
+            last_quoted = preload_last_quoted_prices(db)
+        except Exception as e:  # pragma: no cover - best-effort, mirrors existing callers
+            from loguru import logger
+
+            logger.warning("Pricing history unavailable seeding sell price for {}: {} — falling back to markup", mpn, e)
+            last_quoted = {}
+
+    mpn_key = (mpn or "").upper().strip()
+    lq = last_quoted.get(mpn_key)
+    sell = lq.get("sell_price") if lq else None
+
+    if sell is not None:
+        sell = float(sell)
+    elif cost is not None:
+        sell = round(float(cost) * (1 + markup_pct / 100.0), 4)
+    else:
+        return None, None
+
+    margin_pct = round((sell - float(cost)) / sell * 100, 2) if (cost is not None and sell) else None
+    return sell, margin_pct
+
+
 def build_quote_tab_data(
     db: Session,
     req_id: int,
@@ -280,8 +330,6 @@ def build_quote_tab_data(
         logger.warning("Pricing history unavailable for req {}: {} — seeds fall back to markup", req_id, e)
         last_quoted = {}
 
-    markup_factor = 1 + (markup_pct / 100.0)
-
     lines: list[dict] = []
     for r in requirements:
         best = best_costs.get(r.id)
@@ -307,13 +355,18 @@ def build_quote_tab_data(
         ]
         offers.sort(key=lambda o: o["unit_price"])
 
-        # Seed the sell price: last-quoted wins, else best-cost × markup.
+        # Seed the sell price: last-quoted wins, else best-cost × markup — the shared rule
+        # (seed_sell_price), so this tab and the three quote-line creation routes agree.
         lq = last_quoted.get((r.primary_mpn or "").upper().strip())
-        seed = lq.get("sell_price") if lq else None
-        seed_source = "last_quoted" if seed is not None else None
-        if seed is None and best_cost is not None:
-            seed = round(best_cost * markup_factor, 4)
+        if lq and lq.get("sell_price") is not None:
+            seed_source = "last_quoted"
+        elif best_cost is not None:
             seed_source = "markup"
+        else:
+            seed_source = None
+        seed, _seed_margin_pct = seed_sell_price(
+            db, r.primary_mpn, best_cost, markup_pct=markup_pct, last_quoted=last_quoted
+        )
 
         lines.append(
             {

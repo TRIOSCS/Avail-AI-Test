@@ -18,7 +18,10 @@ def _add_requirement(db: Session, requisition_id: int, **kw) -> Requirement:
 
 
 def _add_line(db: Session, quote: Quote, mpn: str, offer_id: int | None = None) -> QuoteLine:
-    ql = QuoteLine(quote_id=quote.id, mpn=mpn, offer_id=offer_id, qty=1)
+    # Healthy default cost/sell (comfortable margin) so these dnc/coo/mpn_drift-focused
+    # tests stay isolated from quote_preflight's B4 "pricing" check (test_quote_seeding.py
+    # covers that check directly).
+    ql = QuoteLine(quote_id=quote.id, mpn=mpn, offer_id=offer_id, qty=1, cost_price=1.0, sell_price=2.0)
     db.add(ql)
     db.commit()
     db.refresh(quote)

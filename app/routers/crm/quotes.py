@@ -382,7 +382,8 @@ async def quote_preflight_check(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Advisory pre-send checks (DNC recipient / non-US country-of-origin / MPN drift).
+    """Advisory pre-send checks (DNC recipient / non-US country-of-origin / MPN drift /
+    zero-margin pricing).
 
     Read-only; returns the warnings the send UI surfaces. Advisory only — it never
     blocks the send (the salesperson decides). See app/services/quote_preflight.py.

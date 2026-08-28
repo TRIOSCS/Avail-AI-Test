@@ -2,10 +2,11 @@
 
 What: ``quote_preflight(db, quote)`` runs deterministic, READ-ONLY checks just before a quote
       email is sent and returns a list of advisory ``PreflightWarning``s. It NEVER blocks the
-      send — the send UI surfaces the warnings and the salesperson decides. Three checks:
+      send — the send UI surfaces the warnings and the salesperson decides. Four checks:
         1. dnc                — recipient site or matching contact is marked Do-Not-Contact
         2. country_of_origin  — a quoted line's sourced offer has a non-US country of origin
         3. mpn_drift          — a quoted MPN is not one the requisition actually asked for
+        4. pricing            — a quoted line is at $0/unset sell or at-or-under cost (B4)
 Called by: app/routers/crm/quotes.py (GET /api/quotes/{id}/preflight; the send/preview UI).
 Depends on: models (Quote, CustomerSite, Offer, Requirement),
             app.services.vendor_reachability.dnc_contact_for_email,
@@ -44,7 +45,7 @@ class PreflightWarning:
     ``level`` is always 'warning' — preflight never errors/blocks.
     """
 
-    code: str  # "dnc" | "country_of_origin" | "mpn_drift"
+    code: str  # "dnc" | "country_of_origin" | "mpn_drift" | "pricing"
     message: str
 
     def to_dict(self) -> dict[str, str]:
@@ -71,6 +72,36 @@ def _quote_line_refs(quote: Quote) -> list[tuple[str | None, int | None]]:
     for item in items:
         if isinstance(item, dict):
             refs.append((item.get("mpn"), item.get("offer_id")))
+    return refs
+
+
+def _quote_line_pricing(quote: Quote) -> list[tuple[str | None, float | None, float | None]]:
+    """Return [(mpn, cost_price, sell_price), ...] for a quote, preferring the
+    structured quote_lines relationship and falling back to the legacy line_items JSON
+    (same dual-path ``_quote_line_refs`` uses, plus the cost/sell each line carries)."""
+    if quote.quote_lines:
+        return [
+            (
+                ql.mpn,
+                float(ql.cost_price) if ql.cost_price is not None else None,
+                float(ql.sell_price) if ql.sell_price is not None else None,
+            )
+            for ql in quote.quote_lines
+        ]
+    refs: list[tuple[str | None, float | None, float | None]] = []
+    raw_items = quote.line_items
+    items = raw_items if isinstance(raw_items, list) else []
+    for item in items:
+        if isinstance(item, dict):
+            cost = item.get("cost_price")
+            sell = item.get("sell_price")
+            refs.append(
+                (
+                    item.get("mpn"),
+                    float(cost) if cost is not None else None,
+                    float(sell) if sell is not None else None,
+                )
+            )
     return refs
 
 
@@ -131,5 +162,20 @@ def quote_preflight(db: Session, quote: Quote) -> list[PreflightWarning]:
     if drift:
         listing = ", ".join(drift[:_MAX_LISTED])
         warnings.append(PreflightWarning("mpn_drift", f"{len(drift)} quoted MPN(s) not on the requisition: {listing}."))
+
+    # 4. Zero-margin pricing — a line quoted at $0/unset sell, or at-or-under its cost (B4).
+    bad_pricing = 0
+    for _mpn, cost, sell in _quote_line_pricing(quote):
+        if sell is None or sell == 0:
+            bad_pricing += 1
+        elif cost is not None and sell <= cost:
+            bad_pricing += 1
+    if bad_pricing:
+        warnings.append(
+            PreflightWarning(
+                "pricing",
+                f"{bad_pricing} line(s) at $0 or ≤ cost — check pricing before sending",
+            )
+        )
 
     return warnings
