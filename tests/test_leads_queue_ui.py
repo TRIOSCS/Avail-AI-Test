@@ -190,3 +190,38 @@ class TestQueuesStripMount:
         assert resp.status_code == 200
         assert 'hx-get="/v2/partials/leads/queue"' in resp.text
         assert 'hx-push-url="/v2/leads/queue"' in resp.text
+
+
+class TestStatusUpdateRefererRouting:
+    """Regression (review round 1): lead_status_update's referer sniff used to match on
+    a bare "/leads/" substring, which also matched the new queue page's pushed URL
+    (/v2/leads/queue) — so Claim/Dismiss on a queue card swapped the full lead_detail
+    partial into the small #lead-card-{id} slot instead of re-rendering the card."""
+
+    def test_queue_page_referer_rerenders_card(self, client, db_session: Session, test_user: User, test_requisition):
+        item = db_session.query(Requirement).filter(Requirement.requisition_id == test_requisition.id).first()
+        lead = _make_lead(db_session, item, test_requisition, vendor="QueueRefererVendor")
+
+        resp = client.post(
+            f"/v2/partials/sourcing/leads/{lead.id}/status",
+            data={"status": "contacted"},
+            headers={"HX-Current-URL": "https://host/v2/leads/queue"},
+        )
+        assert resp.status_code == 200
+        assert f'id="lead-card-{lead.id}"' in resp.text
+        assert "page-readable" not in resp.text
+
+    def test_detail_page_referer_still_returns_detail_partial(
+        self, client, db_session: Session, test_user: User, test_requisition
+    ):
+        item = db_session.query(Requirement).filter(Requirement.requisition_id == test_requisition.id).first()
+        lead = _make_lead(db_session, item, test_requisition, vendor="DetailRefererVendor")
+
+        resp = client.post(
+            f"/v2/partials/sourcing/leads/{lead.id}/status",
+            data={"status": "contacted"},
+            headers={"HX-Current-URL": f"https://host/v2/sourcing/leads/{lead.id}"},
+        )
+        assert resp.status_code == 200
+        assert "page-readable" in resp.text
+        assert f'id="lead-card-{lead.id}"' not in resp.text

@@ -430,8 +430,11 @@ async def lead_status_update(
     if hx_target == "split-right-sourcing":
         return await lead_panel_partial(request, lead_id, user, db)
 
-    # Full-page lead detail context
-    if "/leads/" in referer:
+    # Full-page lead detail context. Must be the actual detail-page prefix
+    # (/v2/sourcing/leads/{id}) — a bare "/leads/" substring also matches the
+    # cross-req queue page (/v2/leads/queue), which would wrongly swap the full
+    # detail partial into the queue's small #lead-card-{id} slot.
+    if "/v2/sourcing/leads/" in referer:
         return await lead_detail_partial(request, lead_id, user, db)
 
     # Workspace lead row context: return updated lead row
