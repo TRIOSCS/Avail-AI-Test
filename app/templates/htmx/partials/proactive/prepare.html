@@ -71,6 +71,12 @@
               {% if m.manufacturer %}
               <span class="text-secondary ml-1">{{ m.manufacturer }}</span>
               {% endif %}
+              {% if m.has_ai_variants %}
+              <span class="badge-mini bg-amber-100 text-amber-800 border border-amber-300 ml-1"
+                    title="Availability includes AI-matched variant part numbers — expand the offers to verify">
+                AI match — verify
+              </span>
+              {% endif %}
             </td>
             <td class="text-sm text-gray-700">{{ m.vendor_name }}</td>
             <td class="text-sm text-gray-700 text-right tabular-nums">
@@ -170,6 +176,12 @@
       {% for m in matches %}
       <input type="hidden" name="match_ids" value="{{ m.id }}">
       {% endfor %}
+      {% if any_ai_variants %}
+      {# Server gate parity (2026-08-24): /v2/proactive/send re-derives the
+         AI-variant flag and refuses without this confirm — the flagged rows
+         above carry the amber chip the rep is confirming past. #}
+      <input type="hidden" name="confirm_ai_variants" value="1">
+      {% endif %}
       {# Hidden contact_ids (populated by Alpine) #}
       <template x-for="id in contactIds" :key="id">
         <input type="hidden" name="contact_ids" :value="id">

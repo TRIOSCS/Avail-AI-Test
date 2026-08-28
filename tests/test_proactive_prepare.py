@@ -526,7 +526,17 @@ def test_send_form_path_includes_sell_price(db_session):
     captured: dict = {}
 
     async def _fake_send(
-        *, db, user, token, match_ids, contact_ids, sell_prices, subject=None, email_html=None, allow_all=False
+        *,
+        db,
+        user,
+        token,
+        match_ids,
+        contact_ids,
+        sell_prices,
+        subject=None,
+        email_html=None,
+        allow_all=False,
+        confirm_ai_variants=False,
     ):
         captured["sell_prices"] = sell_prices
         # Return minimal result the route needs to render success
@@ -855,3 +865,129 @@ def test_afterswap_reinits_alpine_on_proactive_contact_list():
     assert "rfq-affinity-section" in allowlist
     assert "settings-content" in allowlist
     assert "lead-drawer-content" in allowlist
+
+
+def _flag_lm358n_class_as_ai(db):
+    """Verdict 'same' against a variant spelling + live supply under it — LM358N's
+    rollup then pools the variant and reports has_ai_variants."""
+    from app.models import PartEquivalence
+    from app.services.part_equivalence import norm_key
+
+    ka, kb = sorted([norm_key("LM358N"), norm_key("LM358N-E3")])
+    db.add(
+        PartEquivalence(
+            key_a=ka,
+            key_b=kb,
+            example_a="LM358N",
+            example_b="LM358N-E3",
+            verdict="same",
+            source="ai",
+            reason="pkg suffix",
+        )
+    )
+    db.add(Offer(vendor_name="Sierra", mpn="LM358N-E3", qty_available=100, unit_price=Decimal("0.40"), status="active"))
+    db.commit()
+
+
+def test_prepare_page_flags_ai_variant_rows(db_session):
+    """Flagged rows carry the amber chip; the send form carries the hidden confirm."""
+    data = _setup_send_scenario(db_session)
+    _flag_lm358n_class_as_ai(db_session)
+    client, app = _add_contact_client(db_session, data["owner"])
+    try:
+        resp = client.post(
+            "/v2/proactive/prepare/{}".format(data["site"].id),
+            data={"match_ids": str(data["match"].id)},
+        )
+    finally:
+        _cleanup_overrides(app)
+    assert resp.status_code == 200, resp.text
+    assert "AI match" in resp.text  # the amber chip on the flagged row
+    assert 'name="confirm_ai_variants"' in resp.text  # posted to the send gate
+
+
+def test_prepare_page_clean_rows_have_no_ai_chip_or_confirm(db_session):
+    data = _setup_send_scenario(db_session)
+    client, app = _add_contact_client(db_session, data["owner"])
+    try:
+        resp = client.post(
+            "/v2/proactive/prepare/{}".format(data["site"].id),
+            data={"match_ids": str(data["match"].id)},
+        )
+    finally:
+        _cleanup_overrides(app)
+    assert resp.status_code == 200, resp.text
+    assert "AI match" not in resp.text
+    assert 'name="confirm_ai_variants"' not in resp.text
+
+
+@pytest.mark.anyio
+async def test_oneshot_send_blocks_ai_variants_without_confirm(db_session, mock_graph_client):
+    """The gate fires before the ProactiveOffer row exists — nothing to clean up."""
+    from app.services.proactive_service import send_proactive_offer
+
+    data = _setup_send_scenario(db_session)
+    _flag_lm358n_class_as_ai(db_session)
+
+    with pytest.raises(ValueError, match="AI-matched variant"):
+        await send_proactive_offer(
+            db=db_session,
+            user=data["owner"],
+            token="tok",
+            match_ids=[data["match"].id],
+            contact_ids=[data["contact1"].id],
+            sell_prices={},
+        )
+    mock_graph_client.post_json.assert_not_called()
+    db_session.rollback()
+    assert db_session.query(ProactiveOffer).count() == 0
+
+
+@pytest.mark.anyio
+async def test_oneshot_send_with_confirm_sends_and_stamps_lines(db_session, mock_graph_client):
+    from app.constants import ProactiveOfferStatus
+    from app.services.proactive_service import send_proactive_offer
+
+    data = _setup_send_scenario(db_session)
+    _flag_lm358n_class_as_ai(db_session)
+
+    result = await send_proactive_offer(
+        db=db_session,
+        user=data["owner"],
+        token="tok",
+        match_ids=[data["match"].id],
+        contact_ids=[data["contact1"].id],
+        sell_prices={},
+        confirm_ai_variants=True,
+    )
+    mock_graph_client.post_json.assert_called_once()
+    assert result["status"] == ProactiveOfferStatus.SENT
+    po = db_session.query(ProactiveOffer).one()
+    assert po.line_items[0]["ai_variant"] is True  # one-shot lines carry the stamp too
+
+
+def test_oneshot_send_route_threads_confirm(db_session):
+    from unittest.mock import AsyncMock, patch
+
+    data = _setup_send_scenario(db_session)
+    _flag_lm358n_class_as_ai(db_session)
+    client, app = _add_contact_client(db_session, data["owner"])
+    form = {
+        "match_ids": str(data["match"].id),
+        "contact_ids": str(data["contact1"].id),
+        "subject": "",
+        "body": "",
+    }
+    try:
+        with (
+            patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="tok"),
+            patch("app.utils.graph_client.GraphClient.post_json", new_callable=AsyncMock),
+        ):
+            r = client.post("/v2/proactive/send", data=form)
+            assert r.status_code == 400
+            assert "AI-matched" in r.text
+            r = client.post("/v2/proactive/send", data={**form, "confirm_ai_variants": "1"})
+            assert r.status_code == 200, r.text
+            assert "Offer sent to" in r.text
+    finally:
+        _cleanup_overrides(app)

@@ -13,11 +13,12 @@ from unittest.mock import patch
 
 import pytest
 
-from app.constants import ProactiveMatchSource, ProactiveMatchStatus
+from app.constants import ProactiveMatchSource, ProactiveMatchStatus, RequisitionStatus
 from app.models import (
     Company,
     CustomerSite,
     Offer,
+    PartEquivalence,
     ProactiveMatch,
     Requirement,
     Requisition,
@@ -25,6 +26,7 @@ from app.models import (
 )
 from app.models.intelligence import ProactiveDoNotOffer, ProactiveThrottle
 from app.models.purchase_history import CustomerPartHistory
+from app.services.part_equivalence import norm_key
 from app.services.proactive_matching import (
     _score_ask_recency,
     _score_margin,
@@ -635,3 +637,108 @@ def test_expire_old_matches(db_session):
     assert expire_old_matches(db_session) == 1
     db_session.refresh(m)
     assert m.status == ProactiveMatchStatus.EXPIRED
+
+
+# ── Requisition-hotlist display identity (2026-08-24 amber-chip fix) ─────
+
+
+def _eq(db, a, b, verdict, *, source="ai", reason="pkg suffix"):
+    """Store an equivalence verdict — copied from
+    tests/test_part_equivalence.py:44-47."""
+    ka, kb = sorted([norm_key(a), norm_key(b)])
+    db.add(PartEquivalence(key_a=ka, key_b=kb, example_a=a, example_b=b, verdict=verdict, source=source, reason=reason))
+    db.commit()
+
+
+def _setup_hotlist_ask(db, *, customer_mpn, owner_email="hot@trioscs.com", company_name="Hotlist Co"):
+    """Owner + company + active site + HOTLIST requisition asking for customer_mpn.
+
+    Requirement.normalized_mpn auto-derives from primary_mpn (model validator), so the
+    hotlist pass's class-key join finds it without explicit normalization.
+    """
+    owner = User(email=owner_email, name="Hotlist Owner", role="sales", azure_id=f"az-{owner_email}")
+    db.add(owner)
+    db.flush()
+    company = Company(name=company_name, is_active=True, account_owner_id=owner.id)
+    db.add(company)
+    db.flush()
+    site = CustomerSite(company_id=company.id, site_name=f"{company_name} HQ", is_active=True)
+    db.add(site)
+    db.flush()
+    req = Requisition(
+        name=f"watch-{customer_mpn}",
+        status=RequisitionStatus.HOTLIST.value,
+        customer_site_id=site.id,
+        company_id=company.id,
+        created_by=owner.id,
+    )
+    db.add(req)
+    db.flush()
+    requirement = Requirement(requisition_id=req.id, primary_mpn=customer_mpn)
+    db.add(requirement)
+    db.commit()
+    return {"owner": owner, "company": company, "site": site, "req": req, "requirement": requirement}
+
+
+def test_requisition_hotlist_ai_match_stores_customer_spelling(db_session):
+    """An AI-verdict variant offer against a hotlist ask stores the CUSTOMER spelling
+    (the pattern _find_requirement_matches line 632 / _find_part_hotlist_matches line
+    901 already use) — keying the read-time rollup so the amber chip can light."""
+    _eq(db_session, "GSOT36C", "GSOT36C-E3-08", "same")
+    s = _setup_hotlist_ask(db_session, customer_mpn="GSOT36C")
+    offer = _make_offer(db_session, mpn="GSOT36C-E3-08", qty_available=177_630, unit_price=Decimal("0.05"))
+
+    matches = find_matches_for_offer(offer.id, db_session)
+    db_session.commit()
+
+    hot = [m for m in matches if m.company_id == s["company"].id]
+    assert len(hot) == 1
+    assert hot[0].match_source == ProactiveMatchSource.HOTLIST
+    assert hot[0].mpn == "GSOT36C"  # customer's own spelling wins the display
+    assert hot[0].requisition_id == s["req"].id
+
+
+def test_requisition_hotlist_pick_is_deterministic_lowest_requirement_id(db_session):
+    """Two requirements on one hotlist requisition both match the offer's class — the
+    lowest-id one supplies the display spelling, deterministically."""
+    _eq(db_session, "GSOT36C", "GSOT36C-E3-08", "same")
+    s = _setup_hotlist_ask(db_session, customer_mpn="GSOT36C")
+    db_session.add(Requirement(requisition_id=s["req"].id, primary_mpn="GSOT36C-E3-08"))
+    db_session.commit()
+    offer = _make_offer(db_session, mpn="GSOT36C-E3-08", qty_available=100, unit_price=Decimal("0.05"))
+
+    matches = find_matches_for_offer(offer.id, db_session)
+    db_session.commit()
+
+    hot = [m for m in matches if m.company_id == s["company"].id]
+    assert len(hot) == 1
+    assert hot[0].mpn == "GSOT36C"  # lowest-id class-matching requirement wins
+
+
+def test_requisition_hotlist_existing_offer_spelling_match_still_dedupes(db_session):
+    """Regression: pre-fix historical rows stored the OFFER spelling. class_spellings
+    covers every observed spelling of the class, so such a row still holds the
+    one-active-match-per-(part, company) slot after the write-time change."""
+    _eq(db_session, "GSOT36C", "GSOT36C-E3-08", "same")
+    s = _setup_hotlist_ask(db_session, customer_mpn="GSOT36C")
+    offer = _make_offer(db_session, mpn="GSOT36C-E3-08", qty_available=100, unit_price=Decimal("0.05"))
+    db_session.add(
+        ProactiveMatch(
+            offer_id=offer.id,
+            requisition_id=s["req"].id,
+            customer_site_id=s["site"].id,
+            salesperson_id=s["owner"].id,
+            mpn="GSOT36C-E3-08",  # pre-fix: the offer's spelling
+            company_id=s["company"].id,
+            status=ProactiveMatchStatus.NEW,
+            match_score=60,
+            match_source=ProactiveMatchSource.HOTLIST,
+        )
+    )
+    db_session.commit()
+
+    matches = find_matches_for_offer(offer.id, db_session)
+    db_session.commit()
+
+    assert [m for m in matches if m.company_id == s["company"].id] == []
+    assert db_session.query(ProactiveMatch).filter(ProactiveMatch.company_id == s["company"].id).count() == 1

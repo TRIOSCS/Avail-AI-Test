@@ -96,6 +96,48 @@ def _mk_match(db, *, mpn, owner, company, site, price="8.00", qty=500, target=30
     return m
 
 
+def _mk_ai_match(db, *, customer_mpn, variant_mpn, owner, company, site, price="0.05", qty=1000, target=300):
+    """Match displayed under the CUSTOMER spelling whose live supply sits under an AI-
+    verdict variant spelling — compute_offer_rollups flags it has_ai_variants."""
+    from app.models import PartEquivalence, Requirement
+    from app.services.part_equivalence import norm_key
+
+    ka, kb = sorted([norm_key(customer_mpn), norm_key(variant_mpn)])
+    db.add(
+        PartEquivalence(
+            key_a=ka,
+            key_b=kb,
+            example_a=customer_mpn,
+            example_b=variant_mpn,
+            verdict="same",
+            source="ai",
+            reason="pkg suffix",
+        )
+    )
+    offer = Offer(vendor_name="Arrow", mpn=variant_mpn, qty_available=qty, unit_price=Decimal(price), status="active")
+    db.add(offer)
+    db.flush()
+    req = Requisition(name=f"req-{customer_mpn}", customer_site_id=site.id, status="open", created_by=owner.id)
+    db.add(req)
+    db.flush()
+    requirement = Requirement(requisition_id=req.id, primary_mpn=customer_mpn, target_qty=target)
+    db.add(requirement)
+    db.flush()
+    m = ProactiveMatch(
+        offer_id=offer.id,
+        requirement_id=requirement.id,
+        salesperson_id=owner.id,
+        mpn=customer_mpn,
+        company_id=company.id,
+        customer_site_id=site.id,
+        status="new",
+        match_score=70,
+    )
+    db.add(m)
+    db.commit()
+    return m
+
+
 def _scenario(db):
     rep = _mk_user(db, "Sales Rep", "rep@trio.com")
     other = _mk_user(db, "Other Rep", "other@trio.com")
@@ -433,3 +475,201 @@ def test_proactive_offer_claim_is_exclusive(pg_session, pg_engine):
 
     assert first == 1  # this caller won the claim and sends
     assert second == 0  # the racer finds no DRAFT row and must not send
+
+
+# ── AI-variant flag surfaces (2026-08-24) ────────────────────────────────
+
+
+def test_top_picks_carry_ai_variant_flag(db_session):
+    from app.services.proactive_service import get_top_picks
+
+    s = _scenario(db_session)
+    _mk_ai_match(
+        db_session,
+        customer_mpn="GSOT36C",
+        variant_mpn="GSOT36C-E3-08",
+        owner=s["rep"],
+        company=s["beckhoff"],
+        site=s["beckhoff_site"],
+    )
+    picks = get_top_picks(db_session, s["rep"].id)
+    by_mpn = {p["mpn"]: p for p in picks}
+    assert by_mpn["GSOT36C"]["has_ai_variants"] is True
+    assert by_mpn["LTSR15-NP"]["has_ai_variants"] is False
+
+
+def test_build_draft_offers_stamps_ai_variant_flags(db_session):
+    s = _scenario(db_session)
+    ai = _mk_ai_match(
+        db_session,
+        customer_mpn="GSOT36C",
+        variant_mpn="GSOT36C-E3-08",
+        owner=s["rep"],
+        company=s["beckhoff"],
+        site=s["beckhoff_site"],
+    )
+    build_draft_offers(db_session, s["rep"], [s["m1"].id, ai.id])
+    db_session.commit()
+    draft = db_session.query(ProactiveOffer).one()
+    flags = {li["mpn"]: li["ai_variant"] for li in draft.line_items}
+    assert flags["GSOT36C"] is True
+    assert flags["LTSR15-NP"] is False
+
+
+def test_list_draft_offers_exposes_has_ai_variants(db_session):
+    s = _scenario(db_session)
+    ai = _mk_ai_match(
+        db_session,
+        customer_mpn="GSOT36C",
+        variant_mpn="GSOT36C-E3-08",
+        owner=s["rep"],
+        company=s["beckhoff"],
+        site=s["beckhoff_site"],
+    )
+    build_draft_offers(db_session, s["rep"], [ai.id, s["m3"].id])
+    db_session.commit()
+    by_company = {d["company_name"]: d for d in list_draft_offers(db_session, s["rep"])}
+    assert by_company["Beckhoff"]["has_ai_variants"] is True
+    assert by_company["Siemens"]["has_ai_variants"] is False
+
+
+def test_list_draft_offers_legacy_lines_without_key_read_false(db_session):
+    """Drafts staged before this change have no 'ai_variant' key — the list flag
+    defaults False (the send gate re-derives authoritatively either way)."""
+    s = _scenario(db_session)
+    build_draft_offers(db_session, s["rep"], [s["m1"].id])
+    db_session.commit()
+    draft = db_session.query(ProactiveOffer).one()
+    draft.line_items = [{k: v for k, v in li.items() if k != "ai_variant"} for li in draft.line_items]
+    db_session.commit()
+    drafts = list_draft_offers(db_session, s["rep"])
+    assert drafts[0]["has_ai_variants"] is False
+
+
+@pytest.mark.anyio
+async def test_send_draft_blocks_ai_variants_without_confirm(db_session):
+    """The gate fires BEFORE the DRAFT→SENT claim: no Graph call, draft stays DRAFT
+    (never stranded in SENT), matches stay NEW, no throttles."""
+    s = _scenario(db_session)
+    ai = _mk_ai_match(
+        db_session,
+        customer_mpn="GSOT36C",
+        variant_mpn="GSOT36C-E3-08",
+        owner=s["rep"],
+        company=s["beckhoff"],
+        site=s["beckhoff_site"],
+    )
+    build_draft_offers(db_session, s["rep"], [ai.id])
+    db_session.commit()
+    draft = db_session.query(ProactiveOffer).one()
+
+    with patch("app.utils.graph_client.GraphClient.post_json", new_callable=AsyncMock) as mock_send:
+        with pytest.raises(ValueError, match="AI-matched variant"):
+            await send_draft_offer(db_session, s["rep"], "tok", draft.id)
+
+    mock_send.assert_not_called()
+    db_session.rollback()
+    db_session.refresh(draft)
+    assert draft.status == ProactiveOfferStatus.DRAFT
+    db_session.refresh(ai)
+    assert ai.status == ProactiveMatchStatus.NEW
+    assert db_session.query(ProactiveThrottle).count() == 0
+
+
+@pytest.mark.anyio
+async def test_send_draft_with_confirm_sends_ai_variant_offer(db_session):
+    s = _scenario(db_session)
+    ai = _mk_ai_match(
+        db_session,
+        customer_mpn="GSOT36C",
+        variant_mpn="GSOT36C-E3-08",
+        owner=s["rep"],
+        company=s["beckhoff"],
+        site=s["beckhoff_site"],
+    )
+    build_draft_offers(db_session, s["rep"], [ai.id])
+    db_session.commit()
+    draft = db_session.query(ProactiveOffer).one()
+
+    with patch("app.utils.graph_client.GraphClient.post_json", new_callable=AsyncMock) as mock_send:
+        result = await send_draft_offer(db_session, s["rep"], "tok", draft.id, confirm_ai_variants=True)
+
+    mock_send.assert_called_once()
+    assert result["status"] == ProactiveOfferStatus.SENT
+
+
+@pytest.mark.anyio
+async def test_send_draft_legacy_lines_clean_rederive_sends(db_session):
+    """A pre-change draft (no ai_variant keys) whose live supply re-derives clean sends
+    without any confirm — a missing key means re-derive, never block."""
+    s = _scenario(db_session)
+    build_draft_offers(db_session, s["rep"], [s["m1"].id])
+    db_session.commit()
+    draft = db_session.query(ProactiveOffer).one()
+    draft.line_items = [{k: v for k, v in li.items() if k != "ai_variant"} for li in draft.line_items]
+    db_session.commit()
+
+    with patch("app.utils.graph_client.GraphClient.post_json", new_callable=AsyncMock):
+        result = await send_draft_offer(db_session, s["rep"], "tok", draft.id)
+
+    assert result["status"] == ProactiveOfferStatus.SENT
+
+
+def test_prepared_send_route_gates_and_threads_confirm(db_session):
+    s = _scenario(db_session)
+    ai = _mk_ai_match(
+        db_session,
+        customer_mpn="GSOT36C",
+        variant_mpn="GSOT36C-E3-08",
+        owner=s["rep"],
+        company=s["beckhoff"],
+        site=s["beckhoff_site"],
+    )
+    build_draft_offers(db_session, s["rep"], [ai.id])
+    db_session.commit()
+    draft = db_session.query(ProactiveOffer).one()
+    try:
+        client = _make_client(db_session, s["rep"])
+        with (
+            patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="tok"),
+            patch("app.utils.graph_client.GraphClient.post_json", new_callable=AsyncMock),
+        ):
+            r = client.post(f"/v2/partials/proactive/prepared/{draft.id}/send", headers=HX)
+            assert r.status_code == 400
+            assert "AI-matched" in r.text
+            db_session.rollback()
+            db_session.refresh(draft)
+            assert draft.status == ProactiveOfferStatus.DRAFT
+            r = client.post(
+                f"/v2/partials/proactive/prepared/{draft.id}/send",
+                data={"confirm_ai_variants": "1"},
+                headers=HX,
+            )
+            assert r.status_code == 200
+            assert "Offer sent to" in r.text
+    finally:
+        _clear_overrides()
+
+
+def test_prepared_card_renders_ai_badge_and_confirm_input(db_session):
+    s = _scenario(db_session)
+    ai = _mk_ai_match(
+        db_session,
+        customer_mpn="GSOT36C",
+        variant_mpn="GSOT36C-E3-08",
+        owner=s["rep"],
+        company=s["beckhoff"],
+        site=s["beckhoff_site"],
+    )
+    build_draft_offers(db_session, s["rep"], [ai.id])
+    db_session.commit()
+    try:
+        client = _make_client(db_session, s["rep"])
+        r = client.get("/v2/partials/proactive?tab=matches", headers=HX)
+        assert r.status_code == 200
+        assert "Prepared offers" in r.text
+        # The card form's hidden confirm — only flagged cards render it.
+        assert 'name="confirm_ai_variants"' in r.text
+        assert "verify before sending" in r.text  # the explicit hx-confirm copy
+    finally:
+        _clear_overrides()

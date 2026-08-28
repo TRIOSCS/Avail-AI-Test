@@ -199,7 +199,13 @@ async def proactive_prepare_page(
         .all()
     )
 
+    from ...services.proactive_matching import compute_offer_rollups
     from ...services.proactive_service import DEFAULT_PROACTIVE_MARKUP
+
+    # AI-variant flags for the row chips + Task 5's server-side send gate.
+    # ONE batch call for every distinct part (PERF guard pattern —
+    # services/proactive_service.py:105-109).
+    rollups = compute_offer_rollups(db, parts={(m.mpn or "").strip().upper() for m in matches if m.mpn})
 
     match_data = []
     for m in matches:
@@ -218,6 +224,7 @@ async def proactive_prepare_page(
                 "suggested_sell": f"{(unit_price * DEFAULT_PROACTIVE_MARKUP) if unit_price else 0:.4f}",
                 "margin_pct": m.margin_pct,
                 "match_score": m.match_score or 0,
+                "has_ai_variants": (rollups.get((m.mpn or "").strip().upper()) or {}).get("has_ai_variants", False),
             }
         )
 
@@ -240,6 +247,7 @@ async def proactive_prepare_page(
             "company_name": company.name if company else "Customer",
             "site_name": site.site_name if site else "",
             "matches": match_data,
+            "any_ai_variants": any(m["has_ai_variants"] for m in match_data),
             "match_ids_json": json.dumps([m["id"] for m in match_data]),
             "contacts": contact_data,
             "error_msg": "",
@@ -492,6 +500,7 @@ async def proactive_send_offer(
     contact_ids = [int(cid) for cid in contact_ids_raw if cid and str(cid).isdigit()]
     subject = form.get("subject", "").strip()
     body = form.get("body", "").strip()
+    confirm_ai_variants = str(form.get("confirm_ai_variants") or "") == "1"
 
     # Parse rep-entered sell prices keyed as sell_price_<match_id>
     sell_prices: dict[str, float] = {}
@@ -538,6 +547,7 @@ async def proactive_send_offer(
             subject=subject or None,
             email_html=email_html,
             allow_all=is_manager_or_admin(user),
+            confirm_ai_variants=confirm_ai_variants,
         )
 
         # Honest outcome (QC 2026-08-13): send_proactive_offer swallows a Graph
@@ -1009,8 +1019,17 @@ async def proactive_prepared_send(
     token = await get_valid_token(user, db)
     if not token:
         raise HTTPException(400, "No valid Microsoft token — sign in again to send")
+    form = await request.form()
+    confirm_ai_variants = str(form.get("confirm_ai_variants") or "") == "1"
     try:
-        result = await send_draft_offer(db, user, token, po_id, allow_all=is_manager_or_admin(user))
+        result = await send_draft_offer(
+            db,
+            user,
+            token,
+            po_id,
+            allow_all=is_manager_or_admin(user),
+            confirm_ai_variants=confirm_ai_variants,
+        )
     except ValueError as e:
         raise HTTPException(403 if "Not your" in str(e) else 400, str(e)) from e
     recipients = ", ".join(result.get("recipient_emails", []))

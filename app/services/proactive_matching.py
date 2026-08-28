@@ -685,6 +685,11 @@ def _find_hotlist_matches(
     same suppression + dedup + surface pipeline. Salesperson falls back to the
     hotlist requisition's owner when the company has no account owner.
 
+    The match's display identity is the CUSTOMER requirement's spelling
+    (2026-08-24 amber-chip fix) — the same rule as the requirement and
+    part-hotlist passes — so the read-time rollup pools the offer's variant
+    spellings under it and flags AI variants.
+
     ``skip_company_ids`` carries the company_ids the requirement pass already
     produced in THIS call (their ``db.add()``s are uncommitted, so a fresh DB
     query won't see them) — union them into the existing-match set so dedup
@@ -702,7 +707,7 @@ def _find_hotlist_matches(
         class_keys, class_spellings = class_keys_and_spellings(db, part)
 
     rows = (
-        db.query(Requisition, CustomerSite, Company)
+        db.query(Requisition, CustomerSite, Company, Requirement)
         .join(Requirement, Requirement.requisition_id == Requisition.id)
         .join(CustomerSite, CustomerSite.id == Requisition.customer_site_id)
         .join(Company, Company.id == func.coalesce(Requisition.company_id, CustomerSite.company_id))
@@ -711,6 +716,10 @@ def _find_hotlist_matches(
             Requirement.normalized_mpn.in_(class_keys),
             CustomerSite.is_active.is_(True),
         )
+        # Deterministic display identity: every row's requirement matched the
+        # offer's class (the filter above); the lowest-id one wins via the
+        # first-row-per-company dedup below.
+        .order_by(Requirement.id.asc())
         .all()
     )
     if not rows:
@@ -723,10 +732,10 @@ def _find_hotlist_matches(
     )
     existing |= skip_company_ids or set()
 
-    dno = build_batch_dno_set_multi(db, class_spellings, {c.id for _, _, c in rows})
+    dno = build_batch_dno_set_multi(db, class_spellings, {c.id for _, _, c, _ in rows})
 
     out: list[ProactiveMatch] = []
-    for req, site, company in rows:
+    for req, site, company, requirement in rows:
         salesperson_id = company.account_owner_id or req.created_by
         if not salesperson_id:
             continue
@@ -738,7 +747,10 @@ def _find_hotlist_matches(
             requisition_id=req.id,
             customer_site_id=site.id,
             salesperson_id=salesperson_id,
-            mpn=part,
+            # Display identity = the customer's own spelling (mirrors the
+            # requirement pass at line 632); equivalence classes make the offer's
+            # variants reachable from it, which is what lights the amber chip.
+            mpn=part_key(requirement.primary_mpn) or part,
             material_card_id=source_offer.material_card_id if source_offer else None,
             company_id=company.id,
             match_score=60,  # baseline — explicit monitor request, no ask history to weight
