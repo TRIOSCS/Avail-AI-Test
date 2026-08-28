@@ -8,7 +8,18 @@
    Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
 {% from "htmx/partials/settings/_macros.html" import merge_button, delete_both_button, dismiss_button, mass_action_bar -%}
+{% from "htmx/partials/shared/_macros.html" import lazy_body -%}
 <div class="space-y-6">
+
+  {# ── Unmatched Activity (Phase 2A review queue) — lazy-loaded, same idiom as the
+     Connector Health card (settings/system.html): explicit id so the card's own
+     attribute/dismiss forms can re-target it; hx-push-url="false" because hx-push-url
+     is inherited from the tab nav and a background loader must never rewrite the URL. #}
+  {% call lazy_body(id='unmatched-activities-card', url='/v2/partials/data-ops/unmatched-activities', class_='empty:hidden', indicator='#unmatched-activities-spinner', extra_attrs='hx-push-url="false"') %}
+    <div id="unmatched-activities-spinner" class="htmx-indicator flex items-center justify-center py-4">
+      <svg class="h-5 w-5 text-gray-400 animate-spin" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
+    </div>
+  {% endcall %}
 
   {# ── Pending OEM Spec-Code Mappings (admin approval queue) ── #}
   <div class="bg-white border border-line-base rounded-lg overflow-hidden">

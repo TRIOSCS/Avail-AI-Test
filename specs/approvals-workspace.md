@@ -126,4 +126,4 @@ All four tabs usable first (display + approve/reject/verify/prepay, incl. the li
 5. QP-sales fields optional at submit; manager completes at approval.
 6. Notes reuse ActivityLog manual notes if the pattern fits; sales keeps notes while pending.
 7. Payment method is picked by the buyer at confirm-PO (wire / PayPal / credit card / ACH / COD); COD lines are excluded from prepayment and the risk lane.
-8. **Deferred, in writing:** repair-service TPOs (handled outside for now); bulk approve/verify actions; buyer sibling-line context beyond a "line N of M · partial-ship yes/no" flag on the card; Myrna/Katy in-app approve rights.
+8. **Deferred, in writing:** repair-service TPOs (handled outside for now); buyer sibling-line context beyond a "line N of M · partial-ship yes/no" flag on the card; Myrna/Katy in-app approve rights. *(Bulk approve/verify actions dropped 2026-08-28, Decision H: Deal Sheet j/k + auto-advance covers it.)*

@@ -36,7 +36,7 @@ Tracking docs understate completion; APP_MAP missing migration 185 (`requirement
 - **Idea I** (buy-plan line editing) — folds into the buy-plan epic (next).
 - **Idea C** (score/price hover) — decided (deterministic factor breakdown); build after buy-plan.
 - **SP4 manual "Park in prospecting" UI** — never built (auto-sweep backbone exists).
-- **Approvals bulk-approve** — parked under "leave Approvals unchanged".
+- ~~**Approvals bulk-approve** — parked under "leave Approvals unchanged".~~ **CLOSED 2026-08-28 (dropped, Decision H — Deal Sheet j/k + auto-advance covers it)**
 
 ## 🛣 ROADMAP (multi-day / post-go-live)
 API-search Phases 1-4 (product core; Phase 1 is the highest-confidence next batch); HIGH-BE-11 (`db.query()`→2.0, ~1,561 callsites — land a lint guard first, migrate in waves); HIGH-SEC-4 (Graph-webhook IP allowlist); CRM redesign Phases 1-6; vendor-API parametric enrichment (MOSFET extractor, blocked on inventory); calendar delta sync; KB insight refresh (disabled for AI cost).
