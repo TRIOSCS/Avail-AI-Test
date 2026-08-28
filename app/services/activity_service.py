@@ -10,7 +10,7 @@ Usage:
 from datetime import UTC, datetime, timedelta
 
 from loguru import logger
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session, selectinload
 
@@ -947,6 +947,22 @@ def get_requisition_activities(
     if meaningful_only:
         q = q.filter(_is_meaningful_or_unscored())
     return q.order_by(ActivityLog.created_at.desc()).limit(limit).all()
+
+
+def get_buy_plan_activities(
+    buy_plan_id: int, db: Session, limit: int = 200, meaningful_only: bool = True
+) -> list[ActivityLog]:
+    """Get the activity timeline for a buy plan, newest first.
+
+    Includes plan-level, line-tagged, and prepayment-tagged rows (everything logged
+    against the plan) — backs the AI handoff brief. Same meaningful_only semantics as
+    get_requisition_activities.
+    """
+    stmt = select(ActivityLog).where(ActivityLog.buy_plan_id == buy_plan_id)
+    if meaningful_only:
+        stmt = stmt.where(_is_meaningful_or_unscored())
+    stmt = stmt.order_by(ActivityLog.created_at.desc()).limit(limit)
+    return list(db.scalars(stmt).all())
 
 
 def _paginate_timeline(db: Session, *conditions, limit: int, offset: int) -> tuple[list[ActivityLog], int]:

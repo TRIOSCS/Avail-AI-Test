@@ -83,12 +83,22 @@ responsiveness, sentiment trend, open RFQs, and the single most useful follow-up
 'on_track' for healthy engagement, 'stalled' when contact has gone quiet, 'needs_attention'
 when something awaits a reply."""
 
+_BUYPLAN_SYSTEM = """You write a handoff brief for an electronic-component buy plan (deal), so a
+backup teammate can take over cold. Given deterministic deal facts (plan header, per-line
+standing, quality-plan review stamps, prepayments, approval history) and recent activity,
+produce a tight digest: what the customer asked for, where each line stands, what is blocked
+(issues, unpaid prepayments, unreviewed QP sections, missing POs), and the single most useful
+next action. status_signal: 'on_track' when moving, 'stalled' when nothing recent, 'needs_attention'
+when something is blocked or awaiting a decision."""
+
 
 def _system_prompt(entity_type: DigestEntityType) -> str:
     if entity_type == DigestEntityType.REQUISITION:
         return _REQ_SYSTEM
     if entity_type == DigestEntityType.COMPANY:
         return _ACCOUNT_SYSTEM
+    if entity_type == DigestEntityType.BUY_PLAN:
+        return _BUYPLAN_SYSTEM
     raise ValueError(entity_type)
 
 
@@ -120,10 +130,12 @@ def _get_redis():
 
 
 def _load_activities(entity_type: DigestEntityType, entity_id: int, db: Session):
-    from .activity_service import get_company_activities, get_requisition_activities
+    from .activity_service import get_buy_plan_activities, get_company_activities, get_requisition_activities
 
     if entity_type == DigestEntityType.REQUISITION:
         return get_requisition_activities(entity_id, db, limit=ACTIVITY_CAP, meaningful_only=True)
+    if entity_type == DigestEntityType.BUY_PLAN:
+        return get_buy_plan_activities(entity_id, db, limit=200, meaningful_only=False)
     return get_company_activities(entity_id, db, limit=ACTIVITY_CAP, meaningful_only=True)
 
 
@@ -156,8 +168,20 @@ async def get_or_build_digest(
     if existing and not force and existing.cooldown_until and existing.cooldown_until > now:
         return _digest_to_dict(existing)
 
+    plan = None
+    if entity_type == DigestEntityType.BUY_PLAN:
+        from ..models.buy_plan import BuyPlan
+
+        plan = db.get(BuyPlan, entity_id)
+        if plan is None:
+            return {"state": DigestState.INSUFFICIENT}
+
     activities = _load_activities(entity_type, entity_id, db)
-    if len(activities) < 2:
+    if entity_type == DigestEntityType.BUY_PLAN:
+        meaningful = [a for a in activities if a.is_meaningful is not False][:ACTIVITY_CAP]
+        if not plan.lines and len(meaningful) < 2:
+            return {"state": DigestState.INSUFFICIENT}
+    elif len(activities) < 2:
         return {"state": DigestState.INSUFFICIENT}
 
     basis_last = max((a.created_at for a in activities if a.created_at), default=None)
@@ -191,7 +215,18 @@ async def get_or_build_digest(
     try:
         from ..utils.claude_client import claude_structured
 
-        prompt = "Recent activity (newest first):\n" + _build_activity_lines(activities)
+        if entity_type == DigestEntityType.BUY_PLAN:
+            from .buyplan_handoff import build_handoff_facts
+
+            act_block = _build_activity_lines(meaningful) if meaningful else "none logged"
+            try:
+                facts = build_handoff_facts(db, plan)
+            except Exception as e:
+                logger.warning("Handoff facts build failed for plan {}: {}", entity_id, e)
+                return {"state": DigestState.ERROR}
+            prompt = "Deal facts:\n" + facts + "\n\nRecent activity (newest first):\n" + act_block
+        else:
+            prompt = "Recent activity (newest first):\n" + _build_activity_lines(activities)
         try:
             result = await claude_structured(
                 prompt=prompt,

@@ -3108,6 +3108,27 @@ budget, but none exist today — the dormant KB-insight refresh job
 (`knowledge_jobs._job_refresh_insights`) was deleted 2026-07-06 (no UI consumer, burned
 Anthropic API cost when enabled; recoverable from git history).
 
+### 8c. Buy-plan handoff brief (one-tap deal handoff, 2026-08)
+
+The Approvals deal pane (`_pane_sales_order.html`) carries a "Handoff brief" panel below the
+QP-sales section: a `Generate` button lazy-loads `GET
+/v2/partials/buy-plans/{plan_id}/handoff-brief` (`insights_views.buyplan_handoff_brief`) into
+an empty `#handoff-brief-{{ bp.id }}` div, rendering the same shared `activity_digest_card.html`
+states (ready/insufficient/generating/error) as the requisition/company digests above. The
+route is ownership-gated first (`get_buyplan_for_user` — 404s a missing plan or a restricted
+non-owner) before calling `get_or_build_digest(DigestEntityType.BUY_PLAN, plan_id, db, force)`
+— same cache row, cooldown, and Redis nx-lock machinery, new entity type. Unlike the other two
+entities, the BUY_PLAN branch's Claude prompt leads with deterministic facts, not raw activity:
+`services/buyplan_handoff.build_handoff_facts` assembles plan header/totals, up to 15 per-line
+rows (vendor, qty, cost→sell, status, PO#, ETA, issue), QP sales/purchasing review stamps,
+prepayment states, and the last 10 `ApprovalEvent` rows into plain text, appended with up to 30
+meaningful rows from `get_buy_plan_activities` (200-row load, `meaningful_only=False`, filtered
+in Python to `is_meaningful is not False`). The insufficient-guard is looser than the other
+entities': a plan with any lines is never "insufficient" even with zero logged activity — only
+a lineless plan with fewer than 2 meaningful activities returns `{state: "insufficient"}`.
+`_BUYPLAN_SYSTEM` targets a status_signal of on_track/stalled/needs_attention and one next
+action for a backup teammate picking the deal up cold.
+
 ---
 
 ## 9. Inbox Observability
