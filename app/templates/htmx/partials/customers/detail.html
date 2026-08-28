@@ -61,6 +61,14 @@
        hx-swap="innerHTML"
        class="empty:hidden"></div>
 
+  {# One-tap AI account summary (sibling-pooled) — lazy; button card only, no AI on load #}
+  <div hx-get="/v2/partials/customers/{{ company.id }}/account-summary"
+       hx-target="this"
+       hx-trigger="load"
+       hx-swap="innerHTML"
+       hx-push-url="false"
+       class="empty:hidden"></div>
+
   {# ── Slim account header ─────────────────────────────────────────────────
      One compact card: identity (left) · commercial/cadence chip strip (middle) ·
      actions (right). Account cadence/disposition/clocks collapse below. #}

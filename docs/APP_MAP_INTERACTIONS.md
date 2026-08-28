@@ -7719,3 +7719,25 @@ Route: `POST /v2/partials/buy-plans/{plan}/lines/{line}/receive` (`require_user`
 PermissionError→403, ValueError→400); `origin=approvals_workspace` re-renders the
 SO/BP pane when a `lens` rides along (the kanban card's button — the board repaints
 in place) else the PO-line pane, both with `awListRefresh`.
+
+## Customer-360 Sibling Pooling — one-tap AI account summary (2026-08-27)
+
+A one-tap AI account summary sits on the customer detail page, lazy-mounted
+(`hx-trigger=load`) in `detail.html` right below the existing dup-suggestion banner:
+`GET /v2/partials/customers/{company_id}/account-summary`
+(`insights_views.account_summary_panel`) renders an idle button card with no AI call
+on page load; `POST` (`account_summary_generate`) gates on `can_manage_account(user,
+company, db)` (else a `forbidden` card) and a per-user `check_rate_limit(user.id,
+"account_summary", limit=5, window_seconds=60)` (else `throttled`), then calls
+`account_summary_service.generate_account_summary`. That service pools context
+across **sibling accounts** — `company_utils.find_sibling_companies(db, company,
+cap=5)` applies no owner filter, returning every other active `Company` row
+sharing the exact same `normalized_name`; such rows persist unmerged because
+auto-dedup's merge step skips pairs whose `account_owner_id` differs, not
+because of any filter in this function. Pooling is **read-only**: sites,
+contacts, requisitions, activity, and commercial stats are gathered across
+`[company_id] + sibling_ids` to brief Claude, but sibling rows are never merged or
+written. `_account_summary_card.html` surfaces an amber banner listing each pooled
+sibling by name + owner ("accounts stay unmerged") whenever `sibling_accounts` is
+non-empty, so the AI-generated situation/development/next-steps read as one
+customer even though the underlying accounts stay separate.
