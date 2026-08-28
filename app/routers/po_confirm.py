@@ -117,7 +117,10 @@ async def po_confirm_post(
 
     Idempotent + state-scoped: acts only while the line is still AWAITING_PO on an
     ACTIVE plan — a concurrent confirm (caught as the service ValueError) renders the
-    read-only page and never double-confirms.
+    read-only page and never double-confirms. A9 follow-up: if the line's assigned
+    buyer changed after this token was minted, ``confirm_po``'s actor gate now raises
+    PermissionError — caught here too and rendered as the same graceful "inactive"
+    panel (never a raw 500 on this public, no-login page).
     """
     line, buyer = _load(db, token)
     if line is None or buyer is None:
@@ -154,9 +157,15 @@ async def po_confirm_post(
         )
         log_field_edits(db, user=buyer, buy_plan_id=line.buy_plan_id, buy_plan_line_id=line.id, edits=line_edits)
         db.commit()
-    except ValueError as e:
+    except (ValueError, PermissionError) as e:
         db.rollback()
         db.refresh(line)
+        if isinstance(e, PermissionError):
+            # The line's assigned buyer changed since this token was minted — the
+            # token no longer authorizes this actor. Same graceful "not live anymore"
+            # panel the other stale-link cases render below; never a raw exception on
+            # a public, no-login page.
+            return _render(request, line, "inactive")
         mode = _mode(line)
         if mode != "form":  # overtaken concurrently — read-only, never re-confirm
             return _render(request, line, mode)
