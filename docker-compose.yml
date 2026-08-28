@@ -89,7 +89,12 @@ services:
     # Trust X-Forwarded-* headers only from the compose network (where Caddy
     # is the sole HTTP client) — never "*", which would trust a spoofed
     # X-Forwarded-For from any client that reached uvicorn directly.
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "172.28.0.0/24"]
+    # Phase-4 infra: --workers 2 (locked ruling, not 4) — sync ORM handlers no
+    # longer serialize requests behind one process. DB_POOL_SIZE/
+    # DB_MAX_OVERFLOW in app/database.py are sized per-process against this
+    # worker count; see the connection-budget comment there before raising
+    # either number. The `scheduler` service below stays single-worker.
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "172.28.0.0/24", "--workers", "2"]
     env_file: .env
     # P1.4: REDIS_URL is composed here (not left to whatever plain value is in
     # .env) so redis auth wiring can never drift from the redis service's own
@@ -183,11 +188,13 @@ services:
         max-file: "5"
 
   # --- Scheduler (Phase-4 infra: split out of `app` — APScheduler runs here,
-  # and ONLY here. Same image/command as `app` (single uvicorn worker), just
-  # with RUN_SCHEDULER=1 flipped on and RUN_SCHEDULER=0 on `app` above.
-  # Not reachable from Caddy (no ports mapping) — it exists to run background
-  # jobs, not serve traffic. See app/main.py lifespan + deploy.sh's post-deploy
-  # "exactly one scheduler" verification. ---
+  # and ONLY here. Same image as `app`, but deliberately single-worker (no
+  # --workers flag, unlike `app`'s --workers 2) — APScheduler's in-process job
+  # store/locks assume exactly one process, and RUN_SCHEDULER=1 here vs.
+  # RUN_SCHEDULER=0 on `app` above is what keeps it the only process that runs
+  # jobs at all. Not reachable from Caddy (no ports mapping) — it exists to run
+  # background jobs, not serve traffic. See app/main.py lifespan + deploy.sh's
+  # post-deploy "exactly one scheduler" verification. ---
   scheduler:
     build: .
     restart: always
