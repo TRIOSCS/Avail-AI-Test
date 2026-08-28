@@ -209,6 +209,22 @@
   {% endif %}
   {% endif %}
 
+  {# ── Handoff brief (AI, one-tap): loads the cached digest card on demand #}
+  <div class="rounded-lg border border-brand-200 bg-white p-3">
+    <div class="flex items-center justify-between gap-3">
+      <p class="text-xs font-semibold uppercase tracking-wide text-gray-500">Handoff brief</p>
+      <button type="button"
+              hx-get="/v2/partials/buy-plans/{{ bp.id }}/handoff-brief"
+              hx-target="#handoff-brief-{{ bp.id }}"
+              hx-swap="innerHTML"
+              hx-push-url="false"
+              class="text-xs text-brand-600 hover:text-brand-700 cursor-pointer">
+        Generate
+      </button>
+    </div>
+    <div id="handoff-brief-{{ bp.id }}" class="mt-2 empty:hidden"></div>
+  </div>
+
   {# ── Notes & attachments (2.4) — never status-locked ─────────────── #}
   {% include "htmx/partials/approvals/_notes_thread.html" %}
 </div>

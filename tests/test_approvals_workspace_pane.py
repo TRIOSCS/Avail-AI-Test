@@ -165,6 +165,16 @@ def test_pane_missing_plan_404s(hub_client: TestClient):
     assert hub_client.get("/v2/partials/approvals/plan/999999/pane").status_code == 404
 
 
+def test_pane_offers_handoff_brief(hub_client: TestClient, db_session: Session, test_user: User):
+    req, q, _ = _req_quote(db_session, test_user)
+    bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
+    db_session.commit()
+
+    body = hub_client.get(f"/v2/partials/approvals/plan/{bp.id}/pane").text
+    assert f"/v2/partials/buy-plans/{bp.id}/handoff-brief" in body
+    assert "Handoff brief" in body
+
+
 # ── Decide from the pane (origin=approvals_workspace) ────────────────────
 
 
