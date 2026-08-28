@@ -549,6 +549,13 @@ def test_split_refetch_includes_filter_form(hub_client: TestClient, db_session: 
     assert 'hx-include="#aw-filters"' in body
 
 
+def test_search_input_has_stable_id(hub_client: TestClient, db_session: Session, test_user: User):
+    """A4: the search input carries a stable id="aw-q" so htmx restores focus+caret
+    across the 300ms-debounced #aw-list innerHTML swaps instead of stealing focus."""
+    body = hub_client.get("/v2/partials/approvals/sales-orders/list").text
+    assert 'id="aw-q"' in body
+
+
 # ── Prepayments list ─────────────────────────────────────────────────────
 
 

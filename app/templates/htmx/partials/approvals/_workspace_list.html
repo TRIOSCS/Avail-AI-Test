@@ -43,7 +43,7 @@
 {# ── Filters — every control targets #aw-list EXPLICITLY (never inherit). #}
 <form id="aw-filters" class="flex items-center gap-2 p-2 border-b border-line-base bg-gray-50 flex-shrink-0"
       @submit.prevent>
-  <input type="text" name="q" value="{{ q }}" placeholder="Search customer, SO#, part…"
+  <input type="text" id="aw-q" name="q" value="{{ q }}" placeholder="Search customer, SO#, part…"
          aria-label="Search {{ tab }}"
          class="input input-sm flex-1 min-w-0"
          hx-get="{{ list_url }}"
