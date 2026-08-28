@@ -487,6 +487,63 @@ def test_po_list_buyer_awaiting_po_lines_listed(hub_client: TestClient, db_sessi
     assert "Awaiting PO" in body
 
 
+def test_po_list_own_awaiting_po_gets_confirm_section(hub_client: TestClient, db_session: Session, test_user: User):
+    """A8: the viewer's own AWAITING_PO line is buyer work ("cut/confirm the PO"), not
+    an approval decision — it renders under "Your POs to confirm", never under "Needs
+    your approval"."""
+    req, q, rq = _req_quote(db_session, test_user)
+    bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
+    line = _line(db_session, bp, rq, test_user, status=BuyPlanLineStatus.AWAITING_PO.value)
+    db_session.commit()
+
+    body = hub_client.get("/v2/partials/approvals/purchase-orders/list").text
+    assert "Your POs to confirm" in body
+    assert "Needs your approval" not in body
+    assert f"line-{line.id}" in body
+
+
+def test_po_list_needs_approval_row_unmoved_by_confirm_split(
+    hub_client: TestClient, db_session: Session, test_user: User
+):
+    """A8: a decide-eligible PENDING_VERIFY row still renders under "Needs your
+    approval" even when the viewer also has an own-confirm row on the same list — the
+    two sections are disjoint and ordered needs-first, confirm-second."""
+    req, q, rq = _req_quote(db_session, test_user)
+    bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
+    verify_line = _pending_verify_line(db_session, bp, rq, test_user)
+    confirm_line = _line(db_session, bp, rq, test_user, status=BuyPlanLineStatus.AWAITING_PO.value)
+    db_session.commit()
+
+    body = hub_client.get("/v2/partials/approvals/purchase-orders/list").text
+    assert "Needs your approval" in body
+    assert "Your POs to confirm" in body
+    needs_idx = body.index("Needs your approval")
+    confirm_idx = body.index("Your POs to confirm")
+    verify_row_idx = body.index(f"line-{verify_line.id}")
+    confirm_row_idx = body.index(f"line-{confirm_line.id}")
+    assert needs_idx < verify_row_idx < confirm_idx  # decide-eligible row IN the needs section
+    assert confirm_idx < confirm_row_idx  # own-confirm row IN the confirm section, below it
+
+
+def test_po_badge_unchanged_by_confirm_split(hub_client: TestClient, db_session: Session, test_user: User):
+    """A8: the PO tab's "waiting on you" badge is computed independently
+    (_po_waiting_on_viewer) and must not change value because the list now groups
+    own-confirm rows separately from decide-eligible rows."""
+    req, q, rq = _req_quote(db_session, test_user)
+    bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
+    _pending_verify_line(db_session, bp, rq, test_user)
+    _line(db_session, bp, rq, test_user, status=BuyPlanLineStatus.AWAITING_PO.value)
+    db_session.commit()
+
+    from app.routers.htmx.approvals_hub import _viewer_badges
+
+    expected = _viewer_badges(db_session, test_user)["purchase-orders"]
+    assert expected == 2  # 1 decide-eligible + 1 own-awaiting, same seed as above
+
+    shell_body = hub_client.get("/v2/partials/approvals").text
+    assert f">{expected}<" in shell_body
+
+
 def test_po_list_closed_shows_verified(hub_client: TestClient, db_session: Session, test_user: User):
     req, q, rq = _req_quote(db_session, test_user)
     bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)

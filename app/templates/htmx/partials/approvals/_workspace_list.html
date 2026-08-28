@@ -2,13 +2,17 @@
   approvals/_workspace_list.html — the Approvals Workspace left work list (any tab).
   Search (300ms debounce) + Mine/All toggle + live/closed filter, then the rows:
   "Needs your approval" grouped FIRST (oldest first — decision queues surface the
-  stalest work), everything else below. Every row shows its age; Acctivate numbers
-  (SO#/PO#) render as one-tap copy chips (spec §5). Rows dispatch aw-select to fill
-  the right pane; the oldest needs-your-approval row dispatches aw-default once so
-  opening the tab lands the approver on a decision, never a hunt.
-  Receives: tab, q, scope, show_closed, needs_rows / other_rows (list[WorkspaceRow]),
-            default_row (WorkspaceRow|None — the oldest needs-approval row, or the
-            ?select=-deep-linked plan's row/pane stand-in), list_url.
+  stalest work), then (A8, PO tab only) "Your POs to confirm" — the viewer's own
+  AWAITING_PO lines, buyer work rather than a decision — then everything else below
+  (which the "Stalled — no approver" group, A7, is further carved out of). Every row
+  shows its age; Acctivate numbers (SO#/PO#) render as one-tap copy chips (spec §5).
+  Rows dispatch aw-select to fill the right pane; the oldest needs-your-approval row
+  dispatches aw-default once so opening the tab lands the approver on a decision,
+  never a hunt.
+  Receives: tab, q, scope, show_closed, needs_rows / own_confirm_rows / other_rows
+            (list[WorkspaceRow]), default_row (WorkspaceRow|None — the oldest
+            needs-approval row, or the ?select=-deep-linked plan's row/pane stand-in),
+            list_url.
   Called by: htmx/approvals_hub.py approvals_workspace_list (GET /{tab}/list).
   Depends on: HTMX, Alpine.js, Tailwind; shared copy_chip + age_chip macros.
 #}
@@ -145,6 +149,12 @@
     {% for row in needs_rows %}{{ list_row(row) }}{% endfor %}
   </div>
   {% endif %}
+  {% if own_confirm_rows %}
+  <div class="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-sky-600">Your POs to confirm</div>
+  <div class="divide-y divide-line-subtle border-b border-line-base">
+    {% for row in own_confirm_rows %}{{ list_row(row) }}{% endfor %}
+  </div>
+  {% endif %}
   {% if stalled_rows %}
   <div class="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-amber-600">Stalled — no approver</div>
   <div class="divide-y divide-line-subtle border-b border-line-base">
@@ -152,12 +162,12 @@
   </div>
   {% endif %}
   {% if rest_rows %}
-  {% if needs_rows or stalled_rows %}<div class="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Everything else</div>{% endif %}
+  {% if needs_rows or own_confirm_rows or stalled_rows %}<div class="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Everything else</div>{% endif %}
   <div class="divide-y divide-line-subtle">
     {% for row in rest_rows %}{{ list_row(row) }}{% endfor %}
   </div>
   {% endif %}
-  {% if not needs_rows and not other_rows %}
+  {% if not needs_rows and not own_confirm_rows and not other_rows %}
   <div class="px-4 py-10 text-center text-sm text-brand-400">
     {% if q %}Nothing matches “{{ q }}”.{% elif show_closed %}No closed items{% if scope == 'mine' %} of yours{% endif %}.{% else %}Nothing here{% if scope == 'mine' %} for you{% endif %} — all clear.{% endif %}
   </div>

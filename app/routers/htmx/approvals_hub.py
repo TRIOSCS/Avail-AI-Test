@@ -146,6 +146,10 @@ class WorkspaceRow:
     # 2.5: the plan is silently stalled — no configured approver can decide it
     # (plan_needs_approver_reason). Rendered as an amber warning on BP-tab rows.
     stalled: bool = False
+    # A8: this row is the viewer's own AWAITING_PO line (their confirm-PO buyer work,
+    # not an approval decision) — rendered in its own "Your POs to confirm" section
+    # instead of "Needs your approval". PO tab only; other tabs leave this False.
+    own_confirm: bool = False
 
 
 def _matches(q: str, *fields: str | None) -> bool:
@@ -1364,10 +1368,13 @@ async def approvals_workspace_list(
     """Render one tab's left work list (search + Mine/All + live/closed + age rows).
 
     Rows group "Needs your approval" first (oldest first — decision queues surface the
-    stalest work); the rest render newest-first. The oldest needs-your-approval row is
-    the default selection (dispatched to the pane on first load only). ``select`` (a
-    plan id from a retired /v2/buy-plans/{id} deep link, SO/BP tabs only) overrides
-    that default with the selected plan's pane when the viewer may see the plan.
+    stalest work), then "Your POs to confirm" (A8: the viewer's own AWAITING_PO lines —
+    buyer work, not a decision — PO tab only), then the rest render newest-first (the
+    template further carves a "Stalled — no approver" group out of that rest, A7). The
+    oldest needs-your-approval row is the default selection (dispatched to the pane on
+    first load only). ``select`` (a plan id from a retired /v2/buy-plans/{id} deep
+    link, SO/BP tabs only) overrides that default with the selected plan's pane when
+    the viewer may see the plan.
     """
     resolved = _resolve_tab(tab)
     if resolved is None:
@@ -1381,8 +1388,13 @@ async def approvals_workspace_list(
     else:
         rows = _prepayment_rows(db, user, q=q, scope=scope, show_closed=show_closed)
 
+    # A8: own-confirm rows carve out BEFORE the generic rest, same idiom stalled uses
+    # (carved out of rest, in the template) — needs is never guaranteed disjoint from
+    # stalled (Task 2 caution), so own_confirm is carved the same defensive way: by its
+    # own flag, not by exclusion from needs.
     needs = [r for r in rows if r.needs_approval]
-    rest = [r for r in rows if not r.needs_approval]
+    own_confirm = [r for r in rows if r.own_confirm]
+    rest = [r for r in rows if not r.needs_approval and not r.own_confirm]
     default_row = needs[0] if needs else None
     select_key = _normalize_select(select, resolved)
     if select_key:
@@ -1396,6 +1408,7 @@ async def approvals_workspace_list(
             "scope": scope,
             "show_closed": show_closed,
             "needs_rows": needs,
+            "own_confirm_rows": own_confirm,
             "other_rows": rest,
             "default_row": default_row,
             "list_url": f"/v2/partials/approvals/{resolved}/list",
@@ -1462,7 +1475,9 @@ def _plan_rows(db: Session, user: User, *, lens: str, q: str, scope: str, show_c
     return needs + rest
 
 
-def _po_line_row(line: BuyPlanLine, plan, *, needs: bool, closed: bool = False) -> WorkspaceRow:
+def _po_line_row(
+    line: BuyPlanLine, plan, *, needs: bool, closed: bool = False, own_confirm: bool = False
+) -> WorkspaceRow:
     """Build one PO-tab row from an ORM line (+ its plan)."""
     mpn = None
     if line.requirement is not None:
@@ -1493,6 +1508,7 @@ def _po_line_row(line: BuyPlanLine, plan, *, needs: bool, closed: bool = False) 
         age_at=line.po_confirmed_at or line.created_at,
         copy_number=line.po_number,
         closed=closed,
+        own_confirm=own_confirm,
     )
 
 
@@ -1562,8 +1578,12 @@ def _po_rows(db: Session, user: User, *, q: str, scope: str, show_closed: bool) 
             if ln.buyer_id == user.id or (ln.buy_plan is not None and ln.buy_plan.submitted_by_id == user.id)
         ]
     for line in others:
-        needs = line.status == BuyPlanLineStatus.AWAITING_PO.value and line.buyer_id == user.id
-        rows.append(_po_line_row(line, line.buy_plan, needs=needs))
+        # A8: the viewer's own AWAITING_PO line is buyer work ("confirm the PO"), not
+        # an approval decision — it renders under "Your POs to confirm", never "Needs
+        # your approval" (needs stays False here; the PO-tab badge math at
+        # _po_waiting_on_viewer is untouched and still counts it).
+        own_confirm = line.status == BuyPlanLineStatus.AWAITING_PO.value and line.buyer_id == user.id
+        rows.append(_po_line_row(line, line.buy_plan, needs=False, own_confirm=own_confirm))
 
     return [r for r in rows if _matches(q, r.title, r.subtitle, r.copy_number)]
 
