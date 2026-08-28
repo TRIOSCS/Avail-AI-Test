@@ -6,7 +6,11 @@ activity_digest_service.get_or_build_digest.
 """
 
 from datetime import UTC, datetime
+from unittest.mock import AsyncMock, patch
 
+import pytest
+
+import app.services.activity_digest_service as digest_svc
 from app.constants import ApprovalGateType, ApprovalSubjectType, DigestEntityType
 from app.models.approvals import ApprovalEvent, ApprovalRequest
 from app.models.buy_plan import BuyPlanLine
@@ -133,3 +137,67 @@ class TestHandoffFacts:
         assert "approved" in facts
         assert "Prepayments (1): approved: 1" in facts
         assert "$1,200" in facts
+
+
+_FAKE = {
+    "headline": "Deal ready",
+    "narrative": "All lines placed.",
+    "highlights": [{"label": "Lines", "value": "1"}],
+    "status_signal": "on_track",
+    "next_step": "Verify PO",
+}
+
+
+@pytest.mark.asyncio
+class TestBuyPlanDigest:
+    async def test_missing_plan_insufficient(self, db_session, monkeypatch):
+        monkeypatch.setattr(digest_svc, "_get_redis", lambda: None)
+        res = await digest_svc.get_or_build_digest(DigestEntityType.BUY_PLAN, 999999, db_session)
+        assert res["state"] == digest_svc.DigestState.INSUFFICIENT
+
+    async def test_empty_plan_insufficient(self, db_session, test_buy_plan, monkeypatch):
+        monkeypatch.setattr(digest_svc, "_get_redis", lambda: None)
+        res = await digest_svc.get_or_build_digest(DigestEntityType.BUY_PLAN, test_buy_plan.id, db_session)
+        assert res["state"] == digest_svc.DigestState.INSUFFICIENT
+
+    async def test_plan_with_line_generates_with_facts_in_prompt(
+        self, db_session, test_buy_plan, test_offer, monkeypatch
+    ):
+        monkeypatch.setattr(digest_svc, "_get_redis", lambda: None)
+        db_session.add(
+            BuyPlanLine(buy_plan_id=test_buy_plan.id, offer_id=test_offer.id, quantity=10, status="awaiting_po")
+        )
+        db_session.commit()
+        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=_FAKE) as mock_ai:
+            res = await digest_svc.get_or_build_digest(DigestEntityType.BUY_PLAN, test_buy_plan.id, db_session)
+        assert res["state"] == digest_svc.DigestState.READY
+        prompt = mock_ai.call_args.kwargs["prompt"]
+        assert f"Buy plan #{test_buy_plan.id}" in prompt
+        assert "Recent activity" in prompt
+        sys_prompt = mock_ai.call_args.kwargs["system"]
+        assert "handoff" in sys_prompt.lower() or "backup" in sys_prompt.lower()
+
+    async def test_nonmeaningful_activity_busts_basis(self, db_session, test_buy_plan, test_offer, monkeypatch):
+        monkeypatch.setattr(digest_svc, "_get_redis", lambda: None)
+        db_session.add(
+            BuyPlanLine(buy_plan_id=test_buy_plan.id, offer_id=test_offer.id, quantity=1, status="awaiting_po")
+        )
+        db_session.commit()
+        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=_FAKE):
+            first = await digest_svc.get_or_build_digest(DigestEntityType.BUY_PLAN, test_buy_plan.id, db_session)
+        assert first["state"] == digest_svc.DigestState.READY
+        # expire the cooldown so the basis guard is what decides
+        row = (
+            db_session.query(digest_svc.ActivityDigest)
+            .filter_by(entity_type="buy_plan", entity_id=test_buy_plan.id)
+            .one()
+        )
+        row.cooldown_until = datetime(2020, 1, 1, tzinfo=UTC)
+        db_session.commit()
+        _mk_plan_activity(
+            db_session, test_buy_plan.id, activity_type="field_edit", is_meaningful=False, subject="line edited"
+        )
+        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=_FAKE) as mock_ai2:
+            second = await digest_svc.get_or_build_digest(DigestEntityType.BUY_PLAN, test_buy_plan.id, db_session)
+        assert second["state"] == digest_svc.DigestState.READY
+        assert mock_ai2.called  # non-meaningful row still regenerated the brief
