@@ -270,6 +270,14 @@ def test_shell_legacy_tab_keys_alias(hub_client: TestClient, legacy: str, mapped
     assert f"/v2/partials/approvals/{mapped}" in r.text  # lazy body loads the MAPPED tab
 
 
+def test_shell_pill_replace_url_carries_scope(hub_client: TestClient):
+    """A10: the tab pill's hx-replace-url carries the current scope — a hard reload or
+    a shared link off that URL restores Mine instead of snapping back to All."""
+    r = hub_client.get("/v2/partials/approvals?scope=mine")
+    assert r.status_code == 200
+    assert 'hx-replace-url="/v2/approvals?tab=sales-orders&scope=mine"' in r.text
+
+
 def test_shell_badges_show_waiting_on_viewer(hub_client: TestClient, db_session: Session, test_user: User):
     req, q, _ = _req_quote(db_session, test_user)
     bp = _plan(db_session, req, q, status=BuyPlanStatus.PENDING.value)
@@ -706,6 +714,24 @@ def test_prepayments_list_approved_unpaid_in_live_and_closed(
     assert f"prepay-{pp.id}" in closed_txt
 
 
+def test_prepayments_list_approved_unpaid_amber_awaiting_wire_label(
+    hub_client: TestClient, db_session: Session, test_user: User
+):
+    """A3: an APPROVED-but-unpaid prepayment row reads as still-open work — amber tone,
+    not the emerald "done" tone a plain 'Approved' would imply."""
+    req, q, _ = _req_quote(db_session, test_user)
+    bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
+    ar, pp = _pending_prepay_request(db_session, bp, test_user)
+    ar.status = ApprovalRequestStatus.APPROVED.value
+    ar.resolved_at = datetime.now(UTC)
+    pp.status = "approved"
+    db_session.commit()
+
+    txt = hub_client.get("/v2/partials/approvals/prepayments/list").text
+    assert "Approved — awaiting wire" in txt
+    assert "bg-amber-50 text-amber-600 border-amber-200" in txt
+
+
 def test_prepayments_list_paid_stays_out_of_live(hub_client: TestClient, db_session: Session, test_user: User):
     req, q, _ = _req_quote(db_session, test_user)
     bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
@@ -821,6 +847,64 @@ def test_export_streams_csv(hub_client: TestClient, tab: str):
     assert "text/csv" in r.headers["content-type"]
 
 
+def test_prepayments_export_default_is_live_not_resolved_only(
+    hub_client: TestClient, db_session: Session, test_user: User
+):
+    """A6: default export params (no show_closed) build the CSV from the SAME live row
+    builder the list renders — a REQUESTED (decidable-now) row is present; a resolved
+    (terminal) row is not."""
+    req, q, _ = _req_quote(db_session, test_user)
+    bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
+    _ar, pp = _pending_prepay_request(db_session, bp, test_user)  # live REQUESTED row
+
+    req2, q2, _ = _req_quote(db_session, test_user)
+    bp2 = _plan(db_session, req2, q2, status=BuyPlanStatus.ACTIVE.value)
+    ar2, pp2 = _pending_prepay_request(db_session, bp2, test_user)
+    ar2.status = ApprovalRequestStatus.REJECTED.value  # resolved/terminal — history only
+    ar2.resolved_at = datetime.now(UTC)
+    db_session.commit()
+
+    body = hub_client.get("/v2/partials/approvals/prepayments/export").text
+    assert f"prepay-{pp.id}" in body
+    assert f"prepay-{pp2.id}" not in body
+
+
+def test_prepayments_export_show_closed_contains_resolved_row(
+    hub_client: TestClient, db_session: Session, test_user: User
+):
+    """A6: show_closed=true switches the export to the resolved decision feed."""
+    req, q, _ = _req_quote(db_session, test_user)
+    bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
+    ar, pp = _pending_prepay_request(db_session, bp, test_user)
+    ar.status = ApprovalRequestStatus.REJECTED.value
+    ar.resolved_at = datetime.now(UTC)
+    db_session.commit()
+
+    body = hub_client.get("/v2/partials/approvals/prepayments/export?show_closed=true").text
+    assert str(pp.id) in body
+
+
+def test_po_export_default_is_live_not_resolved_only(hub_client: TestClient, db_session: Session, test_user: User):
+    """A6: same honesty contract on the Purchase Orders tab — a live PENDING_VERIFY line
+    is in the default export; the resolved decision feed is not."""
+    req, q, rq = _req_quote(db_session, test_user)
+    bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
+    line = _pending_verify_line(db_session, bp, rq, test_user)
+    db_session.commit()
+
+    body = hub_client.get("/v2/partials/approvals/purchase-orders/export").text
+    assert f"line-{line.id}" in body
+    assert "Outcome" not in body  # the resolved feed's header, absent from the live one
+
+
+def test_export_anchor_threads_q_scope_show_closed(hub_client: TestClient, db_session: Session, test_user: User):
+    """A6: the export button's URL carries the list's current q/scope/show_closed so the
+    download always matches what's on screen."""
+    r = hub_client.get("/v2/partials/approvals/prepayments/list?scope=mine&show_closed=true&q=acme")
+    assert r.status_code == 200
+    assert "/v2/partials/approvals/prepayments/export?scope=mine&show_closed=true&q=acme" in r.text
+
+
 # ── Origination + hub home (unchanged homes) ─────────────────────────────
 
 
@@ -860,10 +944,32 @@ def test_select_threads_shell_to_tab_body_to_list(hub_client: TestClient):
     the full chain a redirected deep link travels."""
     shell = hub_client.get("/v2/partials/approvals?tab=buy-plans&select=42")
     assert shell.status_code == 200
-    assert "/v2/partials/approvals/buy-plans?select=42" in shell.text
+    # The lazy body's hx-get is Jinja-autoescaped (an attribute VALUE, not literal
+    # template text like the pill's hx-replace-url) — & renders as &amp;.
+    assert "/v2/partials/approvals/buy-plans?scope=all&amp;select=42" in shell.text
     body = hub_client.get("/v2/partials/approvals/buy-plans?select=42")
     assert body.status_code == 200
     assert "/v2/partials/approvals/buy-plans/list?scope=all&select=42" in body.text
+
+
+def test_shell_scope_threads_to_tab_body_to_list(hub_client: TestClient):
+    """A10: ?scope= rides the shell's lazy tab-body URL, then the tab body's lazy list
+    URL, down to the list's own hidden scope input — a hard reload or shared link off
+    /v2/approvals?scope=mine restores Mine end to end."""
+    shell = hub_client.get("/v2/partials/approvals?tab=buy-plans&scope=mine")
+    assert shell.status_code == 200
+    assert "/v2/partials/approvals/buy-plans?scope=mine" in shell.text
+    body = hub_client.get("/v2/partials/approvals/buy-plans?scope=mine")
+    assert body.status_code == 200
+    assert "/v2/partials/approvals/buy-plans/list?scope=mine" in body.text
+    list_html = hub_client.get("/v2/partials/approvals/buy-plans/list?scope=mine").text
+    assert 'name="scope" value="mine"' in list_html
+
+
+def test_shell_scope_defaults_to_all(hub_client: TestClient):
+    """No ?scope= on the shell defaults to 'all', unchanged."""
+    shell = hub_client.get("/v2/partials/approvals?tab=buy-plans")
+    assert "/v2/partials/approvals/buy-plans?scope=all" in shell.text
 
 
 def test_list_select_preselects_that_plan_not_the_oldest(hub_client: TestClient, db_session: Session, test_user: User):

@@ -6,6 +6,9 @@
   into #ap-hub-body. Decisions never navigate — panes decide in place.
   Receives: active_tab (str, one of the four tab keys), tabs (list[(key, label)]),
             badges (dict tab_key → int, items waiting on the viewer),
+            scope ('all'|'mine' — A10: rides the lazy body URL AND each pill's
+            hx-replace-url so a hard reload / shared link keeps Mine instead of
+            snapping back to All),
             select (int|None — plan id from a /v2/buy-plans/{id} deep link; rides the
             lazy body URL so the SO/BP list preselects that plan's pane).
   Called by: htmx/approvals_hub.py approvals_hub_shell (GET /v2/partials/approvals).
@@ -33,7 +36,7 @@
             hx-target="#ap-hub-body"
             hx-swap="innerHTML"
             hx-include="#aw-filters"
-            hx-replace-url="/v2/approvals?tab={{ key }}"
+            hx-replace-url="/v2/approvals?tab={{ key }}&scope={{ scope }}"
             @click="tab = '{{ key }}'"
             :class="tab === '{{ key }}'
                     ? 'bg-accent-600 text-white shadow-sm'
@@ -47,7 +50,7 @@
 
   {# ── Lazy tab body ── (lazy_body macro structurally enforces the explicit hx-target
      guard — see shared/_macros.html for the landmine rationale) #}
-  {% call lazy_body('ap-hub-body', '/v2/partials/approvals/' ~ active_tab ~ (('?select=' ~ select) if select else '')) %}
+  {% call lazy_body('ap-hub-body', '/v2/partials/approvals/' ~ active_tab ~ '?scope=' ~ scope ~ (('&select=' ~ select) if select else '')) %}
     <div class="p-4 text-center text-gray-400 text-sm flex items-center justify-center gap-2">
       <svg class="h-5 w-5 text-gray-400 animate-spin" viewBox="0 0 24 24" fill="none">
         <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"

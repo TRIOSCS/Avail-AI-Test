@@ -335,16 +335,25 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
     elif current_view == "approvals":
         # The Approvals Workspace at /v2/partials/approvals. Thread ?tab= through
         # (customer deep-link pattern) so a reload/bookmark of a pushed tab URL paints
-        # the right tab, and ?select=<plan id> (the retired /v2/buy-plans/{id} deep-link
-        # redirect) so the workspace lands on that plan's pane. select is digits-only
-        # here — the shell route takes a typed int and would 422 on garbage.
+        # the right tab, ?scope= (A10) so a hard reload / shared link restores the
+        # viewer's Mine instead of snapping back to All, and ?select=<plan id> (the
+        # retired /v2/buy-plans/{id} deep-link redirect) so the workspace lands on that
+        # plan's pane. select is digits-only here — the shell route takes a typed int
+        # and would 422 on garbage.
+        qs_parts: list[tuple[str, str]] = []
         tab_qs = request.query_params.get("tab", "").strip()
-        partial_url = f"/v2/partials/approvals?tab={quote(tab_qs)}" if tab_qs else "/v2/partials/approvals"
+        if tab_qs:
+            qs_parts.append(("tab", tab_qs))
+        if request.query_params.get("scope", "").strip() == "mine":
+            qs_parts.append(("scope", "mine"))
         select_qs = request.query_params.get("select", "").strip()
         # Nav audit #3: select is a row KEY (plan-N / line-N / prepay-N) or bare
         # digits — validated by shape here, resolved per-tab in the workspace list.
         if re.fullmatch(r"(?:plan-|line-|prepay-)?\d+", select_qs or ""):
-            partial_url = f"{partial_url}{'&' if tab_qs else '?'}select={quote(select_qs)}"
+            qs_parts.append(("select", select_qs))
+        partial_url = "/v2/partials/approvals"
+        if qs_parts:
+            partial_url = f"{partial_url}?{urlencode(qs_parts)}"
     else:
         partial_url = f"/v2/partials/{current_view}"
         # Nav audit 2026-08-20 (#10): thread the WHOLE query through so a reload or

@@ -226,6 +226,7 @@ def _viewer_badges(db: Session, user: User) -> dict[str, int]:
 async def approvals_hub_shell(
     request: Request,
     tab: str = "",
+    scope: str = "all",
     select: str = "",
     user: User = Depends(require_access(AccessKey.BUY_PLANS)),
     db: Session = Depends(get_db),
@@ -236,15 +237,20 @@ async def approvals_hub_shell(
     lazy body that loads the active tab's split view into ``#ap-hub-body``. ``?tab=``
     threads a deep-link / pushed tab URL; legacy 3-tab keys alias onto the new tabs.
     ``?select=<plan id>`` (the retired /v2/buy-plans/{id} deep-link redirect) threads
-    into the tab body so the SO/BP list preselects that plan's pane.
+    into the tab body so the SO/BP list preselects that plan's pane. ``?scope=`` (A10)
+    threads the same way, so a hard reload or a shared/bookmarked URL restores the
+    Mine/All the viewer had — the tab-switcher pills also carry it in their
+    ``hx-replace-url`` so navigating tabs never drops back to a bare ``?tab=`` URL.
     """
     active_tab = _resolve_tab(tab) or DEFAULT_TAB
+    scope = "mine" if scope == "mine" else "all"
     ctx = _base_ctx(request, user, "buy-plans")
     ctx.update(
         {
             "active_tab": active_tab,
             "tabs": [(key, _TAB_LABELS[key]) for key in _TABS],
             "badges": _viewer_badges(db, user),
+            "scope": scope,
             "select": select,
         }
     )
@@ -1667,16 +1673,24 @@ def _fmt_dt(dt: datetime | None) -> str:
 async def approvals_hub_export(
     tab: str,
     scope: str = "all",
+    q: str = "",
+    show_closed: bool = False,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
     """Stream one workspace list as a CSV download (attachment).
 
-    Same auth (require_user) and Mine/All scope as the tab list, reusing each tab's
-    exact read model so the download can never drift from what the console shows:
-      - sales-orders / buy-plans → the plan tracking list (buy_plan_tracking_rows);
-      - prepayments → the resolved audit feed (resolved_rows_for_gate);
-      - purchase-orders → the resolved PO decision feed (build_po_queue_view.history).
+    Same auth (require_user), Mine/All scope, search, and live/closed filter as the
+    tab list, reusing each tab's exact read model so the download can never drift from
+    what the console shows (A6 — export honesty):
+      - sales-orders / buy-plans → the plan tracking list (buy_plan_tracking_rows),
+        unfiltered by q/show_closed (unchanged);
+      - prepayments / purchase-orders, ``show_closed=false`` (default) → the SAME live
+        row builders the list renders (``_prepayment_rows`` / ``_po_rows``) — a manager
+        who exports without opening Closed gets the open work in front of them, not a
+        surprise history dump;
+      - prepayments / purchase-orders, ``show_closed=true`` → the resolved audit feed
+        (resolved_rows_for_gate / build_po_queue_view.history), unchanged.
     Legacy 3-tab keys alias; anything else 404s.
     """
     resolved = _resolve_tab(tab)
@@ -1691,6 +1705,22 @@ async def approvals_hub_export(
             for r in buy_plan_tracking_rows(db, user, scope=scope)
         )
         return stream_csv(f"approvals_sales_orders_{scope}.csv", header, rows)
+
+    if resolved == "prepayments" and not show_closed:
+        header = ["Prepayment", "Title", "Detail", "Status", "Amount", "PO Number"]
+        rows = (
+            [r.key, r.title, r.subtitle, r.status_label, r.amount, r.copy_number]
+            for r in _prepayment_rows(db, user, q=q, scope=scope, show_closed=False)
+        )
+        return stream_csv(f"approvals_prepayments_{scope}.csv", header, rows)
+
+    if resolved == "purchase-orders" and not show_closed:
+        header = ["Line", "Title", "Detail", "Status", "Amount", "PO Number"]
+        rows = (
+            [r.key, r.title, r.subtitle, r.status_label, r.amount, r.copy_number]
+            for r in _po_rows(db, user, q=q, scope=scope, show_closed=False)
+        )
+        return stream_csv(f"approvals_purchase_orders_{scope}.csv", header, rows)
 
     if resolved == "prepayments":
         header = [

@@ -19,7 +19,10 @@
 {% from "htmx/partials/shared/_macros.html" import copy_chip, age_chip %}
 
 {# Badge tone keyed on the RAW backend status; text is the DISPLAY label (spec §5
-   vocabulary — e.g. pending_verify renders "Pending approval"). #}
+   vocabulary — e.g. pending_verify renders "Pending approval"). A3: 'approved' here is
+   prepay_status=approved — signed off but NOT wired yet, so it gets the amber "still
+   open work" tone, never the emerald "done" tone; this status value is Prepayment-only
+   (Prepayment.status), no other tab's row status collides with it. #}
 {% set _STATUS_TONES = {
   'draft': 'bg-slate-50 text-slate-500 border-slate-200',
   'pending': 'bg-amber-50 text-amber-600 border-amber-200',
@@ -34,14 +37,19 @@
   'issue': 'bg-rose-50 text-rose-500 border-rose-200',
   'resourcing': 'bg-orange-50 text-orange-600 border-orange-200',
   'requested': 'bg-amber-50 text-amber-600 border-amber-200',
-  'approved': 'bg-emerald-50 text-emerald-600 border-emerald-200',
+  'approved': 'bg-amber-50 text-amber-600 border-amber-200',
   'paid': 'bg-emerald-50 text-emerald-700 border-emerald-300',
   'void': 'bg-gray-50 text-gray-400 border-gray-200',
   'rejected': 'bg-rose-50 text-rose-500 border-rose-200',
   'expired': 'bg-gray-50 text-gray-400 border-gray-200'
 } %}
+{# Label overrides paired with the tone map above — same A3 case: the default
+   capitalize()'d "Approved" reads as done, so spell out what's actually pending. #}
+{% set _STATUS_LABEL_OVERRIDES = {
+  'approved': 'Approved — awaiting wire'
+} %}
 {% macro aw_badge(row) -%}
-<span class="badge {{ _STATUS_TONES.get(row.status, 'bg-gray-50 text-gray-600 border-gray-200') }}">{{ row.status_label }}</span>
+<span class="badge {{ _STATUS_TONES.get(row.status, 'bg-gray-50 text-gray-600 border-gray-200') }}">{{ _STATUS_LABEL_OVERRIDES.get(row.status, row.status_label) }}</span>
 {%- endmacro %}
 
 {# ── Filters — every control targets #aw-list EXPLICITLY (never inherit). #}
@@ -87,9 +95,14 @@
     New buy plan
   </a>
   {% endif %}
-  {# Export CSV — a REAL browser download (hx-boost=false opts out of nav-boost). #}
-  <a hx-boost="false" href="/v2/partials/approvals/{{ tab }}/export?scope={{ scope }}"
-     class="btn-secondary btn-sm flex-shrink-0 whitespace-nowrap" title="Download this list as a CSV file">Export CSV</a>
+  {# Export CSV — a REAL browser download (hx-boost=false opts out of nav-boost). A6:
+     q/show_closed ride along so the CSV can never drift from what's on screen — Live
+     streams the same live rows the list renders, Closed streams the resolved history;
+     the tooltip says which one this click downloads. #}
+  <a hx-boost="false"
+     href="/v2/partials/approvals/{{ tab }}/export?scope={{ scope }}&show_closed={{ 'true' if show_closed else 'false' }}{% if q %}&q={{ q|urlencode }}{% endif %}"
+     class="btn-secondary btn-sm flex-shrink-0 whitespace-nowrap"
+     title="{{ 'Download the resolved/closed history shown below as a CSV file' if show_closed else 'Download the live rows shown below as a CSV file' }}">Export CSV</a>
 </form>
 
 {# Row wrapper is a role="button" DIV, not a <button>: the copy chip inside it is a
