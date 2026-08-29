@@ -423,6 +423,78 @@ jobs:
           cache-from: type=gha,scope=tooling-image
           cache-to: type=gha,mode=max,scope=tooling-image
 
+  e2e-playwright:
+    # Task 2 (2026-08-29 ci-drops): the 157-test TS Playwright E2E suite
+    # (e2e/*.spec.ts) previously only ran nightly on the author's host via
+    # cron — this job runs it per-PR instead. No db/redis services: the
+    # webServer playwright.config.ts starts runs with TESTING=1,
+    # DATABASE_URL=sqlite:// (in-memory) and CACHE_BACKEND=none, so the whole
+    # job is self-contained.
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install system dependencies
+        # app import pulls in WeasyPrint (PDF) — its shared libs must be
+        # present or the app fails to boot before a single test runs.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 \
+            libffi-dev shared-mime-info
+
+      - name: Install Python dependencies
+        # Prod lock only — the webServer runs the real app via uvicorn, not
+        # pytest, so the dev/test toolchain isn't needed here.
+        run: pip install -r requirements.txt
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Frontend build
+        run: npm run build
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright E2E suite
+        # Explicit project list excludes `visual`: its baseline screenshots
+        # were committed from the author's Linux host and ubuntu-latest's
+        # font rendering differs enough to false-fail pixel comparisons that
+        # have nothing to do with a real regression. `visual` still runs
+        # nightly via the author's host cron and locally via `npm run
+        # test:visual`.
+        run: |
+          npx playwright test \
+            --project=api --project=auth --project=smoke \
+            --project=data-validation --project=accessibility \
+            --project=dead-ends --project=workflows \
+            --project=materials-ui --project=sales-hub-ui
+
+      - name: Upload Playwright failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          retention-days: 14
+          path: |
+            test-results/
+            playwright-report/
+
   postgres-paths:
     # PG-only code paths — pg_trgm similarity(), the FTS `search_vector @@
     # plainto_tsquery` ranking, jsonb_each aggregation — CANNOT run on the
