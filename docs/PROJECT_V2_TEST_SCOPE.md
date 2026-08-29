@@ -243,7 +243,7 @@ Tabs (each loads via `/v2/partials/requisitions/{id}/tab/{tab}`):
 ## 8. Customers / CRM `/v2/customers`, `/v2/crm`
 
 - CRUD companies, sites, contacts.
-- Enrichment: Apollo + Explorium + Claude analysis → `enrichment_queue` review queue.
+- Enrichment: Apollo + Explorium + Claude analysis → applied directly to company/vendor records (the `enrichment_queue` review queue was dropped by migration 217).
 - Import CSV/Excel.
 - Customer detail `/v2/customers/{id}`: purchase history, quotes, open reqs, proactive matches, contacts.
 - Merge duplicates (`company_merge` service).
