@@ -47,7 +47,6 @@ def _list_with_line(db_session: Session, owner: User, company: Company, status: 
         company_id=company.id,
         owner_id=owner.id,
         status=status,
-        total_line_items=1,
         created_at=datetime.now(UTC),
     )
     db_session.add(el)

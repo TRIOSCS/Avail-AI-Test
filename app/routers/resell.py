@@ -1602,7 +1602,7 @@ async def resell_add_line(
 
 # ── Draft editing (finding #14 / D4) — all DRAFT-only + owner-only, thin over the
 #    service guards (404 → 403 → 409). A draft has no offers/mirror, so these are
-#    side-effect-free except total_line_items. ──────────────────────────────────
+#    side-effect-free. ──────────────────────────────────────────────────────────
 
 
 @router.get("/v2/partials/resell/{list_id}/lines/{line_id}/edit-form", response_class=HTMLResponse)

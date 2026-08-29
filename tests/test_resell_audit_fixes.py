@@ -251,13 +251,10 @@ class TestL3ConfirmImportRevalidation:
         assert db_session.query(ExcessLineItem).filter_by(excess_list_id=draft_list.id).count() == 0
 
     def test_valid_rows_still_import(self, db_session, draft_list, owner):
-        """The legitimate path is unaffected — valid rows import and bump the
-        counter."""
+        """The legitimate path is unaffected — valid rows import."""
         rows = [{"part_number": "A1", "quantity": 10}, {"part_number": "B2", "quantity": 20, "condition": "Used"}]
         result = excess_service.confirm_import(db_session, draft_list.id, owner, rows)
         assert result["imported"] == 2
-        db_session.refresh(draft_list)
-        assert draft_list.total_line_items == 2
 
 
 # ═══════════════════════════════════════════════════════════════════════

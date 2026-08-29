@@ -709,6 +709,10 @@ Single-file services worth flagging individually (not grouped under a shared pac
   expensive full chain-replay (`downgrade base → upgrade head` over all
   migrations, needs `ALEMBIC_ALLOW_CASCADE`) runs **nightly** via the `schedule`
   trigger as the `migration-full-cycle` job, not on every PR (HIGH-DEVOPS-7).
+  The `e2e-playwright` job also runs per-PR: the TS Playwright suite against a
+  self-contained `TESTING=1` sqlite `webServer` (no db/redis services), chromium
+  only, `visual` project excluded (font-rendering drift on `ubuntu-latest`) —
+  `visual` and the full suite still run nightly via the author's host cron.
 - **Deploy (`deploy.sh`)** — the commit step stages with `git add -u`
   (tracked-file modifications/deletions only), never untracked files, so a stray
   secret/key/DB dump can't be swept into a deploy commit (CRIT-DEVOPS-2); brand-new

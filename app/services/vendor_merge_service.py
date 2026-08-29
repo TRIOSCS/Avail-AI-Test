@@ -29,7 +29,6 @@ def merge_vendor_cards(keep_id: int, remove_id: int, db: Session) -> dict:
     from ..models import (
         ActivityLog,
         BuyerVendorStats,
-        EnrichmentQueue,
         Offer,
         ProspectContact,
         StockListHash,
@@ -78,7 +77,6 @@ def merge_vendor_cards(keep_id: int, remove_id: int, db: Session) -> dict:
         (StockListHash, "vendor_card_id"),
         (BuyerVendorStats, "vendor_card_id"),
         (ActivityLog, "vendor_card_id"),
-        (EnrichmentQueue, "vendor_card_id"),
         (ProspectContact, "vendor_card_id"),
     ]
     reassigned = 0
@@ -113,10 +111,10 @@ def delete_vendor_cards(id_a: int, id_b: int, db: Session) -> dict:
     """Delete BOTH vendor cards in a dedup pair (neither is worth keeping).
 
     Soft references that merely *point at* the card and outlive it (offers, stock-list
-    hashes, activity log, prospect contacts, enrichment-queue rows) have their
-    ``vendor_card_id`` NULLed so the record survives unlinked, exactly as merge reassigns
-    FKs rather than cascading. Card-scoped children that are meaningless without the card
-    and are declared NOT-NULL ``ondelete="CASCADE"`` at the DB level (vendor contacts,
+    hashes, activity log, prospect contacts) have their ``vendor_card_id`` NULLed so the
+    record survives unlinked, exactly as merge reassigns FKs rather than cascading.
+    Card-scoped children that are meaningless without the card and are declared NOT-NULL
+    ``ondelete="CASCADE"`` at the DB level (vendor contacts,
     reviews, metrics snapshots, buyer-vendor stats) are NOT NULLed — that would raise a
     NotNullViolation on Postgres — they cascade-delete with the card via ``db.delete(card)``
     (DB ``ON DELETE CASCADE`` + the ORM ``cascade="all, delete-orphan"`` on
@@ -131,7 +129,6 @@ def delete_vendor_cards(id_a: int, id_b: int, db: Session) -> dict:
     """
     from ..models import (
         ActivityLog,
-        EnrichmentQueue,
         Offer,
         ProspectContact,
         StockListHash,
@@ -155,7 +152,6 @@ def delete_vendor_cards(id_a: int, id_b: int, db: Session) -> dict:
         (StockListHash, "vendor_card_id"),
         (ActivityLog, "vendor_card_id"),
         (ProspectContact, "vendor_card_id"),
-        (EnrichmentQueue, "vendor_card_id"),  # nullable column despite DB ondelete=CASCADE
     ]
     detached = 0
     for model, col in detach_tables:

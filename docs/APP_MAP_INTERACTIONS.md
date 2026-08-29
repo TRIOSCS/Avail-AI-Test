@@ -2319,12 +2319,14 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     |     [data-resell-detail-root], not just Lines, so the header Post button appears once a
     |     fresh draft has lines — RS-5)
     +-- DRAFT-EDIT set (finding #14 / D4 — all DRAFT-only + owner-only, guarded 404→403→409 in
-    |     the service; a draft has no offers/mirror so side-effect-free except total_line_items):
+    |     the service; a draft has no offers/mirror so these mutations are side-effect-free —
+    |     line counts are computed live [len(items) / a COUNT query], never maintained on a
+    |     column [migration 217, Decision J dropped `excess_lists.total_line_items`]):
     |        +-- PATCH  /api/resell/{id}/lines/{line_id}  (excess_service.update_line; re-validates
     |        |     quantity>0 → 400 [the model @validates 500s otherwise]; re-resolves the
     |        |     MaterialCard when MPN/manufacturer changes; re-renders detail)
-    |        +-- DELETE /api/resell/{id}/lines/{line_id}  (excess_service.delete_line; decrements
-    |        |     total_line_items; re-renders detail)
+    |        +-- DELETE /api/resell/{id}/lines/{line_id}  (excess_service.delete_line; re-renders
+    |        |     detail — line count is recomputed live, not decremented on a stored column)
     |        +-- PATCH  /api/resell/{id}                   (excess_service.update_excess_list;
     |        |     title/notes/company_id[re-validates exists] — customer_site_id is NOT a param
     |        |     [finding #40: no form carries it; the old unconditional assignment wiped a
@@ -4642,7 +4644,6 @@ enrichment_service.py (orchestrator)
     |
     +---> DB: UPSERT companies (domain, size, location, enrichment_source)
     +---> DB: UPSERT vendor_cards (domain, industry)
-    +---> DB: INSERT enrichment_queue (proposed changes for review)
     +---> DB: INSERT enrichment_jobs (batch tracking)
 ```
 

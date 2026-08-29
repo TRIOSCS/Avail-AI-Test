@@ -82,7 +82,6 @@ def priced_list(db_session: Session, owner: User, seller_company: Company) -> Ex
         company_id=seller_company.id,
         owner_id=owner.id,
         status=ExcessListStatus.COLLECTING,
-        total_line_items=2,
         created_at=datetime.now(UTC),
     )
     db_session.add(el)

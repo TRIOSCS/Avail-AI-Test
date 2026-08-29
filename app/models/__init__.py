@@ -52,7 +52,6 @@ from .email_intelligence import EmailIntelligence  # noqa: F401
 from .enrichment import (
     EmailSignatureExtract,  # noqa: F401
     EnrichmentJob,  # noqa: F401
-    EnrichmentQueue,  # noqa: F401
     ProspectContact,  # noqa: F401
 )
 

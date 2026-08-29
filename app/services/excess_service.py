@@ -335,7 +335,7 @@ def confirm_import(db: Session, list_id: int, user: User, rows: list[dict]) -> d
 
     Returns {imported, skipped}.
     """
-    excess_list = _require_owned_draft(db, list_id, user)
+    _require_owned_draft(db, list_id, user)  # 404 -> 403 -> 409
     imported = 0
     skipped = 0
     for raw in rows:
@@ -359,7 +359,6 @@ def confirm_import(db: Session, list_id: int, user: User, rows: list[dict]) -> d
         _resolve_line_material_card(db, item)
         imported += 1
     if imported > 0:
-        excess_list.total_line_items = (excess_list.total_line_items or 0) + imported
         _safe_commit(db, entity="excess line items")
     logger.info("Confirmed import of {} items into ExcessList id={} (skipped={})", imported, list_id, skipped)
     return {"imported": imported, "skipped": skipped}
@@ -1677,8 +1676,7 @@ def save_offer_reference(db: Session, *, offer_id: int, sales_order_number: str)
 #
 # Before a list is posted it is a private working draft the owner may correct in place;
 # once posted the lines lock. All four editors below are DRAFT-ONLY + owner-only. A draft
-# carries no offers and no Sighting mirror, so these are side-effect-free except the
-# ``total_line_items`` counter (kept in step with the actual line rows on delete).
+# carries no offers and no Sighting mirror, so these are side-effect-free.
 
 # The honest 409 the draft-lock guards raise (replaces the old, false "revise as a new
 # version" copy — there is no versioned-revise flow; the real path is close + re-create).
@@ -1721,8 +1719,8 @@ def add_line(
     (400 — otherwise the ``@validates('quantity')`` ValueError surfaces as a 500) and a
     non-blank part number AFTER stripping (400 — whitespace-only was stored verbatim,
     with no normalized key, mirroring ``_parse_import_row``'s blank-part rejection).
-    Resolves the MaterialCard link, bumps ``total_line_items``, commits via
-    :func:`_safe_commit` (IntegrityError → 409).
+    Resolves the MaterialCard link, commits via :func:`_safe_commit` (IntegrityError →
+    409).
     """
     el = _require_owned_draft(db, list_id, owner)
     pn = (part_number or "").strip()
@@ -1745,7 +1743,6 @@ def add_line(
     )
     db.add(item)
     _resolve_line_material_card(db, item)
-    el.total_line_items = (el.total_line_items or 0) + 1
     _safe_commit(db, entity="excess line item")
     db.refresh(el)
     logger.info("Added ExcessLineItem to draft list={} by owner={} (part={})", list_id, owner.id, pn)
@@ -1756,15 +1753,13 @@ def delete_line(db: Session, list_id: int, line_id: int, owner: User) -> ExcessL
     """Delete one line from a draft list (owner-only, draft-only); returns the list.
 
     404 if the line does not exist or belongs to a different list (never touch another
-    list's line). Decrements ``total_line_items`` (floored at 0) so the counter stays in
-    step with the actual rows. Commits; returns the refreshed list for the detail re-render.
+    list's line). Commits; returns the refreshed list for the detail re-render.
     """
     el = _require_owned_draft(db, list_id, owner)
     line = db.get(ExcessLineItem, line_id)
     if line is None or line.excess_list_id != el.id:
         raise HTTPException(404, f"Line {line_id} not found on list {list_id}")
     db.delete(line)
-    el.total_line_items = max((el.total_line_items or 0) - 1, 0)
     _safe_commit(db, entity="excess line delete")
     db.refresh(el)
     logger.info("Deleted ExcessLineItem id={} from draft list={} by owner={}", line_id, list_id, owner.id)

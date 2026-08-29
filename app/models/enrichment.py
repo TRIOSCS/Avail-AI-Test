@@ -1,4 +1,4 @@
-"""Enrichment models — jobs, queue, signatures, prospects.
+"""Enrichment models — jobs, signatures, prospects.
 
 (The `intel_cache` table is raw-SQL only and intentionally has no ORM model — see
 the note at the bottom of this module.)
@@ -47,49 +47,6 @@ class EnrichmentJob(Base):
         Index("ix_ej_status", "status"),
         Index("ix_ej_type_status", "job_type", "status"),
         Index("ix_ej_started_by", "started_by_id"),
-    )
-
-
-class EnrichmentQueue(Base):
-    """Pending enrichment results for review or auto-apply."""
-
-    __tablename__ = "enrichment_queue"
-    id = Column(Integer, primary_key=True)
-
-    # Polymorphic target
-    vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id", ondelete="CASCADE"))
-    company_id = Column(Integer, ForeignKey("companies.id", ondelete="CASCADE"))
-    vendor_contact_id = Column(Integer, ForeignKey("vendor_contacts.id", ondelete="CASCADE"))
-
-    enrichment_type = Column(String(50), nullable=False)
-    field_name = Column(String(100), nullable=False)
-    current_value = Column(Text)
-    proposed_value = Column(Text, nullable=False)
-
-    confidence = Column(Float, nullable=False, default=0.5)
-    source = Column(String(50), nullable=False)
-
-    status = Column(String(20), default="pending")
-    batch_job_id = Column(Integer, ForeignKey("enrichment_jobs.id", ondelete="SET NULL"))
-
-    reviewed_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
-    reviewed_at = Column(UTCDateTime)
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(UTC))
-
-    vendor_card = relationship("VendorCard", foreign_keys=[vendor_card_id])
-    company = relationship("Company", foreign_keys=[company_id])
-    vendor_contact = relationship("VendorContact", foreign_keys=[vendor_contact_id])
-    batch_job = relationship("EnrichmentJob", foreign_keys=[batch_job_id])
-    reviewed_by = relationship("User", foreign_keys=[reviewed_by_id])
-
-    __table_args__ = (
-        Index("ix_eq_status", "status"),
-        Index("ix_eq_vendor", "vendor_card_id"),
-        Index("ix_eq_company", "company_id"),
-        Index("ix_eq_batch", "batch_job_id"),
-        Index("ix_eq_status_created", "status", "created_at"),
-        Index("ix_eq_status_source", "status", "source"),
-        Index("ix_eq_reviewed_by", "reviewed_by_id"),
     )
 
 

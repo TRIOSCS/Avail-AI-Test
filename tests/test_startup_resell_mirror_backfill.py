@@ -47,7 +47,6 @@ def _published_list(db: Session, owner: User, company: Company, *, title: str) -
         company_id=company.id,
         owner_id=owner.id,
         status=ExcessListStatus.DRAFT,
-        total_line_items=1,
     )
     db.add(el)
     db.flush()

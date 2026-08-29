@@ -69,7 +69,6 @@ class ExcessList(Base):
     version = Column(Integer, nullable=False, default=1, server_default="1")
     source_filename = Column(String(255), nullable=True)
     notes = Column(Text, nullable=True)
-    total_line_items = Column(Integer, default=0)
     # Posting window (phase-5 D1): open_at is stamped on publish. close_at is the OPTIONAL
     # owner-set "Offers close by" deadline — settable at create/update while the list is a
     # draft (so a draft MAY carry close_at). Publish preserves a still-FUTURE close_at and

@@ -4,23 +4,32 @@
 // Depends on: app/main.py (FastAPI app)
 
 import { defineConfig } from '@playwright/test';
+import path from 'path';
 
 const port = parseInt(process.env.PW_PORT || '8787', 10);
+const isCI = !!process.env.CI;
+
+// Repo root — was hardcoded to /root/availai, which only exists on the
+// author's machine and breaks the webServer command on GitHub-hosted
+// runners (and any other worktree/checkout path). __dirname resolves to
+// wherever this config file actually lives.
+const repoRoot = __dirname;
 
 export default defineConfig({
   testDir: './e2e',
   timeout: 30000,
   retries: 0,
   workers: 1,
-  reporter: 'list',
+  reporter: isCI ? [['list'], ['html', { open: 'never' }]] : 'list',
   use: {
     baseURL: `http://127.0.0.1:${port}`,
     extraHTTPHeaders: {
       'Accept': 'application/json',
     },
+    trace: 'retain-on-failure',
   },
   webServer: {
-    command: `TESTING=1 DATABASE_URL=sqlite:// REDIS_URL="" CACHE_BACKEND=none PYTHONPATH=/root/availai python3 -m uvicorn app.main:app --host 127.0.0.1 --port ${port}`,
+    command: `TESTING=1 DATABASE_URL=sqlite:// REDIS_URL="" CACHE_BACKEND=none PYTHONPATH=${path.resolve(repoRoot)} python3 -m uvicorn app.main:app --host 127.0.0.1 --port ${port}`,
     port,
     timeout: 15000,
     reuseExistingServer: false,
@@ -34,7 +43,7 @@ export default defineConfig({
     { name: 'visual', testMatch: /visual\.spec\.ts$/ },
     { name: 'dead-ends', testMatch: /dead-ends\.spec\.ts$/ },
     { name: 'workflows', testMatch: /workflows\.spec\.ts$/ },
-    { name: 'requisitions2-resize', testMatch: /requisitions2-resize\.spec\.ts$/ },
-    { name: 'requisitions2-visuals', testMatch: /requisitions2-visuals\.spec\.ts$/ },
+    { name: 'materials-ui', testMatch: /materials-ui\.spec\.ts$/ },
+    { name: 'sales-hub-ui', testMatch: /sales-hub-ui\.spec\.ts$/ },
   ],
 });

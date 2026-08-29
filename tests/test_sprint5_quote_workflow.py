@@ -8,12 +8,14 @@ Depends on: conftest.py fixtures, app.routers.htmx_views
 """
 
 from datetime import UTC, date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.models import Offer, Quote, Requisition, User
+from app.utils.timezones import DEFAULT_DISPLAY_TZ
 
 # ── Fixtures ─────────────────────────────────────────────────────────
 
@@ -59,14 +61,20 @@ class TestQuotePreview:
         assert resp.status_code == 404
 
     def test_preview_shows_valid_until(self, client: TestClient, draft_quote: Quote):
-        # draft_quote has no sent_at → anchor is today; validity_days defaults to 7.
+        # draft_quote has no sent_at → anchor is "now" (UTC); validity_days defaults to 7.
+        # The preview renders _build_quote_email_html's `expires`, a UTC instant that
+        # quote_send.format_localdate() displays in DEFAULT_DISPLAY_TZ (America/New_York)
+        # — NOT the container's local/UTC calendar date (date.today() drifted a day behind
+        # whenever the suite ran ~00:00-04:00 UTC, since that's still "yesterday" in EDT;
+        # 2026-08-29 flake post-mortem). Mirror the service's exact computation instead.
         resp = client.post(
             f"/v2/partials/quotes/{draft_quote.id}/preview",
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
         assert "Valid Until" in resp.text
-        expected = (date.today() + timedelta(days=7)).strftime("%B %d, %Y")
+        expires = datetime.now(UTC) + timedelta(days=7)
+        expected = expires.astimezone(ZoneInfo(DEFAULT_DISPLAY_TZ)).strftime("%B %d, %Y")
         assert expected in resp.text
 
 

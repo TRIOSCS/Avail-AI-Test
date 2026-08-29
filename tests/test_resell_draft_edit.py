@@ -4,7 +4,7 @@ Before a list is posted it is a private working draft; the owner must be able to
 it in place — edit/delete a line, edit the list header, or delete the whole draft — instead
 of the module's old dead-end (post-then-locked with no undo). All four mutations are
 DRAFT-ONLY and owner-only (409 once posted, 403 for a non-owner, 404 across lists), and a
-draft carries no offers/mirror so they are side-effect-free except ``total_line_items``.
+draft carries no offers/mirror so they are side-effect-free.
 
 Covers the four services (delete_line / update_line / update_excess_list /
 delete_excess_list), their routes, the re-validated ``quantity > 0`` on the edit path
@@ -77,9 +77,8 @@ def _lines(db: Session, el: ExcessList) -> list[ExcessLineItem]:
 
 
 class TestDeleteLine:
-    def test_deletes_line_and_decrements_counter(self, db_session, owner, company):
+    def test_deletes_line(self, db_session, owner, company):
         el = _draft_with_lines(db_session, owner, company)
-        assert el.total_line_items == 2
         line = _lines(db_session, el)[0]
 
         excess_service.delete_line(db_session, el.id, line.id, owner)
@@ -87,8 +86,6 @@ class TestDeleteLine:
         remaining = _lines(db_session, el)
         assert len(remaining) == 1
         assert line.id not in {li.id for li in remaining}
-        db_session.refresh(el)
-        assert el.total_line_items == 1
 
     def test_non_owner_403(self, db_session, owner, outsider, company):
         el = _draft_with_lines(db_session, owner, company)

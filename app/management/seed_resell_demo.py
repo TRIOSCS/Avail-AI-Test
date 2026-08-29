@@ -233,7 +233,6 @@ def _build_collecting(db: Session, company: Company, owner: User, broker: User) 
     if created:
         for mpn, mfr in _BULK_MPNS:
             _add_line(db, el, mpn=mpn, mfr=mfr, qty=50 + (hash(mpn) % 950))
-        el.total_line_items = len(_BULK_MPNS)  # type: ignore[assignment]  # legacy Column-model ORM noise
         db.commit()
         # Mirror so the Sighting live-mirror is exercised (and matchers see supply).
         excess_mirror.sync_list_mirror(db, el)
@@ -312,7 +311,6 @@ def _build_oneoff(db: Session, company: Company, owner: User, broker: User) -> N
     )
     if created:
         _add_line(db, el, mpn="DELL-412-AAVE", mfr="Dell", qty=24, condition="Refurbished")
-        el.total_line_items = 1  # type: ignore[assignment]  # legacy Column-model ORM noise
         db.commit()
         excess_mirror.sync_list_mirror(db, el)
         db.commit()
@@ -374,7 +372,6 @@ def _build_awarded(db: Session, company: Company, owner: User, broker: User) -> 
     if created:
         for mpn, mfr in _BULK_MPNS[:6]:
             _add_line(db, el, mpn=mpn, mfr=mfr, qty=200)
-        el.total_line_items = 6  # type: ignore[assignment]  # legacy Column-model ORM noise
         db.commit()
         excess_mirror.sync_list_mirror(db, el)
         db.commit()

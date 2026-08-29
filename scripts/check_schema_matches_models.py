@@ -31,9 +31,10 @@ def _include_object(obj, name, type_, reflected, compare_to) -> bool:
     """CHECK constraints are IN SCOPE (the 08-20 follow-up to the alembic-1.19 fix).
 
     Every coherent constraint is now declared on its model, so autogenerate compares
-    them like everything else; the one carve-out is the enumerated LEGACY family below
-    (see _LEGACY_CHECKS_PENDING_DROP), handled in the allowlist — never here, so a
-    genuinely new undeclared CHECK still fails the gate.
+    them like everything else. The legacy NOT-VALID chk_* family from the 001-era squash
+    (superseded by the modern ck_* constraints) was dropped for real by migration 217
+    (Decision L), so there is no more carve-out here — a genuinely new undeclared CHECK
+    fails the gate.
     """
     return True
 
@@ -61,53 +62,42 @@ def _include_object(obj, name, type_, reflected, compare_to) -> bool:
 # 2026-07-02 (#464 finish): buy_plans (V1), notification_engagement and self_heal_log
 # are dropped by migration 174 (IF EXISTS — live staging already lacked them), so their
 # entries were removed; if a future DB somehow resurrects them, the gate SHOULD flag it.
-# Still grandfathered:
+# 2026-08-29 (migration 217, Decision K): enrichment_credit_usage and sync_logs — both
+# orphaned (0 rows, no remaining code references since #751) — are DROPPED (IF EXISTS)
+# rather than grandfathered, so their entries were removed too. Still grandfathered:
 #   - _sp1_desc_backup — 700 live rows; migration 091's downgrade restore path needs it.
-#   - enrichment_credit_usage — exists but EMPTY and referenced only by migration 030;
-#     the old "billing telemetry, never drop" rationale looks moot, but dropping needs
-#     an explicit product decision — keep grandfathered until the user approves.
 #   - intel_cache — ACTIVE raw-SQL-only table (read/written via app/cache/intel_cache.py:
 #     enrichment result cache, email-mining usage counters, Clay OAuth state store,
 #     rate-limit counters). The `IntelCache` ORM class had zero ORM consumers and was
 #     removed in #751 (see the NOTE in app/models/enrichment.py); the table itself is
 #     load-bearing and must NEVER be dropped, so it is intentionally model-less.
-#   - sync_logs — orphaned by #751 (the `SyncLog` model + /api/admin/sync-logs endpoint
-#     were removed as dead code; 0 rows on staging, no remaining code references). A clean
-#     drop-via-migration is a valid follow-up but is deferred to explicit user approval,
-#     same as enrichment_credit_usage above.
 _GRANDFATHERED_REMOVE_TABLES = {
     "_sp1_desc_backup",
-    "enrichment_credit_usage",
     "intel_cache",
-    "sync_logs",
 }
 
 # Indexes that live in the DB (raw-DDL) but the model's metadata never declares, so
 # autogenerate wants to drop them. Migration 172 / #464 reconciled the bulk of these:
 # ~35 pg_trgm GIN, GIN-on-JSONB-tag-array, FTS-tsvector GIN, plain-btree-FK, and simple
 # partial indexes were declared directly on the ORM models (so autogenerate now sees
-# them), and the duplicate ``ix_requisitions_company_id`` was dropped. The two groups
-# below are the ones that deliberately stay grandfathered:
+# them), and the duplicate ``ix_requisitions_company_id`` was dropped. Migration 217
+# (Decision K) then dropped ``ix_ecu_provider_month`` and ``ix_sync_source_time`` with
+# their orphan tables, so those entries were removed too. The two groups below are the
+# ones that deliberately stay grandfathered:
 #
-#   1. DANGER / orphan-table indexes — they belong to tables held in
-#      ``_GRANDFATHERED_REMOVE_TABLES`` (live-data ``buy_plans`` /
-#      ``enrichment_credit_usage`` we must never drop, plus orphan
-#      ``notification_engagement`` / ``self_heal_log``). The index can't be reconciled
-#      without first reconciling its table, which is out of scope.
+#   1. DANGER / orphan-table index — belongs to ``intel_cache`` (see
+#      ``_GRANDFATHERED_REMOVE_TABLES``), the one orphan table we must never drop. The
+#      index can't be reconciled without first reconciling its table, which is out of
+#      scope.
 #   2. PostgreSQL-only expression / complex-partial indexes — their definitions use
 #      PG-specific SQL (``lower(col::text)``, ``TRIM(BOTH FROM ...)``, ``DESC NULLS LAST``,
 #      ``<> ALL (ARRAY[...])`` predicates) that can't be expressed on the model in a way
 #      that stays valid for the SQLite test engine, so they remain intentional raw-DDL.
 _GRANDFATHERED_REMOVE_INDEXES = {
-    # 1. Orphan-table index (see _GRANDFATHERED_REMOVE_TABLES). The buy_plans /
-    #    notification_engagement / self_heal_log index entries left with their
-    #    tables (2026-07-02, #464 finish — tables no longer exist on the rebuilt DB).
-    "ix_ecu_provider_month",
-    #    intel_cache / sync_logs indexes — belong to the model-less tables grandfathered
-    #    above (#751). They can't be reconciled without first re-mapping their tables,
-    #    which we deliberately don't (intel_cache is raw-SQL-only; sync_logs is orphaned).
+    # 1. Orphan-table index (see _GRANDFATHERED_REMOVE_TABLES) — belongs to the
+    #    model-less intel_cache table grandfathered above (#751); can't be reconciled
+    #    without first re-mapping the table, which we deliberately don't (raw-SQL-only).
     "ix_intel_cache_cache_key",
-    "ix_sync_source_time",
     # 2. PostgreSQL-only expression / complex-partial indexes (intentional raw-DDL).
     "ix_mc_cat_order_live",
     "ix_mc_category_lower",
@@ -181,34 +171,6 @@ def _add_constraint_key(diff: tuple) -> tuple[str | None, tuple[str, ...]]:
     return table, tuple(sorted(col.name for col in constraint.columns))
 
 
-# Legacy NOT-VALID CHECK family from the 001-era squash: superseded by (or in
-# direct conflict with) the modern named ck_* constraints the models now declare —
-# e.g. chk_offer_price demands unit_price > 0 while the app deliberately supports
-# zero-price free-sample offers, and the production DB (schema-stamped before the
-# squash) has NONE of these. Declaring them on models would re-impose abandoned
-# semantics; dropping them from the migration chain is a pending owner decision.
-# Until then they are enumerated here BY NAME so fresh-DB-only legacy noise is
-# allowed while any new undeclared CHECK still fails the gate.
-_LEGACY_CHECKS_PENDING_DROP = {
-    "chk_offer_condition",
-    "chk_offer_moq",
-    "chk_offer_packaging",
-    "chk_offer_price",
-    "chk_offer_qty",
-    "chk_req_condition",
-    "chk_req_packaging",
-    "chk_req_target_price",
-    "chk_req_target_qty",
-    "chk_sight_condition",
-    "chk_sight_confidence",
-    "chk_sight_lead_time",
-    "chk_sight_moq",
-    "chk_sight_packaging",
-    "chk_sight_price",
-    "chk_sight_qty",
-    "chk_sight_score",
-}
-
 # Each entry is a (diff_kind, predicate) tuple. The predicate gets the raw diff
 # tuple and returns True if the entry should be dropped from the result. Keep
 # every entry commented with the underlying alembic/sqlalchemy quirk or the
@@ -232,9 +194,6 @@ _ALLOWLIST: list[tuple[str, Callable[..., bool]]] = [
     ("add_constraint", lambda d: _add_constraint_key(d) in _GRANDFATHERED_ADD_CONSTRAINTS),
     ("modify_type", lambda d: len(d) >= 4 and (d[2], d[3]) in _GRANDFATHERED_MODIFY_TYPE),
     ("modify_comment", lambda d: len(d) >= 4 and (d[2], d[3]) in _GRANDFATHERED_MODIFY_COMMENT),
-    # Legacy 001-era CHECKs (see _LEGACY_CHECKS_PENDING_DROP above) — fresh DBs have
-    # them, models deliberately do not.
-    ("remove_constraint", lambda d: getattr(d[1], "name", None) in _LEGACY_CHECKS_PENDING_DROP),
 ]
 
 

@@ -199,8 +199,9 @@ def select_batch(db: Session, config: EnrichmentWorkerConfig) -> list:
     """
     from app.models import MaterialCard
 
-    # NOTE: eligibility is read from material_cards.enrichment_status — NOT the (unused)
-    # enrichment_queue table. material_cards is the single source of enrichment state.
+    # NOTE: eligibility is read from material_cards.enrichment_status. material_cards is
+    # the single source of enrichment state (the dead enrichment_queue table was dropped
+    # by migration 217).
     now = datetime.now(UTC)
     retry_cutoff = now - timedelta(hours=config.not_found_retry_hours)
 

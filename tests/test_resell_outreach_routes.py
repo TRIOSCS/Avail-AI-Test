@@ -77,7 +77,6 @@ def draft_list(db_session: Session, trader_user: User, test_company: Company) ->
         company_id=test_company.id,
         owner_id=trader_user.id,
         status=ExcessListStatus.DRAFT,
-        total_line_items=0,
         created_at=datetime.now(UTC),
     )
     db_session.add(el)
@@ -94,7 +93,6 @@ def posted_list(db_session: Session, trader_user: User, test_company: Company) -
         company_id=test_company.id,
         owner_id=trader_user.id,
         status=ExcessListStatus.COLLECTING,
-        total_line_items=1,
         created_at=datetime.now(UTC),
     )
     db_session.add(el)
@@ -284,7 +282,6 @@ def _customer_named_list(db_session, trader_user, test_company) -> ExcessList:
         company_id=test_company.id,
         owner_id=trader_user.id,
         status=ExcessListStatus.COLLECTING,
-        total_line_items=1,
         created_at=datetime.now(UTC),
     )
     db_session.add(el)
