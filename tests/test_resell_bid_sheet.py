@@ -53,7 +53,6 @@ def posted_list(db_session: Session, trader_user: User, test_company: Company) -
         company_id=test_company.id,
         owner_id=trader_user.id,
         status=ExcessListStatus.COLLECTING,
-        total_line_items=4,
         created_at=datetime.now(UTC),
     )
     db_session.add(el)
@@ -159,7 +158,6 @@ def test_bid_sheet_formula_injection_safe(client, db_session, trader_user, test_
         company_id=test_company.id,
         owner_id=trader_user.id,
         status=ExcessListStatus.OPEN,
-        total_line_items=1,
         created_at=datetime.now(UTC),
     )
     db_session.add(el)

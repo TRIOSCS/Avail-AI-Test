@@ -298,13 +298,15 @@ jobs:
         # ships. Uses INTEGRATION_REDIS_URL because conftest.py blanks REDIS_URL
         # for test isolation; -o addopts="" drops the suite-wide xdist/ignore opts.
         # Shard 0 only — this is a fixed, single-file integration check, not
-        # part of the sharded unit-test split.
+        # part of the sharded unit-test split. test_sse_broker_redis.py's
+        # two-instance test (two SSEBroker()s, one real Redis) is skipif-gated
+        # on this same var everywhere else, so it only actually runs here.
         if: matrix.shard == 0
         env:
           INTEGRATION_REDIS_URL: redis://localhost:6379/0
           PYTHONPATH: ${{ github.workspace }}
         run: |
-          pytest tests/integration/test_redis_integration.py -v -o addopts=""
+          pytest tests/integration/test_redis_integration.py tests/test_sse_broker_redis.py -v -o addopts=""
 
       - name: Upload test results (shard ${{ matrix.shard }})
         if: always()
@@ -422,6 +424,78 @@ jobs:
           push: false
           cache-from: type=gha,scope=tooling-image
           cache-to: type=gha,mode=max,scope=tooling-image
+
+  e2e-playwright:
+    # Task 2 (2026-08-29 ci-drops): the 157-test TS Playwright E2E suite
+    # (e2e/*.spec.ts) previously only ran nightly on the author's host via
+    # cron — this job runs it per-PR instead. No db/redis services: the
+    # webServer playwright.config.ts starts runs with TESTING=1,
+    # DATABASE_URL=sqlite:// (in-memory) and CACHE_BACKEND=none, so the whole
+    # job is self-contained.
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install system dependencies
+        # app import pulls in WeasyPrint (PDF) — its shared libs must be
+        # present or the app fails to boot before a single test runs.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 \
+            libffi-dev shared-mime-info
+
+      - name: Install Python dependencies
+        # Prod lock only — the webServer runs the real app via uvicorn, not
+        # pytest, so the dev/test toolchain isn't needed here.
+        run: pip install -r requirements.txt
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Frontend build
+        run: npm run build
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright E2E suite
+        # Explicit project list excludes `visual`: its baseline screenshots
+        # were committed from the author's Linux host and ubuntu-latest's
+        # font rendering differs enough to false-fail pixel comparisons that
+        # have nothing to do with a real regression. `visual` still runs
+        # nightly via the author's host cron and locally via `npm run
+        # test:visual`.
+        run: |
+          npx playwright test \
+            --project=api --project=auth --project=smoke \
+            --project=data-validation --project=accessibility \
+            --project=dead-ends --project=workflows \
+            --project=materials-ui --project=sales-hub-ui
+
+      - name: Upload Playwright failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          retention-days: 14
+          path: |
+            test-results/
+            playwright-report/
 
   postgres-paths:
     # PG-only code paths — pg_trgm similarity(), the FTS `search_vector @@

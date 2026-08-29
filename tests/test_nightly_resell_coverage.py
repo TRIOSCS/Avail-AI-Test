@@ -141,7 +141,6 @@ def _make_list(db: Session, owner: User, company: Company, status: str = ExcessL
         company_id=company.id,
         owner_id=owner.id,
         status=status,
-        total_line_items=0,
         created_at=datetime.now(UTC),
     )
     db.add(el)
@@ -312,7 +311,6 @@ def _titled_list(db, owner, company, title, status=ExcessListStatus.COLLECTING):
         company_id=company.id,
         owner_id=owner.id,
         status=status,
-        total_line_items=0,
         created_at=datetime.now(UTC),
     )
     db.add(el)

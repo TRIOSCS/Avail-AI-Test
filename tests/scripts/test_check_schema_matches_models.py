@@ -72,24 +72,28 @@ def test_reconciled_add_constraints_now_surface():
 def test_reconciled_indexes_surface_but_intentional_ones_stay_grandfathered():
     """#464 (migration 172) declared the raw-DDL pg_trgm/GIN/btree/partial indexes on
     the models, so a ``remove_index`` for a reconciled name must now SURFACE as real
-    drift, while DANGER/orphan-table and PG-only expression indexes stay
-    grandfathered."""
+    drift, while the one remaining DANGER/orphan-table index and PG-only expression
+    indexes stay grandfathered."""
 
     class _Ix:
         def __init__(self, name):
             self.name = name
 
     reconciled = [("remove_index", _Ix("ix_companies_name_trgm"))]
-    # ix_buyplans_token left with its table (dropped by migration 174, #464 finish),
-    # so its remove_index must now surface too.
+    # ix_buyplans_token left with its table (dropped by migration 174, #464 finish);
+    # ix_ecu_provider_month left with enrichment_credit_usage (dropped by migration 217,
+    # Decision K) — both must now surface too.
     dropped_with_table = [("remove_index", _Ix("ix_buyplans_token"))]
-    orphan_table_index = [("remove_index", _Ix("ix_ecu_provider_month"))]
+    ecu_dropped_with_table = [("remove_index", _Ix("ix_ecu_provider_month"))]
+    # Still intentional: the sole remaining orphan-table index (intel_cache, which we
+    # never drop) + PG-only expression DDL.
+    orphan_table_index = [("remove_index", _Ix("ix_intel_cache_cache_key"))]
     pg_expression = [("remove_index", _Ix("ix_vendor_cards_domain_lower"))]
 
     # Reconciled (now model-declared) → no longer filtered → surfaces as drift.
     assert filter_allowlist(reconciled) == reconciled
     assert filter_allowlist(dropped_with_table) == dropped_with_table
-    # Still intentional: enrichment_credit_usage's index + PG-only expression DDL.
+    assert filter_allowlist(ecu_dropped_with_table) == ecu_dropped_with_table
     assert filter_allowlist(orphan_table_index) == []
     assert filter_allowlist(pg_expression) == []
 

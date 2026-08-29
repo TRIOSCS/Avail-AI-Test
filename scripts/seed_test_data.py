@@ -630,7 +630,6 @@ def seed_excess_lists(db, user, companies, sites):
             owner_id=user.id,
             title=ecfg["title"],
             status=ExcessListStatus.DRAFT.value,
-            total_line_items=3,
         )
         db.add(el)
         db.flush()

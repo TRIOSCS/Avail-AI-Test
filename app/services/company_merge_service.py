@@ -30,7 +30,7 @@ def merge_companies(keep_id: int, remove_id: int, db: Session) -> dict:
     Raises:
         ValueError if companies not found or same id.
     """
-    from ..models import ActivityLog, EnrichmentQueue, Requisition, Sighting
+    from ..models import ActivityLog, Requisition, Sighting
 
     keep = db.get(Company, keep_id)
     remove = db.get(Company, remove_id)
@@ -151,7 +151,6 @@ def merge_companies(keep_id: int, remove_id: int, db: Session) -> dict:
     reassigned = 0
     for model, col in [
         (ActivityLog, "company_id"),
-        (EnrichmentQueue, "company_id"),
         (Sighting, "source_company_id"),
         (CustomerPartHistory, "company_id"),
         (ExcessList, "company_id"),

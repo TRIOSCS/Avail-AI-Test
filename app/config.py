@@ -47,6 +47,15 @@ class Settings(BaseSettings):
     encryption_salt: str = ""
     database_url: str = "postgresql://availai:availai@db:5432/availai"
 
+    # --- Database connection pool (Phase-4 infra: multi-worker sizing) ---
+    # Per-process caps passed to SQLAlchemy's create_engine in app/database.py.
+    # Defaults are sized for uvicorn --workers 2 alongside the scheduler,
+    # enrichment-worker, and host workers all sharing one Postgres instance —
+    # see the connection-budget arithmetic above the module-level `engine` in
+    # app/database.py. Env: DB_POOL_SIZE / DB_MAX_OVERFLOW.
+    db_pool_size: int = Field(default=5, ge=1)
+    db_max_overflow: int = Field(default=5, ge=0)
+
     # --- Sentry ---
     sentry_dsn: str = ""
     sentry_traces_sample_rate: float = 0.1
@@ -359,7 +368,7 @@ class Settings(BaseSettings):
     eight_by_eight_pbx_id: str = ""
     eight_by_eight_timezone: str = "America/Los_Angeles"
     eight_by_eight_enabled: bool = False
-    eight_by_eight_poll_interval_minutes: int = 30
+    eight_by_eight_poll_interval_minutes: int = 5
 
     # --- Lusha Enrichment (key via get_credential_cached, NOT a Settings field) ---
     lusha_enrichment_enabled: bool = False  # feature gate; off → chain == today

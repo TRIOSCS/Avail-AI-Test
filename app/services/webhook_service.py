@@ -1,11 +1,12 @@
-"""Graph webhook service — subscribe to mail events, process notifications.
+"""Graph webhook service — subscribe to mail/calendar events, process notifications.
 
-Microsoft Graph sends push notifications when emails arrive or are sent.
-We validate, fetch the message details, and auto-log activities.
+Microsoft Graph sends push notifications when emails arrive, are sent, or calendar
+events are created. We validate, fetch the item details, and auto-log activities.
 
 Usage:
-    # Create subscription for a user
+    # Create subscriptions for a user
     await create_mail_subscription(user, db)
+    await create_calendar_subscription(user, db)
 
     # Handle incoming webhook POST (called from the FastAPI endpoint)
     await handle_notification(payload, db)
@@ -20,13 +21,15 @@ import time
 from datetime import UTC, datetime, timedelta
 
 from loguru import logger
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.cache.intel_cache import _get_redis
 from app.config import settings
 from app.constants import UserRole
 from app.models import ActivityLog, GraphSubscription, User
 
-# Graph webhook subscriptions for mail expire after max 3 days (4230 min)
+# Graph webhook subscriptions for mail expire after max 7 days (10,080 min)
 SUBSCRIPTION_LIFETIME_HOURS = 70  # ~3 days, renew before expiry
 
 # HTTP status codes returned by GraphClient.patch_json that confirm the
@@ -39,8 +42,13 @@ RENEW_BUFFER_HOURS = 6  # renew when less than 6h remaining
 RENEW_FAIL_THRESHOLD = 3
 _M365_SUB_ERROR_MSG = "Email tracking degraded — Graph subscription renewal failing"
 
-# Replay protection: reject duplicate notifications within this window
+# Replay protection: reject duplicate notifications within this window. Shared across
+# worker processes via a Redis SET NX EX (mirrors the token-refresh lock idiom in
+# app/jobs/core_jobs.py:_safe_refresh); _seen_notifications is the in-process fallback
+# used when Redis is unavailable (TESTING, or an outage) — unchanged from before Redis
+# support was added.
 REPLAY_WINDOW_SECONDS = 300  # 5 minutes
+_REPLAY_REDIS_PREFIX = "webhook:replay:"
 _seen_notifications: dict[str, float] = {}  # key -> timestamp
 
 # Validation-echo bounds. Microsoft Graph requires the raw ``validationToken``
@@ -79,9 +87,9 @@ def _active_subscription(db: Session, user_id: int, resource: str | None = None)
     Graph *resource*.
 
     The single existing-row query behind both create_* paths and
-    ``ensure_all_users_subscribed``. NOTE: the mail create path deliberately passes no
-    resource (its historical check matches ANY active row for the user); every other
-    caller filters by resource.
+    ``ensure_all_users_subscribed``. Every caller filters by resource so an active
+    subscription for one resource (e.g. calendar) never blocks creation of another
+    (e.g. mail).
     """
     q = db.query(GraphSubscription).filter(
         GraphSubscription.user_id == user_id,
@@ -101,14 +109,16 @@ async def _create_graph_subscription(
     webhook_path: str,
     err_label: str,
     created_log: str,
+    change_type: str = "created",
 ) -> GraphSubscription | None:
     """POST a new Graph webhook subscription and persist its GraphSubscription row.
 
     The shared tail of ``create_mail_subscription`` / ``create_teams_subscription`` —
-    identical apart from the resource, webhook path, and log wording (*err_label*
-    prefixes the failure logs; *created_log* is a format template taking
-    ``sub_id``/``email``/``expiration``). Callers have already taken the per-user
-    lock and checked for an existing active row.
+    identical apart from the resource, webhook path, log wording (*err_label* prefixes
+    the failure logs; *created_log* is a format template taking
+    ``sub_id``/``email``/``expiration``), and the Graph ``changeType`` (*change_type*,
+    defaults to ``"created"`` — existing callers are unaffected). Callers have already
+    taken the per-user lock and checked for an existing active row.
     """
     from app.utils.graph_client import GraphClient
 
@@ -116,7 +126,7 @@ async def _create_graph_subscription(
     expiration = datetime.now(UTC) + timedelta(hours=SUBSCRIPTION_LIFETIME_HOURS)
 
     payload = {
-        "changeType": "created",
+        "changeType": change_type,
         "notificationUrl": f"{settings.app_url}{webhook_path}",
         "resource": resource,
         "expirationDateTime": expiration.strftime("%Y-%m-%dT%H:%M:%S.0000000Z"),
@@ -139,7 +149,7 @@ async def _create_graph_subscription(
         user_id=user.id,
         subscription_id=sub_id,
         resource=resource,
-        change_type="created",
+        change_type=change_type,
         expiration_dt=expiration,
         client_state=client_state,
     )
@@ -165,8 +175,9 @@ async def create_mail_subscription(user: User, db: Session) -> GraphSubscription
     # Serialize subscription creation per-user to avoid duplicate active rows
     db.query(User).filter(User.id == user.id).with_for_update().first()
 
-    # Check for existing active subscription
-    existing = _active_subscription(db, user.id)
+    # Check for existing active subscription, scoped to the mail resource so an
+    # active subscription for another resource (e.g. calendar) never blocks this one.
+    existing = _active_subscription(db, user.id, resource="/me/messages")
     if existing:
         logger.debug(f"Active subscription exists for {user.email}: {existing.subscription_id}")
         return existing
@@ -179,6 +190,45 @@ async def create_mail_subscription(user: User, db: Session) -> GraphSubscription
         webhook_path="/api/webhooks/graph",
         err_label="",
         created_log="Created Graph subscription {sub_id} for {email}, expires {expiration}",
+    )
+
+
+async def create_calendar_subscription(user: User, db: Session) -> GraphSubscription | None:
+    """Create a Graph webhook subscription for a user's calendar.
+
+    Subscribes to /me/events with changeType="created" only — deliberately NOT
+    "created,updated". Graph would also notify on reschedules/detail edits, but
+    log_meeting_activity dedupes on external_id "calendar-{graph_event_id}", so an
+    "updated" notification for an already-logged event is a no-op after burning a Graph
+    fetch for nothing. Routed to the same /api/webhooks/graph endpoint as mail; branched
+    in handle_notification by subscription resource.
+    """
+    from app.scheduler import get_valid_token
+
+    token = await get_valid_token(user, db)
+    if not token:
+        logger.warning(f"No valid token for {user.email}, skipping calendar subscription")
+        return None
+
+    # Serialize subscription creation per-user to avoid duplicate active rows
+    db.scalar(select(User.id).where(User.id == user.id).with_for_update())
+
+    # Check for existing active calendar subscription, scoped to the calendar resource
+    # so an active subscription for another resource (e.g. mail) never blocks this one.
+    existing = _active_subscription(db, user.id, resource="/me/events")
+    if existing:
+        logger.debug(f"Active calendar subscription exists for {user.email}: {existing.subscription_id}")
+        return existing
+
+    return await _create_graph_subscription(
+        user,
+        db,
+        token,
+        resource="/me/events",
+        webhook_path="/api/webhooks/graph",
+        err_label="calendar ",
+        created_log="Created Graph calendar subscription {sub_id} for {email}, expires {expiration}",
+        change_type="created",
     )
 
 
@@ -293,7 +343,8 @@ async def renew_expiring_subscriptions(db: Session):
 
 
 async def ensure_all_users_subscribed(db: Session):
-    """Create mail and Teams subscriptions for any M365-connected user missing them."""
+    """Create mail, calendar, and Teams subscriptions for any M365-connected user
+    missing them."""
     users = (
         db.query(User)
         .filter(
@@ -308,6 +359,11 @@ async def ensure_all_users_subscribed(db: Session):
         if not _active_subscription(db, user.id, resource="/me/messages"):
             await create_mail_subscription(user, db)
 
+        # Calendar subscription — not mvp_mode-gated (only Teams is; calendar
+        # tracking is core CRM activity logging, not a Teams-specific feature)
+        if not _active_subscription(db, user.id, resource="/me/events"):
+            await create_calendar_subscription(user, db)
+
         # Teams subscription (skip in MVP mode)
         if not settings.mvp_mode:
             if not _active_subscription(db, user.id, resource="/me/chats/getAllMessages"):
@@ -320,11 +376,34 @@ async def ensure_all_users_subscribed(db: Session):
 
 
 def _prune_replay_cache():
-    """Remove expired entries from the replay-protection cache."""
+    """Remove expired entries from the in-process replay-protection fallback cache."""
     cutoff = time.monotonic() - REPLAY_WINDOW_SECONDS
     expired = [k for k, ts in _seen_notifications.items() if ts < cutoff]
     for k in expired:
         del _seen_notifications[k]
+
+
+def _replay_check_and_mark(replay_key: str, now: float) -> bool:
+    """Return True if *replay_key* is a replay (already seen within the window).
+
+    Redis available: an atomic ``SET NX EX`` on the shared substrate (same client as
+    ``app.rate_limit`` / ``app.jobs.core_jobs``) — the 5-minute window is enforced across
+    every worker process, not just this one. Redis unavailable (TESTING, or the SET call
+    itself errors): falls back to the original in-process ``_seen_notifications`` dict,
+    exactly as before Redis support was added.
+    """
+    redis = _get_redis()
+    if redis is not None:
+        try:
+            acquired = redis.set(f"{_REPLAY_REDIS_PREFIX}{replay_key}", "1", nx=True, ex=REPLAY_WINDOW_SECONDS)
+            return not acquired
+        except Exception as e:
+            logger.warning("Webhook replay cache: Redis error ({}) — falling back to in-process cache", e)
+
+    if replay_key in _seen_notifications:
+        return True
+    _seen_notifications[replay_key] = now
+    return False
 
 
 def validate_notifications(payload: dict, db: Session) -> list[dict]:
@@ -380,10 +459,9 @@ def validate_notifications(payload: dict, db: Session) -> list[dict]:
         # Replay protection
         resource = notif.get("resource", "")
         replay_key = f"{sub_id}:{resource}"
-        if replay_key in _seen_notifications:
+        if _replay_check_and_mark(replay_key, now):
             logger.warning(f"Replay detected for {replay_key}, ignoring")
             continue
-        _seen_notifications[replay_key] = now
 
         user = db.get(User, sub.user_id)
         if not user:
@@ -401,6 +479,78 @@ def validate_notifications(payload: dict, db: Session) -> list[dict]:
 # ═══════════════════════════════════════════════════════════════════════
 
 
+async def _handle_calendar_notification(notif: dict, token: str, user: User, db: Session) -> None:
+    """Process a single validated calendar notification.
+
+    Fetches the event from Graph, skips cancelled events, then calls
+    log_meeting_activity directly (the daily 06:00 calendar scan's writer, minus its
+    create_unlinked_fallback=True — a real-time notification for a meeting with no CRM-
+    matched attendee logs nothing rather than writing an unlinked row for every
+    personal/internal meeting created). The external_id dedup key
+    ("calendar-{graph_event_id}") is shared with the daily scan, so a webhook
+    notification and a later poll of the same event can never double-log it.
+
+    Note: an unmatched-attendee meeting isn't lost — the daily scan's unlinked
+    fallback backfills it (latency only). But that scan is a 30-day LOOKBACK
+    (see scan_calendar_events), so a far-future meeting only gets backfilled
+    once its start time has passed into that window.
+    """
+    from app.services.activity_service import log_meeting_activity
+    from app.services.calendar_intelligence import _parse_graph_dt
+    from app.utils.graph_client import GraphClient
+
+    resource = notif.get("resource", "")
+
+    gc = GraphClient(token)
+    try:
+        event = await gc.get_json(
+            f"/{resource}",
+            params={"$select": "id,subject,attendees,start,end,location,organizer,isCancelled"},
+        )
+    except Exception as e:
+        logger.error(f"Failed to fetch calendar event for notification: {e}")
+        return
+
+    if event.get("isCancelled"):
+        logger.debug(f"Skipping cancelled event {event.get('id')} for {user.email}")
+        return
+
+    graph_event_id = (event.get("id") or "").strip()
+    if not graph_event_id:
+        return
+
+    subject = (event.get("subject") or "").strip()
+    start_dt = _parse_graph_dt((event.get("start") or {}).get("dateTime"))
+    end_dt = _parse_graph_dt((event.get("end") or {}).get("dateTime"))
+    if start_dt is None:
+        return
+    if end_dt is None:
+        end_dt = start_dt
+
+    organizer_data = (event.get("organizer") or {}).get("emailAddress", {})
+    organizer_email = (organizer_data.get("address") or "").strip().lower() or None
+
+    attendee_emails = []
+    for att in event.get("attendees", []):
+        email = (att.get("emailAddress", {}).get("address") or "").strip().lower()
+        if email and "@" in email:
+            attendee_emails.append(email)
+
+    location_name = (event.get("location", {}) or {}).get("displayName") or None
+
+    log_meeting_activity(
+        user_id=user.id,
+        graph_event_id=graph_event_id,
+        subject=subject,
+        start_dt=start_dt,
+        end_dt=end_dt,
+        organizer_email=organizer_email,
+        attendee_emails=attendee_emails,
+        location=location_name,
+        db=db,
+    )
+
+
 async def handle_notification(payload: dict, db: Session, validated: list[dict] | None = None):
     """Process a Graph webhook notification payload.
 
@@ -409,6 +559,10 @@ async def handle_notification(payload: dict, db: Session, validated: list[dict] 
     ``validate_notifications`` — one canonical copy of the security-relevant
     subscription/clientState/replay checks (the production caller always
     pre-validates; the fallback exists for direct/back-compat callers).
+
+    Routes each notification by subscription resource:
+    - /me/messages  → mail path below (fetch message, log_email_activity, poll inbox)
+    - /me/events    → calendar path (_handle_calendar_notification)
 
     Graph sends a list of notifications. For each, we fetch the message
     from Graph, log it as an activity, and trigger inbox poll for RFQ
@@ -428,6 +582,21 @@ async def handle_notification(payload: dict, db: Session, validated: list[dict] 
 
     for notif in items:
         user = notif["_user"]
+        sub = notif["_subscription"]
+
+        # Calendar notifications are routed to their own handler before the mail
+        # branch's own `changeType != "created"` drop below — calendar subscriptions
+        # are created with changeType="created" only (see create_calendar_subscription),
+        # but Graph is checked defensively here too rather than trusted to always honor
+        # the subscribed changeType.
+        if sub.resource == "/me/events":
+            if notif.get("changeType") != "created":
+                continue
+            token = await get_valid_token(user, db)
+            if not token:
+                continue
+            await _handle_calendar_notification(notif, token, user, db)
+            continue
 
         resource = notif.get("resource", "")
         change_type = notif.get("changeType")

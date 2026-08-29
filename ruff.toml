@@ -31,6 +31,12 @@ ignore = [
 "scripts/*" = ["F841", "ASYNC230", "T201", "BLE001"]
 # CLI management commands (python -m app.management.*): stdout is their UX.
 "app/management/*" = ["T201"]
+# Bootstrap migration-lock wrapper invoked by docker-entrypoint.sh before the
+# app itself (and its loguru setup) is running -- stdout IS its UX, same
+# reasoning as scripts/*, and the top-level connect failure is a deliberate
+# catch-log-exit(1) so a DB outage prints a clear message instead of a raw
+# traceback before anything is logging yet.
+"docker-entrypoint-migrate.py" = ["T201", "BLE001"]
 # Deliberate broad-catch orchestrators: scheduler jobs must never let one failing
 # item kill the whole run.
 "app/jobs/*" = ["BLE001"]

@@ -115,12 +115,13 @@ def _make_subscription(
     sub_id: str = "sub-001",
     client_state: str = "state123",
     expires_in_hours: int = 48,
+    resource: str = "/me/messages",
 ) -> GraphSubscription:
     """Create a GraphSubscription record for testing."""
     sub = GraphSubscription(
         user_id=user.id,
         subscription_id=sub_id,
-        resource="/me/messages",
+        resource=resource,
         change_type="created",
         expiration_dt=datetime.now(UTC) + timedelta(hours=expires_in_hours),
         client_state=client_state,
@@ -159,6 +160,23 @@ def _make_notification(
         "changeType": change_type,
         "resource": resource,
     }
+
+
+class _FakeReplayRedis:
+    """Minimal redis stand-in implementing the SET NX EX slice the webhook replay cache
+    uses (mirrors ``FakeRedis`` in tests/test_outreach_rate_limiter.py)."""
+
+    def __init__(self, *, fail: bool = False):
+        self.store: dict[str, str] = {}
+        self.fail = fail
+
+    def set(self, key: str, value: str, nx: bool = False, ex: int | None = None):
+        if self.fail:
+            raise RuntimeError("redis down")
+        if nx and key in self.store:
+            return None
+        self.store[key] = value
+        return True
 
 
 def _make_message(
@@ -759,6 +777,115 @@ class TestCreateMailSubscription:
             assert "expirationDateTime" in payload
             assert "clientState" in payload
 
+    def test_active_calendar_subscription_does_not_block_mail_creation(self, db_session, test_user):
+        """Regression lock: an active /me/events (calendar) subscription must NOT block
+        mail subscription creation. Prior to the resource-scoped guard fix,
+        _active_subscription(db, user.id) matched ANY active row for the user, so once a
+        calendar subscription existed, create_mail_subscription was silently blocked
+        forever (see webhook_service.py _active_subscription docstring)."""
+        from app.services.webhook_service import create_mail_subscription
+
+        _make_subscription(db_session, test_user, sub_id="calendar-sub", resource="/me/events")
+
+        mock_gc = MagicMock()
+        mock_gc.post_json = AsyncMock(return_value={"id": "new-mail-sub-id"})
+
+        with (
+            patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"),
+            patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc),
+            patch("app.services.webhook_service.settings") as mock_settings,
+        ):
+            mock_settings.app_url = "https://app.example.com"
+            result = _run(create_mail_subscription(test_user, db_session))
+
+            mock_gc.post_json.assert_called_once()
+            assert result is not None
+            assert result.subscription_id == "new-mail-sub-id"
+            assert result.resource == "/me/messages"
+
+    def test_existing_mail_subscription_still_blocks_new_mail_creation(self, db_session, test_user):
+        """Mail-vs-mail idempotency preserved: an active /me/messages row still short-
+        circuits create_mail_subscription without hitting Graph."""
+        from app.services.webhook_service import create_mail_subscription
+
+        _make_subscription(db_session, test_user, sub_id="mail-sub", resource="/me/messages")
+
+        mock_gc = MagicMock()
+        mock_gc.post_json = AsyncMock()
+
+        with (
+            patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"),
+            patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc),
+        ):
+            result = _run(create_mail_subscription(test_user, db_session))
+            assert result.subscription_id == "mail-sub"
+            mock_gc.post_json.assert_not_called()
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  _create_graph_subscription() — changeType parameterization
+# ══════════════════════════════════════════════════════════════════════
+
+
+class TestCreateGraphSubscriptionChangeType:
+    def test_default_change_type_is_created(self, db_session, test_user):
+        """Omitting change_type preserves existing behavior (defaults to 'created')."""
+        from app.services.webhook_service import _create_graph_subscription
+
+        mock_gc = MagicMock()
+        mock_gc.post_json = AsyncMock(return_value={"id": "default-ct-sub"})
+
+        with (
+            patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc),
+            patch("app.services.webhook_service.settings") as mock_settings,
+        ):
+            mock_settings.app_url = "https://app.example.com"
+            record = _run(
+                _create_graph_subscription(
+                    test_user,
+                    db_session,
+                    "token",
+                    resource="/me/messages",
+                    webhook_path="/api/webhooks/graph",
+                    err_label="",
+                    created_log="Created {sub_id} for {email}, expires {expiration}",
+                )
+            )
+
+            payload = mock_gc.post_json.call_args[0][1]
+            assert payload["changeType"] == "created"
+            assert record.change_type == "created"
+
+    def test_passed_change_type_is_sent_to_graph(self, db_session, test_user):
+        """A caller-supplied change_type is passed through to the Graph POST payload and
+        persisted on the GraphSubscription record."""
+        from app.services.webhook_service import _create_graph_subscription
+
+        mock_gc = MagicMock()
+        mock_gc.post_json = AsyncMock(return_value={"id": "custom-ct-sub"})
+
+        with (
+            patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc),
+            patch("app.services.webhook_service.settings") as mock_settings,
+        ):
+            mock_settings.app_url = "https://app.example.com"
+            record = _run(
+                _create_graph_subscription(
+                    test_user,
+                    db_session,
+                    "token",
+                    resource="/me/events",
+                    webhook_path="/api/webhooks/calendar",
+                    err_label="Calendar ",
+                    created_log="Created {sub_id} for {email}, expires {expiration}",
+                    change_type="updated",
+                )
+            )
+
+            payload = mock_gc.post_json.call_args[0][1]
+            assert payload["changeType"] == "updated"
+            assert record.change_type == "updated"
+
 
 # ══════════════════════════════════════════════════════════════════════
 #  renew_subscription()
@@ -1063,6 +1190,44 @@ class TestValidateNotifications:
         # Should be accepted again after expiry
         result2 = validate_notifications({"value": [notif.copy()]}, db_session)
         assert len(result2) == 1
+
+    def test_validate_replay_redis_rejects_duplicate(self, db_session, test_user, monkeypatch):
+        """Replay protection via the Redis SET NX EX path (shared across worker
+        processes) rejects a duplicate sub+resource within the window, without touching
+        the in-process fallback cache."""
+        fake_redis = _FakeReplayRedis()
+        monkeypatch.setattr("app.services.webhook_service._get_redis", lambda: fake_redis)
+
+        _make_subscription(db_session, test_user, sub_id="sub-val-redis", client_state="secret")
+        notif = _make_notification(
+            sub_id="sub-val-redis", client_state="secret", resource="Users('abc')/Messages('msg-redis')"
+        )
+
+        result1 = validate_notifications({"value": [notif.copy()]}, db_session)
+        assert len(result1) == 1
+
+        result2 = validate_notifications({"value": [notif.copy()]}, db_session)
+        assert result2 == []
+
+        # The Redis path handled it — the in-process fallback dict was never touched.
+        assert "sub-val-redis:Users('abc')/Messages('msg-redis')" not in _seen_notifications
+
+    def test_validate_replay_redis_error_falls_back_to_in_process(self, db_session, test_user, monkeypatch):
+        """A Redis SET error degrades to the in-process cache instead of failing open
+        (silently accepting every replay) or raising."""
+        fake_redis = _FakeReplayRedis(fail=True)
+        monkeypatch.setattr("app.services.webhook_service._get_redis", lambda: fake_redis)
+
+        _make_subscription(db_session, test_user, sub_id="sub-val-redis-err", client_state="secret")
+        notif = _make_notification(
+            sub_id="sub-val-redis-err", client_state="secret", resource="Users('abc')/Messages('msg-redis-err')"
+        )
+
+        result1 = validate_notifications({"value": [notif.copy()]}, db_session)
+        assert len(result1) == 1
+
+        result2 = validate_notifications({"value": [notif.copy()]}, db_session)
+        assert result2 == []
 
     def test_validate_timing_safe(self, db_session, test_user):
         """Verify that hmac.compare_digest is used for clientState comparison."""

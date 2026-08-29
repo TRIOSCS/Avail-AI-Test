@@ -263,7 +263,6 @@ class TestBuildAwarded:
                     created_at=_now(),
                 )
             )
-        el.total_line_items = 2
         db_session.commit()
 
         _build_awarded(db_session, company, trader, broker)

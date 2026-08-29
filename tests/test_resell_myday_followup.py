@@ -72,7 +72,6 @@ def owned_list(db_session: Session, test_user: User, test_company: Company) -> E
         company_id=test_company.id,
         owner_id=test_user.id,
         status=ExcessListStatus.COLLECTING,
-        total_line_items=1,
         created_at=datetime.now(UTC),
     )
     db_session.add(el)

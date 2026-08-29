@@ -26,12 +26,42 @@ AvailAI is a production electronic component sourcing platform and CRM. Buyers s
 
 | Container | Purpose | Resources |
 |-----------|---------|-----------|
-| **app** | FastAPI on port 8000 | 2 GB / 2 CPU |
+| **app** | FastAPI on port 8000, `uvicorn --workers 2` | 2 GB / 2 CPU |
+| **scheduler** | Same image as `app`, single-worker, `RUN_SCHEDULER=1` — runs APScheduler, not reachable from Caddy | 2 GB / 2 CPU |
 | **db** | PostgreSQL 16 | 2 GB / 1.5 CPU |
 | **redis** | Cache + coordination | 768 MB |
 | **caddy** | Reverse proxy, HTTPS | 512 MB |
 | **db-backup** | pg_dump every 6 hours | 256 MB |
 | **enrichment-worker** | Paced material-card enrichment — trust chain `verified` (distributor API) → `web_sourced` (Claude web search, authorized domains) → **OEM cross-ref** (grounded web, double-verify against distributors → `verified`) → **OEM description** (`oem_sourced`, single official OEM page) → `ai_inferred` (Opus 4.8, ≥0.95, flagged) → `not_catalogued` (recognised OEM/FRU, no public specs) / `not_found`. OEM tiers gated by a pure regex classifier (`oem_classifier.py`). `web_meter` tracks per-card billable web calls + Claude health for exact budget accounting and circuit-breaker reset. Fast-lane: newest-added parts head the queue (`select_batch` orders `unenriched-first, then search_count DESC, created_at DESC` — never-resolved parts drain before `not_found` re-checks, so old low-demand cards aren't starved by the daily re-check churn); ~60s idle poll | 512 MB |
+
+**Phase-4 infra split (multi-process runtime):** `app` runs `uvicorn --workers 2`
+(locked ruling) so sync ORM handlers no longer serialize behind one process;
+APScheduler moved out into the dedicated `scheduler` service (same image,
+single-worker, `RUN_SCHEDULER=1`) while `app` sets `RUN_SCHEDULER=0` — gated in
+`app/main.py`'s lifespan, because the approval-notification outbox has no
+cross-process locking and two live schedulers would double-send emails.
+(`enrichment-worker` runs `python -m app.services.enrichment_worker` directly,
+never `uvicorn app.main:app`, so the flag doesn't apply to it — it never
+touches the lifespan/scheduler code at all.) `RUN_SCHEDULER` is the instant
+rollback knob if the split ever needs collapsing back to one process, and
+`/health`'s `scheduler` field reports `"external (scheduler service)"` on `app`
+rather than a misleading `"off"`. Real-time SSE (`app/services/sse_broker.py`) fans out
+over Redis pub/sub (namespaced `sse:{channel}`) so a `publish()` from one
+worker or from the scheduler reaches a `listen()`-er attached to a different
+worker; each listener's background reader task self-heals a dropped or
+never-connected Redis with capped exponential backoff, and the whole path
+falls back to the original in-process dict fan-out (same-process delivery
+only) when Redis is unavailable or `TESTING`. Every container built from the
+app image (`app`, `scheduler`, `enrichment-worker`) migrates through
+`docker-entrypoint-migrate.py`, which wraps `alembic upgrade head` in a
+Postgres session-level advisory lock so concurrent boots on a schema-changing
+deploy can't race DDL — the loser blocks until the winner finishes, then
+no-ops. Per-process DB pool sizing (`DB_POOL_SIZE`/`DB_MAX_OVERFLOW`, default
+5+5) is budgeted against Postgres `max_connections=100` across every process
+that imports `app/database.py`; the full connection-budget table (2 app
+workers + scheduler + enrichment-worker + 3 host workers = 70 of 100, 30
+headroom) lives in the comment above the module-level `engine` in
+`app/database.py`.
 
 ## Request Flow — Browser to Database
 
@@ -679,6 +709,10 @@ Single-file services worth flagging individually (not grouped under a shared pac
   expensive full chain-replay (`downgrade base → upgrade head` over all
   migrations, needs `ALEMBIC_ALLOW_CASCADE`) runs **nightly** via the `schedule`
   trigger as the `migration-full-cycle` job, not on every PR (HIGH-DEVOPS-7).
+  The `e2e-playwright` job also runs per-PR: the TS Playwright suite against a
+  self-contained `TESTING=1` sqlite `webServer` (no db/redis services), chromium
+  only, `visual` project excluded (font-rendering drift on `ubuntu-latest`) —
+  `visual` and the full suite still run nightly via the author's host cron.
 - **Deploy (`deploy.sh`)** — the commit step stages with `git add -u`
   (tracked-file modifications/deletions only), never untracked files, so a stray
   secret/key/DB dump can't be swept into a deploy commit (CRIT-DEVOPS-2); brand-new

@@ -37,6 +37,8 @@ class TestDefaults:
             ("rate_limit_enabled", True),
             ("admin_emails", []),
             ("own_domains", frozenset({"trioscs.com"})),
+            ("db_pool_size", 5),
+            ("db_max_overflow", 5),
         ],
     )
     def test_default(self, attr, expected):
@@ -82,6 +84,40 @@ class TestDatabaseUrlValidator:
         env = {"DATABASE_URL": "sqlite://", "TESTING": ""}
         with patch.dict(os.environ, env, clear=True):
             with pytest.raises(ValidationError, match="DATABASE_URL must start with"):
+                _make()
+
+
+class TestDbPoolSettings:
+    """DB_POOL_SIZE / DB_MAX_OVERFLOW are env-tunable per-process pool caps (Phase-4
+    infra: sized against Postgres max_connections=100 across the 2 app workers +
+    scheduler + enrichment-worker + 3 host workers — see the budget comment in
+    app/database.py)."""
+
+    def test_env_override(self):
+        s = _settings_with({"DB_POOL_SIZE": "8", "DB_MAX_OVERFLOW": "12"})
+        assert s.db_pool_size == 8
+        assert s.db_max_overflow == 12
+        assert isinstance(s.db_pool_size, int)
+        assert isinstance(s.db_max_overflow, int)
+
+    def test_pool_size_rejects_zero(self):
+        with patch.dict(os.environ, {"DB_POOL_SIZE": "0"}, clear=True):
+            with pytest.raises(ValidationError):
+                _make()
+
+    def test_pool_size_rejects_negative(self):
+        with patch.dict(os.environ, {"DB_POOL_SIZE": "-1"}, clear=True):
+            with pytest.raises(ValidationError):
+                _make()
+
+    def test_max_overflow_allows_zero(self):
+        """max_overflow=0 (no bursting past pool_size) is a valid, deliberate config."""
+        s = _settings_with({"DB_MAX_OVERFLOW": "0"})
+        assert s.db_max_overflow == 0
+
+    def test_max_overflow_rejects_negative(self):
+        with patch.dict(os.environ, {"DB_MAX_OVERFLOW": "-1"}, clear=True):
+            with pytest.raises(ValidationError):
                 _make()
 
 

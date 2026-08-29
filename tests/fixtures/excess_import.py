@@ -30,7 +30,7 @@ def import_line_items(db: Session, list_id: int, rows: list[dict]) -> dict:
 
     Returns {imported: int, skipped: int, errors: list[str]}.
     """
-    excess_list = get_excess_list(db, list_id)
+    get_excess_list(db, list_id)  # 404 if the list doesn't exist
 
     imported = 0
     skipped = 0
@@ -58,9 +58,7 @@ def import_line_items(db: Session, list_id: int, rows: list[dict]) -> dict:
         _resolve_line_material_card(db, item)
         imported += 1
 
-    # Update total_line_items counter
     if imported > 0:
-        excess_list.total_line_items = (excess_list.total_line_items or 0) + imported
         _safe_commit(db, entity="excess line items")
 
     logger.info(

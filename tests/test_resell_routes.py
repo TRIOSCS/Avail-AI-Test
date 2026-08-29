@@ -45,7 +45,6 @@ def posted_list(db_session: Session, trader_user: User, test_company: Company) -
         company_id=test_company.id,
         owner_id=trader_user.id,
         status=ExcessListStatus.COLLECTING,
-        total_line_items=2,
         created_at=datetime.now(UTC),
     )
     db_session.add(el)
@@ -74,7 +73,6 @@ def single_line_list(db_session: Session, trader_user: User, test_company: Compa
         company_id=test_company.id,
         owner_id=trader_user.id,
         status=ExcessListStatus.OPEN,
-        total_line_items=1,
         created_at=datetime.now(UTC),
     )
     db_session.add(el)
@@ -195,7 +193,6 @@ def test_open_lens_title_never_leaks_customer_via_free_text(client, db_session, 
         company_id=test_company.id,
         owner_id=trader_user.id,
         status=ExcessListStatus.OPEN,
-        total_line_items=1,
         created_at=datetime.now(UTC),
     )
     db_session.add(el)
@@ -251,7 +248,6 @@ def test_open_lens_search_matches_part_identity_not_title(client, db_session, tr
         company_id=test_company.id,
         owner_id=trader_user.id,
         status=ExcessListStatus.OPEN,
-        total_line_items=1,
         created_at=datetime.now(UTC),
     )
     db_session.add(el)
@@ -294,7 +290,6 @@ def test_mine_lens_search_still_matches_title(client, db_session, trader_user, t
         company_id=test_company.id,
         owner_id=trader_user.id,
         status=ExcessListStatus.OPEN,
-        total_line_items=1,
         created_at=datetime.now(UTC),
     )
     db_session.add(el)
@@ -504,7 +499,6 @@ def draft_list(db_session: Session, trader_user: User, test_company: Company) ->
         company_id=test_company.id,
         owner_id=trader_user.id,
         status="draft",
-        total_line_items=1,
         created_at=__import__("datetime").datetime.now(__import__("datetime").timezone.utc),
     )
     db_session.add(el)
@@ -533,7 +527,6 @@ def empty_draft_list(db_session: Session, trader_user: User, test_company: Compa
         company_id=test_company.id,
         owner_id=trader_user.id,
         status="draft",
-        total_line_items=0,
         created_at=datetime.now(UTC),
     )
     db_session.add(el)
@@ -1263,7 +1256,6 @@ def bare_list(db_session: Session, trader_user: User, test_company: Company) -> 
         company_id=test_company.id,
         owner_id=trader_user.id,
         status=ExcessListStatus.COLLECTING,
-        total_line_items=0,
         created_at=datetime.now(UTC),
     )
     db_session.add(el)

@@ -7,7 +7,23 @@ services:
     environment:
       - TESTING=1
       - EXTRA_LOGS=0
+      - RUN_SCHEDULER=0
     # Hot-reload: mount source code so changes reflect immediately without rebuild
+    volumes:
+      - ./app:/app/app
+      - /app/app/static/dist    # preserve Vite-built assets from image
+      - ./scripts:/app/scripts
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "172.28.0.0/24", "--reload", "--reload-dir", "/app/app"]
+
+  # Same split as prod: dedicated scheduler service. TESTING=1 here too (like
+  # `app` above) so local dev never boots a live APScheduler by default — flip
+  # TESTING off in .env to actually exercise it locally. Hot-reload mounted the
+  # same way as `app` for iterating on app/scheduler.py / app/jobs/.
+  scheduler:
+    environment:
+      - TESTING=1
+      - EXTRA_LOGS=0
+      - RUN_SCHEDULER=1
     volumes:
       - ./app:/app/app
       - /app/app/static/dist    # preserve Vite-built assets from image
