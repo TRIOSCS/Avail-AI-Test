@@ -7607,6 +7607,19 @@ section partials — `qp/_section_sales.html`, `_section_purchasing.html`, `_sec
   an arbitrary column), coercing Y/N→tri-state Boolean, qty→int, else stripped string|None. A PATCH
   is a no-op once the section is approved (read-only). The grid is read-only while a request is
   `requested` or the section is approved.
+- *AI draft-from-deal (ideas #8+#19):* each editable section carries a "✦ Draft with AI" button (+
+  an optional "from a pasted TSO/PO" fold). `POST /v2/qp/{id}/draft/{section}` calls
+  `qp_draft_service.build_section_draft` — SUGGEST-ONLY, it never writes the QP. It fills only the
+  EMPTY non-boolean free-text fields from three precedence-ordered sources: deterministic deal-copy
+  (`"deal"` — the buy plan's first requirement-bearing line's Requirement + chosen Offer +
+  `MaterialCard.category`), pasted-document extraction (`"ai"` — `extract_qp_fields_from_paste`,
+  claude fast tier, per-user rate-limited, single attempt, graceful `{}`), and carry-forward
+  (`"prior"` — the 3 most-recent section-reviewed QPs for the same `company_id` + commodity category).
+  The route re-renders the section with the suggestions prefilled into the inputs behind an amber
+  banner + per-field source chips; **while a draft is shown the form drops its `hx-patch`/
+  `hx-trigger="change"`** so an edit can't silently auto-save. "Accept & save" (`hx-include` the form)
+  fires the existing section PATCH to persist; "Discard" `GET /v2/qp/{id}/section/{section}` re-renders
+  the clean section. A no-op on an already-reviewed (locked) section. NO migration.
 - *Completeness gate:* `validate_section(qp, gate_type)` → `_validate_sales_section`/
   `_validate_purchasing_section` (required: the SO#/PO# + condition + product commodity + testing-
   required, plus quantity for Sales). `submit_section` now calls it FIRST and raises
