@@ -4623,7 +4623,6 @@ enrichment_service.py (orchestrator)
     |
     +---> DB: UPSERT companies (domain, size, location, enrichment_source)
     +---> DB: UPSERT vendor_cards (domain, industry)
-    +---> DB: INSERT enrichment_queue (proposed changes for review)
     +---> DB: INSERT enrichment_jobs (batch tracking)
 ```
 
