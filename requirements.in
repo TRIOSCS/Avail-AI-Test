@@ -13,7 +13,7 @@ jinja2==3.1.6
 filetype==1.2.0
 charset-normalizer==3.5.1
 # Credential encryption
-cryptography==50.0.0
+cryptography==50.0.1
 # Observability
 loguru==0.7.3
 # Pinned >=1.3.1 to fix CVE-2026-54283 (urlencoded form DoS) + CVE-2026-54282
@@ -24,7 +24,7 @@ starlette>=1.6.0,<2.0
 # Replaced prometheus-fastapi-instrumentator (hard-pinned starlette<1.0.0) with a small
 # ASGI middleware in app/prometheus_metrics.py that uses prometheus_client directly.
 prometheus_client>=0.26.0,<1.0
-sentry-sdk[fastapi]==2.68.0
+sentry-sdk[fastapi]==2.68.1
 # Rate limiting
 slowapi==0.1.10
 # Fuzzy matching
@@ -32,7 +32,7 @@ rapidfuzz>=3.0.0,<4.0
 # PDF generation
 weasyprint==69.0
 # PDF text extraction (datasheet verification)
-pypdf==6.16.1
+pypdf==6.16.2
 # Scheduling
 apscheduler>=3.11.3,<4.0
 # Migrations
@@ -46,15 +46,15 @@ starlette-csrf==3.0.0
 beautifulsoup4==4.15.0
 patchright==1.62.1
 # Phone number parsing / E.164 normalization (Google libphonenumber Python port)
-phonenumbers==9.0.37
+phonenumbers==9.0.38
 # Typed settings from env vars (fail-fast validation at startup)
 pydantic-settings==2.15.0
 # SSE streaming for HTMX sourcing progress
 sse-starlette>=3.4.8,<4.0
 # Anthropic Claude API (used by claude_client, enrichment, batch extraction)
-anthropic>=1.0.0,<2.0
+anthropic>=1.2.0,<2.0
 # HTML sanitization for untrusted email content (XSS prevention)
-nh3==0.3.6
+nh3==0.3.7
 # Safe XML parsing (XXE prevention)
 defusedxml>=0.7.1,<1.0
 # Azure Communication Services (click-to-call)

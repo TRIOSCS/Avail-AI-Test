@@ -4,7 +4,7 @@ annotated-doc==0.0.4
     # via fastapi
 annotated-types==0.7.0
     # via pydantic
-anthropic==1.0.0
+anthropic==1.2.0
     # via -r requirements.in
 anyio==4.13.0
     # via
@@ -46,7 +46,7 @@ charset-normalizer==3.5.1
     #   requests
 click==8.4.1
     # via uvicorn
-cryptography==50.0.0
+cryptography==50.0.1
     # via -r requirements.in
 cssselect2==0.9.0
     # via weasyprint
@@ -115,7 +115,7 @@ markupsafe==3.0.3
     #   mako
 msrest==0.7.1
     # via azure-communication-identity
-nh3==0.3.6
+nh3==0.3.7
     # via -r requirements.in
 oauthlib==3.3.1
     # via requests-oauthlib
@@ -127,7 +127,7 @@ packaging==26.2
     # via limits
 patchright==1.62.1
     # via -r requirements.in
-phonenumbers==9.0.37
+phonenumbers==9.0.38
     # via -r requirements.in
 pillow==12.3.0
     # via weasyprint
@@ -150,7 +150,7 @@ pydyf==0.12.1
     # via weasyprint
 pyee==13.0.1
     # via patchright
-pypdf==6.16.1
+pypdf==6.16.2
     # via -r requirements.in
 pyphen==0.17.2
     # via weasyprint
@@ -173,7 +173,7 @@ requests==2.34.2
     #   requests-oauthlib
 requests-oauthlib==2.0.0
     # via msrest
-sentry-sdk[fastapi]==2.68.0
+sentry-sdk[fastapi]==2.68.1
     # via -r requirements.in
 slowapi==0.1.10
     # via -r requirements.in
