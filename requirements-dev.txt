@@ -101,7 +101,7 @@ itsdangerous==2.2.0
     #   -r requirements-dev.in
 jedi==0.20.0
     # via ipython
-jsonschema-rs==0.50.1
+jsonschema-rs==0.51.0
     # via schemathesis
 librt==0.13.0
     # via mypy
@@ -246,16 +246,16 @@ requests==2.34.2
     #   responses
     #   schemathesis
     #   starlette-testclient
-responses==0.26.2
+responses==0.26.3
     # via -r requirements-dev.in
 rich==15.0.0
     # via
     #   bandit
     #   pip-audit
     #   schemathesis
-ruff==0.16.4
+ruff==0.16.5
     # via -r requirements-dev.in
-schemathesis==4.25.0
+schemathesis==4.25.2
     # via -r requirements-dev.in
 six==1.17.0
     # via python-dateutil
