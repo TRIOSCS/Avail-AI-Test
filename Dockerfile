@@ -1,5 +1,5 @@
 # Stage 1: Build frontend with Vite
-FROM node:26-alpine@sha256:aadf416b2cdce311a8811ba3f0608a61b77dbf997500e2eafe781b51f6a0b019 AS builder
+FROM node:26-alpine@sha256:2d984a15c9b54fd0aeb608b8e0d0d83529eb34d2966db27a1fb4f1edc3d298a3 AS builder
 WORKDIR /build
 COPY package.json package-lock.json ./
 RUN npm ci
@@ -16,7 +16,7 @@ COPY app/templates/ app/templates/
 RUN npm run build
 
 # Stage 2: Python application
-FROM python:3.14-slim@sha256:ce40764625a4ff50df3548277632e7f96c4e77fe75fa848aae9885476e7df5a4
+FROM python:3.14-slim@sha256:cae66f2ef0ec51a9891263eeee7f987dacf0a9879e8aa9353d5606e0530619a5
 
 WORKDIR /app
 
