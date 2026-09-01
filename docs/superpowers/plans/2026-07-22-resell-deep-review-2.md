@@ -11,6 +11,96 @@
 Severity: P0 corruption/breach/crash-loop · P1 broken workflow/wrong data, no recovery path ·
 P2 silent failure, race, UX lie, perf · P3 polish/debt/doc drift.
 
+## Resolution ledger (2026-08-01 reconciliation)
+
+Reconciled against the current tree (== `main` through PR #804) across two parallel fix
+tracks: mine (#785 follow-ups, #791, #792, #793, #803 superseding #805) and the owner's
+(#790, #794, #795, #800, plus earlier #785 itself). Every row below was re-verified
+against the shipped code, not the pre-existing inline notes.
+
+| Finding | Sev | Theme | Status | PR |
+|---|---|---|---|---|
+| 1 | P1 | A | FIXED | #791 (+residual #792) |
+| 4 | P2 | A | FIXED | #791 |
+| 8 | P2 | A | FIXED | #791 |
+| 9 | P2 | A | FIXED | #791 (+residual #792) |
+| 10 | P2 | A | FIXED | #791 |
+| 11 | P2 | A | FIXED | #791 (+residual #792) |
+| 12 | P2 | A | FIXED | #791 |
+| 32 | P3 | A | FIXED | #791 |
+| 37 | P3 | A | FIXED | #791 (+residual #792) |
+| 46 | P3 | A | FIXED | #791 |
+| 47 | P3 | A | FIXED | #791 |
+| 2 | P1 | B | FIXED | #792 |
+| 3 | P2 | B | FIXED | #792 (logic) + #800 (template) |
+| 5 | P2 | B | FIXED | #792 |
+| 7 | P2 | B | FIXED | #792 |
+| 36 | P3 | B | FIXED | #792 |
+| 44 | P3 | B | FIXED | #792 |
+| 45 | P3 | B | FIXED | #792 |
+| 23 | P2 | C | FIXED | #785 |
+| 24 | P2 | C | FIXED | #785 |
+| 58 | P3 | C | FIXED | #785 |
+| 13 | P2 | D | FIXED | #800 |
+| 14 | P2 | D | SUPERSEDED | CRM Wave 3 (app-wide, unrelated to the resell track) |
+| 15 | P2 | D | FIXED | #800 |
+| 16 | P2 | D | FIXED | #800 |
+| 17 | P2 | D | FIXED | #800 |
+| 18 | P2 | D | FIXED | #800 |
+| 20 | P2 | D | FIXED | #800 |
+| 50 | P3 | D | FIXED | #800 |
+| 51 | P3 | D | FIXED | #800 |
+| 56 | P3 | D (gap) | FIXED | #790 |
+| 21 | P2 | E | FIXED | #803 |
+| 22 | P2 | E | FIXED | #803 |
+| 55 | P3 | E | FIXED | #803 |
+| 57 | P3 | E | FIXED | #794 |
+| 25 | P2 | F | PENDING PRODUCT DECISION | #793 (core) + #803 (residual F2) |
+| 26 | P2 | F | FIXED | #793 (+residual test #803) |
+| 27 | P2 | F | PENDING PRODUCT DECISION | #793 (core) + #803 (residual F4) |
+| 28 | P2 | F | FIXED | #793 |
+| 38 | P3 | F | FIXED | #794 |
+| 59 | P3 | F | FIXED | #793 |
+| F3 | P2 | F (residual) | FIXED | #803 |
+| 6 | P2 | G | FIXED | #800 |
+| 35 | P3 | G | FIXED | #800 |
+| 49 | P3 | G | FIXED | #800 |
+| 19 | P2 | H | FIXED | #800 |
+| 52 | P3 | H | FIXED | #794 |
+| 53 | P3 | H | FIXED | #794 |
+| 54 | P3 | H | FIXED | #794 |
+| 39 | P3 | H | FIXED | #794 |
+| 31 | P3 | I | FIXED | #800 |
+| 33 | P3 | I | FIXED | #800 |
+| 34 | P3 | I | FIXED | #800 |
+| 40 | P3 | I | FIXED | #800 |
+| 41 | P3 | I | FIXED | #800 |
+| 42 | P3 | I | FIXED | #800 |
+| 43 | P3 | I | FIXED | #794 |
+| 48 | P3 | I | FIXED | #800 |
+| 29 | P2 | J | FIXED | #795 |
+| 30 | P2 | J | FIXED | #795 |
+| 60 | P3 | J | FIXED | #795 |
+| 61 | P3 | J | FIXED | #795 |
+| 62 | P3 | J | FIXED | #795 |
+| 63 | P3 | J | FIXED | #795 |
+| 64 | P3 | J | FIXED | #800 |
+
+**Counts:** 62 FIXED · 1 SUPERSEDED · 2 PENDING PRODUCT DECISION · 0 OPEN (65 total).
+
+**Genuinely open (PENDING PRODUCT DECISION — 2):**
+- **#25** — the board's `is_scratch.is_(False)` filter correctly hides the excess mirror's
+  synthetic "Customer Excess" scratch requisition, but it also blanket-hides
+  `app/services/quick_source_service.py`'s scratch requisitions — real one-off buyer
+  RFQ/offer actions, not synthetic supply. Whether quick-sourced work should still surface
+  on the board is a product call, not a code fix.
+- **#27** — `_invalidate_vendor_summaries_for_cards` scopes its reverse lookup to
+  `Requirement.normalized_mpn` only (kept indexed, no full-table scan). A requirement that
+  aggregated the retired mirror's supply via a listed `substitutes` MPN (not its own
+  `primary_mpn`) is missed, so its stale "customer excess" `VendorSightingSummary` row can
+  survive a retire/close/award. Closing this needs a scope decision (index the substitutes
+  JSON? accept a slower scan on this rare path?), not a mechanical fix.
+
 ## Sequencing
 
 1. **Now (PR #785, before merge):** theme C — the three residuals in the new upload feature.
@@ -30,6 +120,8 @@ expire_overdue_lists selects every list with status in (open, collecting) whose 
 
 **Resolution: FIXED.** `expire_overdue_lists` steps a partially-awarded list (`_list_is_partially_awarded` — any `AWARDED` line or `WON` offer) to non-terminal `bid_out` instead of `expired`, so its remaining live bids stay awardable. **Residual (deep-review #2 residual R2, post-#791):** this writer took no M9 row lock, so a concurrent award/close landing between the batch SELECT and this list's per-list write could be clobbered. Each list is now locked (`_lock_list_row`) INSIDE its existing per-list try/except, with "still unresolved? still overdue? partially-awarded?" all re-evaluated post-lock before writing — a concurrent award is never overwritten. See `app/services/excess_service.py` (`expire_overdue_lists`); tests in `tests/test_resell_list_lifecycle.py` (`test_expire_overdue_flips_and_retires`, `test_expire_partially_awarded_list_steps_to_bid_out_not_expired`, `test_expire_stale_read_cannot_clobber_concurrent_award`).
 
+**Status: FIXED in #791** (residual row-lock hardening in #792) — shipped design uses a `bid_out` step-down + per-list `_lock_list_row`, not the finding's literal "flip to BID_OUT or skip" either/or.
+
 ### 4. [P2] unaward_offer lacks the terminal-list guard award_offer has — unwinds awards on CLOSED/EXPIRED lists
 **Where:** `app/services/excess_service.py:1048` (dimension: services-core)
 
@@ -38,6 +130,8 @@ award_offer 409s on a terminal list (line 955), but unaward_offer has no such gu
 **Fix:** Mirror award_offer's guard in unaward_offer: if excess_list.status in {s.value for s in _TERMINAL_LIST_STATUSES}: raise HTTPException(409, ...) immediately after the WON check.
 
 **Resolution: FIXED.** `unaward_offer` now 409s ("This list is closed — the award can no longer be reversed") when `excess_list.status in _TERMINAL_LIST_STATUSES`, checked immediately after the not-WON guard and before any mutation; `bid_out` is not in that set and stays reversible. See `app/services/excess_service.py` (`unaward_offer`); tests in `tests/test_resell_award.py` (`test_unaward_on_terminal_list_409_no_reopen`, `test_unaward_on_bid_out_list_still_works`).
+
+**Status: FIXED in #791.**
 
 ### 8. [P2] M9 award lock never refreshes the ExcessList row, so award's terminal-list guard and mirror sync read pre-lock stale status
 **Where:** `app/services/excess_service.py:916` (dimension: lifecycle-concurrency)
@@ -48,6 +142,8 @@ _lock_list_for_award applies .populate_existing() to the line-item lock query an
 
 **Resolution: FIXED.** `_lock_list_for_award` now composes the new shared `_lock_list_row` (`with_for_update().populate_existing()` on the ExcessList row) + `_lock_list_and_lines` (adds the line-item lock), so the ExcessList query itself refreshes the caller's identity-mapped object in place — the terminal-status guard and `sync_list_mirror` right after both read post-lock committed state. See `app/services/excess_service.py` (`_lock_list_row`, `_lock_list_and_lines`, `_lock_list_for_award`); test in `tests/test_resell_award.py::test_award_lock_refreshes_stale_excess_list_status` (a raw core UPDATE bypasses the ORM to simulate the race within one SQLite session).
 
+**Status: FIXED in #791.**
+
 ### 9. [P2] submit_offer / _link_inbound_offer flip list status via unlocked last-write-wins, resurrecting a concurrently closed/expired list
 **Where:** `app/services/excess_service.py:618` (dimension: lifecycle-concurrency)
 
@@ -56,6 +152,8 @@ submit_offer takes no _lock_list_for_award and never re-reads the list: it loads
 **Fix:** Take _lock_list_for_award (with the list-row refresh from finding 1) in submit_offer and _link_inbound_offer before reading excess_list.status, or make the flip a guarded UPDATE (`WHERE status='open'`) and re-derive the late stamp from the locked read.
 
 **Resolution: FIXED.** Both `submit_offer` and `resell_outreach_service._link_inbound_offer` now take the new list-only `_lock_list_row` (populate_existing) BEFORE re-reading `excess_list.status` / re-validating the posted-status guard / stamping `offer_status_for_list` — a list closed between the caller's stale read and the lock can no longer be resurrected by the open→collecting flip. See `app/services/excess_service.py` (`submit_offer`), `app/services/resell_outreach_service.py` (`_link_inbound_offer`); tests in `tests/test_resell_offers.py` (`test_submit_offer_locks_list_before_status_read`, `test_submit_offer_stale_read_cannot_resurrect_closed_list`) and `tests/test_resell_outreach_service.py::test_reply_with_offer_locks_list_before_status_read`. **Residual (deep-review #2 residual R1, post-#791):** the sibling bid-ingest path `upload_bids` was left unlocked — it now takes `_lock_list_row` right after the owner check, BEFORE re-reading the posted-status guard, for the whole call (one transaction, serializing against a concurrent award on the same list). Its SUPERSEDE step additionally re-checks (`.with_for_update().populate_existing()` + an explicit post-lock status re-check) that the earlier offer it is about to withdraw is still actionable, so it can never clobber an offer that concurrently became `WON`. Also replaced the spy-only lock tests for #9/#11 with raw-core-UPDATE stale-read repros (finding R4) so a regression to pre-lock reads fails the test, not just the wiring check. See `app/services/excess_service.py` (`upload_bids`); tests in `tests/test_resell_bid_upload.py` (`test_upload_bids_locks_list_before_status_read`, `test_upload_bids_stale_read_cannot_resurrect_closed_list`, `test_upload_bids_reupload_race_prior_won_not_clobbered`), `tests/test_resell_list_lifecycle.py::test_end_posting_window_stale_read_cannot_clobber_concurrent_award`, `tests/test_resell_outreach_service.py::test_reply_with_offer_stale_read_cannot_resurrect_closed_list`.
+
+**Status: FIXED in #791** (residual lock hardening on `submit_offer`/`_link_inbound_offer`/`upload_bids` in #792).
 
 ### 10. [P2] Offers landing after close_at but before the nightly sweep are stamped on-time 'open' — the late flag keys only on list status
 **Where:** `app/services/excess_service.py:449` (dimension: lifecycle-concurrency)
@@ -66,6 +164,8 @@ offer_status_for_list decides LATE solely from list status membership in _CLOSED
 
 **Resolution: FIXED.** `offer_status_for_list` now takes the `ExcessList` object (not a bare status string) and returns `late` when EITHER the status already reads closed OR `_posting_window_closed(excess_list)` is true — shared by `submit_offer`, `upload_bids`, and `_link_inbound_offer` so every offer-creation path stamps the same honest lateness even during the gap before the nightly sweep runs. See `app/services/excess_service.py` (`offer_status_for_list`); tests in `tests/test_resell_offers.py` (`test_submit_offer_past_close_at_is_late_even_though_status_still_open`, `test_submit_offer_before_close_at_is_open`), `tests/test_resell_bid_upload.py::test_upload_bids_past_close_at_stamps_late_even_though_status_still_collecting`, `tests/test_resell_outreach_service.py::test_reply_with_offer_past_close_at_stamps_late`.
 
+**Status: FIXED in #791.**
+
 ### 11. [P2] _end_posting_window (close / close-without-bid) is an unlocked M9 sibling — a close racing an award clobbers the AWARDED status
 **Where:** `app/services/excess_service.py:1261` (dimension: lifecycle-concurrency)
 
@@ -74,6 +174,8 @@ close_list / close_list_without_bid check `status in (open, collecting)` on an u
 **Fix:** Take the same list+lines lock (with list refresh) at the top of _end_posting_window before evaluating the closeable guard, mirroring award/withdraw.
 
 **Resolution: FIXED.** `_end_posting_window` now calls the shared `_lock_list_and_lines` BEFORE evaluating the closeable guard — the same M9 primitive `_lock_list_for_award` composes — so a close racing a concurrent award serializes instead of clobbering the just-awarded status. See `app/services/excess_service.py` (`_end_posting_window`, `_lock_list_and_lines`); test in `tests/test_resell_list_lifecycle.py::test_end_posting_window_locks_list_before_guard`. **Residual (deep-review #2 residual R4, post-#791):** that test only pinned wiring (a monkeypatch spy) — it would pass even if the guard read pre-lock state. Augmented with a raw-core-UPDATE stale-read repro: `tests/test_resell_list_lifecycle.py::test_end_posting_window_stale_read_cannot_clobber_concurrent_award` fails if the closeable guard ever reads pre-lock state.
+
+**Status: FIXED in #791** (residual stale-read test hardening in #792).
 
 ### 12. [P2] assign_offer_line allows assigning an unmatched bid onto an already-AWARDED line, displacing the winner from best_offer_id
 **Where:** `app/services/excess_service.py:777` (dimension: lifecycle-concurrency)
@@ -84,6 +186,8 @@ The target-line guard checks only existence and list membership — not the targ
 
 **Resolution: FIXED.** `assign_offer_line` now takes `_lock_list_for_award` right after resolving the offer line (before any status guard), and 409s when the target line is `awarded` ("unaward the winner first") or `withdrawn` — the winner's `best_offer_id`/`best_offer_unit_price` are never displaced. See `app/services/excess_service.py` (`assign_offer_line`); tests in `tests/test_resell_award.py` (`test_assign_onto_awarded_target_line_409_winner_intact`, `test_assign_onto_available_line_on_bid_out_list_still_works`). **Residual R5 (post-#791 doc nit): FIXED** — the APP_MAP assign-route bullet cited "finding #11/#12"; assign is #12 only, corrected in `docs/APP_MAP_INTERACTIONS.md`.
 
+**Status: FIXED in #791.**
+
 ### 32. [P3] Award/unaward routes ignore the {list_id} path param — no offer.excess_list_id == list_id check (withdraw has one)
 **Where:** `app/routers/resell.py:1535` (dimension: router-correctness)
 
@@ -92,6 +196,8 @@ resell_award_offer (line 1535) and resell_unaward_offer (line 1558) never verify
 **Fix:** In both routes load the offer first and 404 when `offer.excess_list_id != list_id`, exactly as resell_withdraw_offer does.
 
 **Resolution: FIXED.** `resell_award_offer` and `resell_unaward_offer` both load the offer first and 404 ("Offer {id} not found on list {list_id}") when `offer.excess_list_id != list_id`, exactly mirroring `resell_withdraw_offer`. See `app/routers/resell.py`; tests in `tests/test_resell_award.py` (`test_award_route_wrong_list_id_404_nothing_mutated`, `test_unaward_route_wrong_list_id_404_nothing_mutated`).
+
+**Status: FIXED in #791.**
 
 ### 37. [P3] LATE offer status silently flattened to OPEN on unaward / competitor revival
 **Where:** `app/services/excess_service.py:1052` (dimension: services-core)
@@ -102,6 +208,8 @@ A LATE offer (landed after the window closed — a state the module explicitly p
 
 **Resolution: FIXED (same defect as #46 — one fix).** New `_revived_offer_status(excess_list, offer)` recomputes `late` vs `open` from `offer.created_at` vs `excess_list.close_at` (deterministic, no stored prior-status column, no migration); `unaward_offer` uses it for the reversed winner. See `app/services/excess_service.py` (`_revived_offer_status`, `unaward_offer`); tests in `tests/test_resell_award.py` (`test_unaward_revives_late_born_winner_as_late_not_open`, `test_unaward_revives_on_time_winner_as_open`). **Residual (deep-review #2 residual R3, post-#791):** the window-only check missed a posting closed by STATUS with no `close_at` ever recorded (e.g. `awarded`, no D1 deadline configured) — it fell through to `open`. `_revived_offer_status` gained a `competitor: bool = False` parameter: when there is no `close_at` to check AND `competitor=True` AND at least one OTHER line still reads `awarded` (i.e. the list is genuinely resolved beyond just this reversal, not just because THIS reversal's own lines were the ones that made it read `awarded`), it falls back to `late`. Deliberately NOT applied to the winner's own reversal (`competitor` defaults False there) — that would misclassify the ordinary on-time single-line award→unaward round-trip. Only `_reopen_competing_offers` passes `competitor=True`. See `app/services/excess_service.py` (`_revived_offer_status`, `_reopen_competing_offers`); tests in `tests/test_resell_award.py` (`test_revived_offer_status_awarded_close_at_none_is_late`, `test_revived_offer_status_collecting_close_at_none_is_open`, `test_unaward_on_close_at_null_awarded_list_revives_competitor_as_late`).
 
+**Status: FIXED in #791** (residual `close_at`-null status-based fallback in #792) — shipped design derives lateness from `_revived_offer_status`, not the finding's literal `offer_status_for_list(excess_list.status)` suggestion.
+
 ### 46. [P3] Award→unaward round-trip erases LATE provenance: _reopen_competing_offers revives late offers as OPEN
 **Where:** `app/services/excess_service.py:897` (dimension: lifecycle-concurrency)
 
@@ -111,6 +219,8 @@ _close_competing_offers correctly closes both OPEN and LATE competitors to LOST 
 
 **Resolution: FIXED (same defect as #37 — one fix).** `_reopen_competing_offers` uses the same `_revived_offer_status(excess_list, other)` recomputation instead of hardcoding `open`. See `app/services/excess_service.py` (`_revived_offer_status`, `_reopen_competing_offers`); test in `tests/test_resell_award.py::test_unaward_reopens_late_born_competitor_as_late_not_open`.
 
+**Status: FIXED in #791.**
+
 ### 47. [P3] Posted-status guards live only in the router: service-level submit_offer accepts offers on drafts and outreach's _guard_owner skips the draft check
 **Where:** `app/services/excess_service.py:545` (dimension: lifecycle-concurrency)
 
@@ -119,6 +229,8 @@ The Phase-1 architecture states 'Guards live in the SERVICE layer (routers stay 
 **Fix:** Add a 404/409 non-posted guard inside submit_offer and _guard_owner (mirroring the close/award service-level guards) so direct service callers cannot attach offers/outreach to drafts.
 
 **Resolution: FIXED.** `submit_offer` now 409s ("This list is not accepting offers") when `excess_list.status` is not in `_POSTED_LIST_STATUSES` (checked post-lock, see finding #9); `resell_outreach_service._guard_owner` 409s ("List is not posted") on a DRAFT list, mirroring the router's own guard message. See `app/services/excess_service.py` (`submit_offer`, `_POSTED_LIST_STATUSES`), `app/services/resell_outreach_service.py` (`_guard_owner`); tests in `tests/test_resell_offers.py` (`test_submit_offer_rejects_non_posted_list_service_level`, `test_submit_offer_works_on_every_posted_status`) and `tests/test_resell_outreach_service.py::TestSubmitOutreachGuards::test_draft_list_blocked`.
+
+**Status: FIXED in #791.**
 
 
 ## B. Outreach & email truthfulness
@@ -133,6 +245,8 @@ retry_outreach_send treats an exception from email_service._find_sent_message as
 
 **FIXED in PR #792 (annotation added 2026-07-28).** `_find_sent_message` now has the three-state contract (found dict / None / raises `SentMessageLookupError` when every attempt errored — `app/email_service.py`), and `retry_outreach_send` maps a raised lookup to the existing INTERRUPTED no-resend branch, so a Graph outage during the reconcile can never trigger a double-send.
 
+**Status: FIXED in #792.**
+
 ### 3. [P2] Degraded email outreach row (SENT, no graph ids) is a hard dead end — the 409 points at a route that 404s
 **Where:** `app/routers/resell.py:2140` (dimension: router-correctness)
 
@@ -145,6 +259,8 @@ Phase 2 deliberately created a 'delivered, reply-matching degraded' state: a SEN
 
 **FIXED 2026-07-28 (themes D/G/H/I batch PR).** The declared B3 template follow-up shipped: `_outreach.html` renders Log response / Log bid when `(channel != 'email' or not graph_conversation_id)` and the status is not terminal — mirroring the `_load_manual_outreach_for_owner` route contract — so a degraded email row is no longer an action-less dead end (View reply / Retry gates unchanged; render tests for degraded vs threaded rows in tests/test_resell_themes_dghi.py).
 
+**Status: FIXED in #792** (route/logic half) **+ #800** (template follow-up).
+
 ### 5. [P2] Recipient address is not persisted on ExcessOutreach — retry reconciles against the card's CURRENT primary email, defeating the guard
 **Where:** `app/services/resell_outreach_service.py:879` (dimension: outreach-affinity)
 
@@ -153,6 +269,8 @@ enqueue_outreach_email sends to 'buyer.get("email") or _primary_email(card)' (li
 **Fix:** Persist the send-time recipient (e.g. send_to Column(Text)) alongside send_subject/send_body in the next migration; retry should use row.send_to for both the reconcile lookup and the resend, falling back to _primary_email only for legacy rows.
 
 **Resolution: FIXED (migration 203_outreach_recipient_email).** Added `excess_outreach.recipient_email` (Text, nullable), stamped by `enqueue_outreach_email` at send/enqueue time (threaded through `_make_outreach_rows`). `retry_outreach_send` now resolves `row.recipient_email or (_primary_email(card) if card else None)` for BOTH the Sent-folder reconcile lookup and the resend, and backfills a legacy NULL row with the resolved email once a retry/reconcile succeeds. See `app/models/excess.py` (`ExcessOutreach.recipient_email`), `app/services/resell_outreach_service.py` (`_make_outreach_rows`, `enqueue_outreach_email`, `retry_outreach_send`), `alembic/versions/203_outreach_recipient_email.py`; tests in `tests/test_resell_outreach_async.py` (`test_enqueue_stamps_recipient_email`, `test_retry_reconciles_against_persisted_recipient_email_after_card_email_changes`, `test_retry_legacy_row_falls_back_to_card_email`).
+
+**Status: FIXED in #792.**
 
 ### 7. [P2] 30-minute stale-'sending' threshold is only enforced by a once-nightly sweep — orphaned rows are unretryable and poll for up to ~24h
 **Where:** `app/jobs/resell_jobs.py:38` (dimension: outreach-affinity)
@@ -163,6 +281,8 @@ sweep_stale_sending_outreach declares a row 'presumed orphaned' after _STALE_SEN
 
 **Resolution: FIXED (opportunistic sweep, not a new interval trigger).** Extracted the reclassification into a shared `reclassify_stale_sending(db, *, excess_list_id=None, outreach_id=None, now=None)`; `sweep_stale_sending_outreach` (the nightly cron entry point) is now a thin wrapper over it with no scope. The outreach tab context builder (`_outreach_tracker_context`) calls it scoped to the list BEFORE querying rows, and the retry route (`resell_retry_outreach`) calls it scoped to the one row BEFORE the retryable-status check — so a stale row becomes actionable the instant the tab is opened or Retry is clicked, without waiting on the once-nightly cron. See `app/services/resell_outreach_service.py` (`reclassify_stale_sending`, `sweep_stale_sending_outreach`), `app/routers/resell.py` (`_outreach_tracker_context`, `resell_retry_outreach`); tests in `tests/test_nightly_resell_coverage.py` (`TestReclassifyStaleSendingScoping`), `tests/test_resell_outreach_async.py` (`test_retry_route_stale_sending_row_becomes_retryable_immediately`, `test_retry_route_fresh_sending_row_stays_409`, `test_outreach_tab_load_reclassifies_stale_sending_row`).
 
+**Status: FIXED in #792** — shipped as an opportunistic sweep on tab-load/retry, not the finding's literal interval-trigger suggestion.
+
 ### 36. [P3] resell_retry_outreach mutates outreach row state (including forging created_at) directly in the router
 **Where:** `app/routers/resell.py:2090` (dimension: router-correctness)
 
@@ -171,6 +291,8 @@ The retry route performs the state transition itself — flips status to SENDING
 **Fix:** Move the optimistic flip into a service function (e.g. mark_outreach_retrying) and track the sweep window in a dedicated column (or key the sweeper on updated_at) instead of overwriting created_at.
 
 **Resolution: FIXED (behavior preserved exactly, per scope).** Added `resell_outreach_service.mark_outreach_retrying(db, outreach)` — the router's 404/409 guards stay (thin HTTP layer), but the mutation (status→sending, clear send_error/sent_at, refresh created_at, commit+refresh) moved into the service, mirroring `retry_outreach_send`'s own internal reset. The `created_at` overwrite is preserved exactly as before (the dedicated-column alternative was out of scope for this fix — no new migration). See `app/services/resell_outreach_service.py` (`mark_outreach_retrying`), `app/routers/resell.py` (`resell_retry_outreach`); test in `tests/test_resell_outreach_async.py::test_mark_outreach_retrying_flips_row_and_refreshes_created_at`.
+
+**Status: FIXED in #792** — router→service move done; the `created_at` overwrite itself was deliberately left as-is (no dedicated column), diverging from the finding's suggested alternative.
 
 ### 44. [P3] recompute_all_buyer_scores has no per-buyer error isolation — one bad buyer rolls back the entire nightly reconcile
 **Where:** `app/services/buyer_affinity_service.py:614` (dimension: outreach-affinity)
@@ -181,6 +303,8 @@ The nightly BuyerScore backstop iterates every card and calls recompute_buyer_sc
 
 **Resolution: FIXED.** `recompute_all_buyer_scores` now wraps each buyer in its own try/except + commit (mirroring `expire_overdue_lists`'s per-list isolation) — a poisoned buyer is rolled back, logged, and skipped, and the batch continues reconciling the rest; returns the successfully-recomputed count (was: the full walked-card count regardless of failures). See `app/services/buyer_affinity_service.py` (`recompute_all_buyer_scores`); test in `tests/test_resell_buyer_score_backstop.py::test_backstop_one_poisoned_buyer_does_not_strand_the_others`.
 
+**Status: FIXED in #792.**
+
 ### 45. [P3] no_response and opened statuses are never written by any production path; service docstrings still claim finalize advances rows to no_response
 **Where:** `app/services/resell_outreach_service.py:22` (dimension: outreach-affinity)
 
@@ -189,6 +313,8 @@ ExcessOutreachStatus.NO_RESPONSE ('the terminal GENUINE-buyer-silence state used
 **Fix:** Fix the two stale docstrings now; either add the aging job that flips aged SENT rows to NO_RESPONSE (giving the documented nudge semantics a writer) or remove NO_RESPONSE/OPENED from the enum docs, badge map, and reader sets as consciously dormant.
 
 **Resolution: FIXED (docstrings corrected; statuses stay reserved, no members removed).** The module docstring and `submit_outreach_email`'s docstring no longer claim a writer advances rows to `no_response` (corrected to `sent` / `failed`, with a note that `no_response`/`opened` are reserved states with no current writer). `constants.ExcessOutreachStatus`'s docstring similarly corrected. `NO_RESPONSE` and `OPENED` remain in the enum (a future aging job is the natural writer) per the instruction not to remove members. See `app/services/resell_outreach_service.py` (module docstring, `submit_outreach_email`), `app/constants.py` (`ExcessOutreachStatus`).
+
+**Status: FIXED in #792** — took the "fix the docstrings now" half of the fix; the OR-alternative (aging job or member removal) was consciously deferred, statuses stay reserved.
 
 
 ## C. New bid-upload feature residuals (fix in PR #785)
@@ -202,6 +328,8 @@ _classify_bid_row builds accepted rows with "unit_price": _parse_price(row.get("
 
 **Resolution:** `_classify_bid_row` now rejects a non-blank/unparseable-or-negative price with reason "invalid unit price" before quantity/blank checks build the returned fields; a blank cell is unchanged (accepted, `unit_price=None`). See `app/services/excess_service.py` (`_classify_bid_row`); tests in `tests/test_resell_bid_upload.py` (`test_preview_invalid_unit_price_rejected_never_nulled`, `test_preview_blank_unit_price_accepted_with_none`, `test_upload_bids_invalid_unit_price_rejected*`).
 
+**Status: FIXED in #785.**
+
 ### 24. [P2] Re-uploading a corrected bid sheet duplicates every previously ingested bid (no idempotency or duplicate warning) — **FIXED in PR #785**
 **Where:** `app/services/excess_service.py:1005` (dimension: gap:bid-csv-upload)
 
@@ -211,6 +339,8 @@ upload_bids unconditionally creates a NEW ExcessOffer per bidder on every call (
 
 **Resolution:** `upload_bids` now supersedes (withdraw + replace) the design chosen in the review: before creating a bidder's new offer it looks up an earlier offer on this list for the same resolved VendorCard with `submitted_by == the uploading owner`, `notes == "Uploaded bid sheet"`, and status still open/late — withdraws it, and rolls both the withdrawn and new offer's matched lines into the rollup recompute. Manually-submitted offers (different notes) and won/lost offers are never touched. The result now carries a `superseded` count, surfaced in the confirm route's toast ("... replaced K earlier upload(s)") only when K>0; `preview_bid_upload` adds a cheap `supersedes_by_bidder` flag rendered as an inline note in `bid_upload_preview.html`. See `app/services/excess_service.py` (`upload_bids`, `preview_bid_upload`, `_UPLOAD_OFFER_NOTES`), `app/routers/resell.py` (`resell_bids_upload_confirm`); tests in `tests/test_resell_bid_upload.py` (`test_upload_bids_reupload_supersedes_old_offer`, `test_upload_bids_reupload_leaves_manual_offer_untouched`, `test_upload_bids_reupload_never_withdraws_won_offer`, `test_preview_flags_bidder_with_existing_upload`, `test_upload_confirm_toast_includes_superseded_count`).
 
+**Status: FIXED in #785.**
+
 ### 58. [P3] Rejected-row numbers drift on sheets with blank separator rows, while the preview promises they match the file — **FIXED in PR #785**
 **Where:** `app/services/excess_service.py:882` (dimension: gap:bid-csv-upload)
 
@@ -219,6 +349,8 @@ preview_bid_upload numbers rows with 'enumerate(rows, start=2)' assuming the par
 **Fix:** Have parse_tabular_file preserve source row numbers (emit them alongside each dict, as extract_mpns_with_rows already needs), or soften the template promise to 'Row numbers count non-blank rows (header = row 1)'.
 
 **Resolution:** Scope decision taken (do not change `parse_tabular_file`'s shared contract in this PR): `bid_upload_preview.html`'s promise now reads "Row numbers count filled rows only (header = row 1) — blank rows in your file are skipped," and `preview_bid_upload`'s docstring no longer claims file-row parity. See `app/templates/htmx/partials/resell/bid_upload_preview.html`, `app/services/excess_service.py` (`preview_bid_upload` docstring); test in `tests/test_resell_bid_upload.py::test_upload_preview_blank_separator_row_shifts_numbering` (parses a real CSV with a blank separator line through `parse_tabular_file` to pin the drift).
+
+**Status: FIXED in #785** — shipped as the softened-promise alternative (template copy + docstring), not the `parse_tabular_file` row-number-preservation option.
 
 
 ## D. UX truthfulness & dead ends
@@ -233,6 +365,8 @@ D2 hides every offer-existence signal from non-owners: _list_cards nulls coverag
 
 **FIXED 2026-07-28 (themes D/G/H/I batch PR).** In the open lens the stage tokens open/collecting/live all merge onto `_LIVE_STATUSES` (`_list_rows_context`), and both `_list_rows.html` and `_header_chips.html` collapse a collecting badge to a neutral 'open' on the same `can_see_customer` predicate — stage-diffing and the badge both stop leaking offer existence.
 
+**Status: FIXED in #800.**
+
 ### 14. [P2] Every resell 409 guard failure is completely silent in the UI
 **Where:** `app/routers/resell.py:1139` (dimension: frontend-templates)
 
@@ -242,6 +376,8 @@ The global htmx error handler (app/static/htmx_app.js:586-593) deliberately supp
 
 
 **FIXED 2026-07-28 via the app-wide 409 HX-Trigger seam (CRM Wave 3 PR).** Closed centrally — the shared 409 handler owns htmx 409 messaging for every module, so no per-route resell change is needed.
+
+**Status: SUPERSEDED** — mooted by an unrelated app-wide 409 handler change (main.py's exception handler now attaches `HX-Trigger` showToast to every htmx 409, verified present), not a resell-track PR fix.
 
 ### 15. [P2] Draft Delete button is dead on a deep-linked /v2/resell/{id} page
 **Where:** `app/templates/htmx/partials/resell/detail.html:53` (dimension: frontend-templates)
@@ -253,6 +389,8 @@ The header Delete button targets #resell-list-body, which only exists inside the
 
 **FIXED 2026-07-28 (themes D/G/H/I batch PR).** The Delete button targets `closest [data-resell-detail-root]` (exists in both render contexts) and `resell_delete_list` answers with `HX-Redirect: /v2/resell` + toast (the companies-delete pattern; `_list_after_delete.html` retired), so a deep-linked delete actually sends and lands on the workspace with a correct address bar.
 
+**Status: FIXED in #800.**
+
 ### 16. [P2] Import-confirm toast fires 'Imported N lines' unconditionally, masking failures and clobbering the skipped-rows warning
 **Where:** `app/templates/htmx/partials/resell/import_preview.html:67` (dimension: frontend-templates)
 
@@ -262,6 +400,8 @@ The confirm-import form's @htmx:after-request handler sets the success toast wit
 
 
 **FIXED 2026-07-28 (themes D/G/H/I batch PR).** One server-side emitter: `resell_import_confirm` sends a single HX-Trigger toast combining the imported count and any skipped-row warning (type warning when rows were skipped), and the unconditional client-side success handler was deleted from `import_preview.html`.
+
+**Status: FIXED in #800.**
 
 ### 17. [P2] List search input swaps itself away on every debounced keystroke — typing focus is lost
 **Where:** `app/templates/htmx/partials/resell/_lists.html:34` (dimension: frontend-templates)
@@ -273,6 +413,8 @@ The search input targets #resell-list-body with innerHTML, but the input itself 
 
 **FIXED 2026-07-28 (themes D/G/H/I batch PR).** The left list swaps only the `#resell-list-rows` container: the search input targets the new rows-only `GET /v2/partials/resell/list-rows` endpoint (`_list_rows.html`), keeping the filter bar — and the input being typed in — outside the swapped region (the sightings/knowledge/parts pattern, not the id band-aid).
 
+**Status: FIXED in #800.**
+
 ### 18. [P2] Header 'N offers' chip and Offers-tab badge count withdrawn/expired offers the tab never shows
 **Where:** `app/routers/resell.py:352` (dimension: frontend-templates)
 
@@ -282,6 +424,8 @@ _detail_context computes offer_count with no status filter, but the Offers tab r
 
 
 **FIXED 2026-07-28 (themes D/G/H/I batch PR).** `_detail_context` filters `offer_count` on `_VISIBLE_OFFER_STATUSES` (mirroring `take_all_count`), so the header chip and Offers-tab badge count exactly what the tab renders.
+
+**Status: FIXED in #800.**
 
 ### 20. [P2] _parse_close_at stamps UTC onto the naive datetime-local wall-clock — deadline saved shifted by the user's UTC offset, spurious 400 on near-term deadlines
 **Where:** `app/routers/resell.py:167` (dimension: data-tests)
@@ -293,6 +437,8 @@ The D1 "Offers close by" input is an HTML datetime-local field, which submits th
 
 **FIXED 2026-07-28 (themes D/G/H/I batch PR).** The create modal posts a hidden `tz_offset_min` (from `Date.getTimezoneOffset()`) and `_parse_close_at(raw, tz_offset_min)` converts the local wall-clock to the real UTC instant (UTC fallback when the offset is absent/invalid) — killing both the shifted deadline and the spurious 400. The two sibling `replace(tzinfo=UTC)` display sites (`_hours_until` / `_close_at_display`) were verified correct: they stamp UTC onto naive DB reads, and the column stores UTC.
 
+**Status: FIXED in #800.**
+
 ### 50. [P3] 'Submit offer' button renders on closed/expired lists and dead-ends in a 'List not found' error
 **Where:** `app/templates/htmx/partials/resell/detail.html:101` (dimension: frontend-templates)
 
@@ -302,6 +448,8 @@ _detail_context sets can_offer without any list-status check (resell.py:375 `exc
 
 
 **FIXED 2026-07-28 (themes D/G/H/I batch PR).** `can_offer` in `_detail_context` now carries the posted-status term, so a broker on a closed/expired list no longer sees a Submit-offer button that dead-ends in a 404.
+
+**Status: FIXED in #800.**
 
 ### 51. [P3] Open-lens empty state claims 'No postings are open to you' even when a search/filter is what emptied the list
 **Where:** `app/templates/htmx/partials/resell/_lists.html:107` (dimension: frontend-templates)
@@ -313,6 +461,8 @@ The empty-state branch order tests `lens == 'open'` before `stage or needs or q`
 
 **FIXED 2026-07-28 (themes D/G/H/I batch PR).** Branch order flipped (now in `_list_rows.html`): the filter condition tests first, so a filtered-empty list reads 'No lists match this filter.' in both lenses.
 
+**Status: FIXED in #800.**
+
 ### 56. [P3] Invalid line id in assemble payload surfaces as 404 'Line item None is not part of list N' instead of 400
 **Where:** `app/routers/resell.py:995` (dimension: gap:bid-back-export)
 
@@ -321,6 +471,8 @@ resell_assemble_bid coerces ids with `_to_int(str(s.get("excess_line_item_id")))
 **Fix:** In the router, 400 when any coerced excess_line_item_id is None, consistent with the adjacent payload-shape guards.
 
 **Resolution: FIXED (verified NOT already fixed elsewhere, per the P1/P2 pair task's VERIFY note).** `resell_assemble_bid` now 400s ("Invalid bid payload") when any coerced `excess_line_item_id` is `None`, checked right after building `selections` and before the `build_bid_back` call — a missing/typo'd/out-of-range id never reaches the foreign-line guard's confusing "Line item None..." 404. See `app/routers/resell.py::resell_assemble_bid`; test in `tests/test_resell_bid_lifecycle.py::test_assemble_bid_route_rejects_missing_line_id_400`.
+
+**Status: FIXED in #790.**
 
 
 ## E. Bid-back (CustomerBid) guards
@@ -334,6 +486,8 @@ Neither build_bid_back nor send_bid_back checks excess_list.status; the only gua
 
 **Resolution: FIXED.** Both `build_bid_back` and `send_bid_back` now 409 ("This list is not in a state that supports a customer bid back") unless `excess_list.status` is in `excess_service._POSTED_LIST_STATUSES` (open/collecting/bid_out/awarded) — never draft, never terminal closed/expired. `send_bid_back` re-checks independently (the list can decay to terminal between assemble and send). See `app/services/bid_back_service.py` (`build_bid_back`, `send_bid_back`); tests in `tests/test_resell_bid_back.py` (`test_build_bid_back_rejects_draft_list`, `test_build_bid_back_rejects_expired_list`, `test_build_bid_back_rejects_closed_list`, `test_build_bid_back_works_on_bid_out_list`, `test_build_bid_back_works_on_awarded_list`), `tests/test_resell_bid_lifecycle.py` (`test_send_bid_back_rejects_when_list_no_longer_posted`), `tests/test_resell_bid_lifecycle.py::test_assemble_bid_route_rejects_draft_list_409` (router level). Scope note: the legacy pre-Resell `ACTIVE`/`BIDDING` statuses also 409 — a deliberate policy choice consistent with the shipped `submit_offer`/`upload_bids` guards (the legacy members retire in the cutover chunk), documented in `tests/test_resell_bid_back.py::test_build_bid_back_rejects_legacy_status_list`.
 
+**Status: FIXED in #803.**
+
 ### 22. [P2] Emailed customer PDF is stamped 'Status: draft' — attachment rendered before the draft→sent flip
 **Where:** `app/services/bid_back_service.py:357` (dimension: gap:bid-back-export)
 
@@ -343,6 +497,8 @@ send_bid_back renders the PDF attachment while the bid is still a draft (the 409
 
 **Resolution: FIXED (render-time presentation override — flip-after-send preserved).** The emailed customer PDF now renders with `status_override=CustomerBidStatus.SENT` threaded `send_bid_back` → `_bid_pdf_attachment` → `generate_bid_report_pdf` → `bid_back_export_context` — a presentation-only substitute for the exported `status` value, so the one document the customer receives says "sent", never "draft". The bid ROW is not mutated before or during the send: `email_service.send_batch_rfq` commits the session internally (Contact tracking — on failed/skipped outcomes too), so any pending draft→sent flip would be durably persisted before the result is even inspected (an earlier flip-before-send implementation did exactly that — a failed Graph send committed a false `sent` stamp and the draft-only guard 409-blocked every retry; caught in pre-PR verification and reverted). The base semantics stand: `status`/`sent_at` flip and commit ONLY after a confirmed `sent` result; a failed send raises 502 and leaves a genuine, retryable draft. The owner download/preview path passes no override and shows the real status. See `app/services/bid_back_service.py::send_bid_back` / `bid_back_export_context`, `app/services/document_service.py::generate_bid_report_pdf`; tests in `tests/test_resell_bid_lifecycle.py` (`test_send_bid_back_pdf_renders_with_sent_status_not_draft` — pins the rendered context saying `sent` while the row is still `draft` at render time, `test_send_bid_back_failed_send_survives_internal_commit_and_retry_succeeds` — commit-faithful send mock: failed send leaves a committed draft and the retry succeeds, `test_send_bid_back_pdf_render_failure_leaves_bid_draft`, plus the pre-existing `test_send_bid_back_failed_send_502`).
 
+**Status: FIXED in #803** — shipped as a render-time `status_override` presentation substitute (flip-after-send preserved), replacing an earlier flip-before-send attempt that was caught and reverted in pre-PR verification; differs from the finding's literal "drop the status row" suggestion.
+
 ### 55. [P3] Negative override prices accepted server-side and exported to the customer document
 **Where:** `app/routers/resell.py:2576` (dimension: gap:bid-back-export)
 
@@ -351,6 +507,8 @@ The only floor on the per-line price is the client-side `min="0"` on the number 
 **Fix:** Reject negative (and absurdly large) customer_unit_price in build_bid_back with a 400, mirroring the quantity>0 validator.
 
 **Resolution: FIXED.** `build_bid_back` now rejects a negative `customer_unit_price` override at the assemble boundary with a 400 ("customer_unit_price cannot be negative") — see `app/services/bid_back_service.py:182-187` (the guard cites this finding inline). Zero/positive overrides pass through unchanged; blank/unparseable resolves to None upstream and falls back to the rollup price, preserving current semantics. Tests: `tests/test_resell_bid_back.py::test_build_bid_back_rejects_negative_override` (service boundary; also asserts no CustomerBidLine is created carrying the negative price) and `tests/test_resell_bid_lifecycle.py::test_assemble_bid_route_rejects_negative_price_400` (router level). The "absurdly large" upper bound from the fix suggestion was not added — only the negative floor, mirroring the quantity>0 discipline.
+
+**Status: FIXED in #803.**
 
 ### 57. [P3] CustomerBid.status column default is the raw string "draft" instead of CustomerBidStatus.DRAFT
 **Where:** `app/models/excess.py:255` (dimension: gap:bid-back-export)
@@ -362,6 +520,8 @@ CLAUDE.md mandates StrEnum constants from app/constants.py for all status values
 **FIXED 2026-07-24 (P3 batch PR).** CustomerBid.status column default now uses `CustomerBidStatus.DRAFT` (imported from app.constants at module top) instead of the raw string; client-side default only, no migration. Review follow-up: the seven sibling raw-string Column defaults in the same file (ExcessList.status, ExcessLineItem.status, ExcessOffer.scope/status, ExcessOfferLine.match_status, ExcessOutreach.channel/status) were converted to their StrEnum members in the same pass, and the validators now use the module-top enum imports instead of shadowing local imports — value-identical, no migration.
 
 **Re-verified 2026-07-24 (P1/P2 pair task VERIFY note): still fixed.** Re-grounded against current `app/models/excess.py:268` — `status = Column(String(20), default=CustomerBidStatus.DRAFT)` — confirmed already fixed by the P3 batch above; no further change needed. Skipped, as instructed.
+
+**Status: FIXED in #794.**
 
 
 ## F. Mirror & sightings integration
@@ -375,6 +535,8 @@ build_board_requirement_query (shared by the sightings board list, its stat coun
 
 **Resolution:** `build_board_requirement_query` now filters `Requisition.is_scratch.is_(False)` — the single source of truth for the board list, its CSV export, and (as a plain query filter) the CSV rows all drop the mirror's virtual requirement. The cached `sightings_stat_counts` query and the dashboard-strip `active_req_select` (urgent/stale/pending/unassigned counters, which independently re-derive the same base predicate) both got the identical filter so the badges above the now-filtered list can't disagree with it. See `app/routers/sightings.py`; tests in `tests/test_sightings_mirror_exclusion.py`. **Residual (deep-review #2 residual F2, post-#793): FIXED.** The dashboard-strip + facet-count filters were revert-green (untested numbers). Added `test_dashboard_counters_exclude_mirror_virtual_requirement` and `test_stat_counts_exclude_mirror_virtual_requirement` to `tests/test_sightings_mirror_exclusion.py` — each seeds a scratch mirror requirement shaped to inflate the counts if leaked (high `priority_score`, no `assigned_buyer_id`, shared `sourcing_status='open'`) and asserts the counters/facets exclude it.
 
+**Status: PENDING PRODUCT DECISION** — the mirror's phantom scratch requisition is fixed (#793, residual F2 in #803), but the blanket `Requisition.is_scratch.is_(False)` filter also hides `quick_source_service.py`'s legitimate one-off buyer scratch requisitions from the board; whether those should stay visible is a product call, not a further code fix.
+
 ### 26. [P2] Mirror sightings are never scored/tiered — 'Customer Excess' ranks as tier 'Poor' yet sorts to the top on Postgres — **FIXED**
 **Where:** `app/services/sighting_ingest.py:34` (dimension: gap:mirror-consumers)
 
@@ -383,6 +545,8 @@ mirror_line builds its row via sighting_from_row, which defaults `score=item.get
 **Fix:** In mirror_line, set a real score (e.g. via score_sighting_v2 completeness inputs) and evidence_tier — add 'customer_excess' to tier_for_sighting (a live in-hand posting is arguably T6-level trust, not the T3 fallback); add .nullslast() to the three score.desc() order_bys.
 
 **Resolution:** Implemented exactly as prescribed (score honestly, not exclude — a live in-hand posting is genuine, useful supply on a REAL requirement's vendor board, so hiding it would be a regression, not a fix). `mirror_line` now calls `scoring.score_sighting_v2` (real qty/price/completeness inputs; no median-price context available, so price/trust fall to their honest "missing data" baselines) and sets `score`/`score_components`/`evidence_tier` on every mirrored Sighting. `evidence_tiers.tier_for_sighting` gained a `"customer_excess"` → T6 mapping. `.nullslast()` was added to all three `score.desc()` order-bys as defense-in-depth. See `app/services/excess_mirror.py` (`mirror_line`), `app/evidence_tiers.py`, `app/routers/sightings.py`, `app/routers/htmx/parts.py`; tests in `tests/test_resell_mirror.py::test_mirror_line_scores_and_tiers_honestly`. **Residual (deep-review #2 residual F1, post-#793): FIXED.** The three `.nullslast()` additions were untestable on SQLite (its `DESC` default already sorts NULLs last — the opposite of Postgres, where they're load-bearing). New `tests/test_score_nullslast_postgres.py` (`@requires_postgres`, three tests) seeds a NULL-scored + a real-scored `VendorSightingSummary` on the same requirement and pins the NULL-scored row sorting LAST on all three surfaces (board top-vendor pick, the detail-panel list, `part_tab_sourcing`) against a real Postgres engine; each was verified to FAIL when `.nullslast()` is removed.
+
+**Status: FIXED in #793** (residual Postgres-only `nullslast` test coverage in #803).
 
 ### 27. [P2] Retiring the mirror never invalidates VendorSightingSummary — requirement vendor boards advertise closed excess supply forever — **FIXED**
 **Where:** `app/services/excess_mirror.py:228` (dimension: gap:mirror-consumers)
@@ -393,6 +557,8 @@ retire_line / sync_list_mirror / teardown_list_mirror delete the mirrored Sighti
 
 **Resolution:** Both halves implemented. `sighting_aggregation.rebuild_vendor_summaries` now deletes any summary row for a vendor absent from the current sighting group on an unscoped (`vendor_names=None`) rebuild. `excess_mirror.retire_line` / `teardown_list_mirror` call a new `_invalidate_vendor_summaries_for_cards` helper — reverse-looks-up real `Requirement`s sharing the retired line's `MaterialCard.normalized_mpn` (indexed `Requirement.normalized_mpn`, no full-table scan) and reruns `rebuild_vendor_summaries` for each, dropping the stale 'customer excess' row immediately rather than waiting for an unrelated re-search. See `app/services/excess_mirror.py`, `app/services/sighting_aggregation.py`; tests in `tests/test_resell_mirror.py::test_retire_line_invalidates_real_requirement_vendor_summary`, `test_teardown_invalidates_real_requirement_vendor_summary`. **Residual (deep-review #2 residual F4, post-#793): FIXED.** Retire was eager but revive was lazy — `sync_list_mirror` re-mirroring a line back to live (list re-published, a line un-awarded, etc.) never called the invalidation helper, so a real requirement's vendor board only got the "customer excess" row back once an unrelated search happened to rebuild it. `sync_list_mirror` now collects the `material_card_id` of every line whose mirror row THIS sync genuinely revives — newly creates, or restores from unavailable (checked against `_find_mirror` before the upsert) — and calls `_invalidate_vendor_summaries_for_cards` once at the end (`skip_ai_estimates=True`, same as retire — never a synchronous Claude call inside the caller's locked M9 transaction). An already-live line's in-place refresh does NOT invalidate: syncs fire on every publish/edit/close inside the locked transaction, so routine no-op re-syncs stay cheap. See `app/services/excess_mirror.py::sync_list_mirror`; tests in `tests/test_resell_mirror.py::test_sync_list_mirror_revive_eagerly_restores_vendor_summary` (retire→revive round-trip) and `test_sync_list_mirror_noop_resync_skips_summary_invalidation` (a no-op re-sync performs zero invalidations).
 
+**Status: PENDING PRODUCT DECISION** — retire/revive invalidation is fixed for the exact-MPN case (#793, residual F4 in #803), but `_invalidate_vendor_summaries_for_cards` scopes its reverse lookup to `Requirement.normalized_mpn` only (kept indexed, no full-table scan): a requirement that aggregated the retired mirror's supply via a listed `substitutes` MPN, not its own `primary_mpn`, is missed and can keep a stale "customer excess" summary row. Closing this needs a scope decision (index `substitutes`? accept a slower scan?), not a mechanical fix.
+
 ### 28. [P2] Global search surfaces mirror sightings and links users to the hidden scratch requisition — **FIXED**
 **Where:** `app/services/global_search_service.py:374` (dimension: gap:mirror-consumers)
 
@@ -401,6 +567,8 @@ fast_search's sightings group joins Sighting → Requirement and carries requisi
 **Fix:** Join Requisition in the sightings group (fast_search and the intent-query sighting branch at line 623) and add `Requisition.is_scratch.is_(False)` — or exclude `Sighting.source_type == 'customer_excess'` from global search results.
 
 **Resolution:** Took the simpler alternative (no extra join): both `fast_search`'s sightings group and `_run_intent_query`'s "sighting" branch add the new canonical `excess_mirror.mirror_sighting_filter()` predicate (`Sighting.source_type.is_distinct_from("customer_excess")`, NULL-safe). See `app/services/global_search_service.py`; tests in `tests/test_global_search_service.py::test_part_number_excludes_resell_mirror_sighting`, `test_intent_query_excludes_resell_mirror_sighting`.
+
+**Status: FIXED in #793.**
 
 ### 38. [P3] excess_mirror docs still describe the retired (source_company_id, material_card_id) upsert key — **FIXED**
 **Where:** `app/services/excess_mirror.py:21` (dimension: services-core)
@@ -411,6 +579,8 @@ Phase 5 (#18, migration 199) moved the mirror upsert to line-identity (Sighting.
 
 **FIXED 2026-07-24 (P3 batch PR).** Rewrote the module docstring's "Dedup trap" paragraph and the mirror_line update-path comment to describe the `Sighting.excess_line_item_id` line-identity upsert key (#18, migration 199), replacing the retired `(source_company_id, material_card_id)` description.
 
+**Status: FIXED in #794.**
+
 ### 59. [P3] L3 vendor-affinity aggregation counts mirror rows — suggests synthetic 'Customer Excess' as a supplier — **FIXED**
 **Where:** `app/services/vendor_affinity_service.py:187` (dimension: gap:mirror-consumers)
 
@@ -420,12 +590,16 @@ find_affinity_vendors_l3 aggregates ALL sightings joined to MaterialCard by cate
 
 **Resolution:** `find_affinity_vendors_l3`'s query adds the canonical `excess_mirror.mirror_sighting_filter()` predicate. See `app/services/vendor_affinity_service.py`; test in `tests/test_vendor_affinity_coverage.py::TestFindAffinityVendorsL3::test_excludes_resell_mirror_sighting`.
 
+**Status: FIXED in #793.**
+
 ### F3 (post-#793 residual, THEME F). Two card-scoped Sighting queries missed the Phase-6 mirror-consumer-exclusion sweep
 **Where:** `app/services/part_history_service.py:sightings_for_card` (+ `sightings_count`), `app/services/material_card_service.py:serialize_material_card` (dimension: gap:mirror-consumers)
 
 The Phase-6 sweep (findings #25/#26/#27/#28/#59) covered the buyer sightings board, global search, and vendor-affinity L3 aggregation — but two more Sighting queries scoped by `material_card_id` were left ungated: the part history/dossier panel's `sightings_for_card` (and its `sightings_count` companion) and the material-card API's `serialize_material_card`. Both surface REAL vendor intelligence for a specific card and would include a mirrored 'customer_excess' row for any card an excess line shares a resolved MaterialCard with.
 
 **Resolution: FIXED.** Both queries add `excess_mirror.mirror_sighting_filter()`. `vendor_affinity_service`'s L3 aggregation and the global-search sighting branches were already covered (#59/#28); `search_service`'s ungated card-summary sighting count and `sighting_aggregation`'s own scope filter were deliberately left as-is — they aggregate across ALL sources by design (an internal card-summary count / the aggregation engine itself), not a real-vendor-only display surface. See `app/services/part_history_service.py` (`sightings_for_card`, `get_part_history`), `app/services/material_card_service.py` (`serialize_material_card`); tests in `tests/test_part_history_service.py::test_sightings_for_card_excludes_resell_mirror`, `tests/test_material_card_service.py::TestSerializeMaterialCard::test_excludes_resell_mirror_sighting`.
+
+**Status: FIXED in #803.**
 
 
 ## G. Buyer affinity & nudges
@@ -440,6 +614,8 @@ The don't-forget nudge calls rank_buyers_for(db, excess_list_id=..., limit=limit
 
 **FIXED 2026-07-28 (themes D/G/H/I batch PR).** `not_yet_offered_strip` computes the `already` set first, ranks with `limit + len(already)` headroom, subtracts, THEN caps — a campaign that touched the top-ranked buyers no longer starves the nudge.
 
+**Status: FIXED in #800.**
+
 ### 35. [P3] Offer-to-buyers panel accepts line_ids from ANY list — scope_lines query and rank_buyers_for are never scoped to the URL's list
 **Where:** `app/routers/resell.py:1713` (dimension: router-correctness)
 
@@ -449,6 +625,8 @@ resell_offer_buyers_form parses line_ids from the query string (resell.py:1825) 
 
 
 **FIXED 2026-07-28 (themes D/G/H/I batch PR).** (Same fix closes #49.) `_buyer_panel_context` scopes the line query with `ExcessLineItem.excess_list_id == el.id` and 422s any id not on the list (mirroring the POST twin's `_target_line_ids`), so foreign line ids never reach the scope strip or `rank_buyers_for`.
+
+**Status: FIXED in #800.**
 
 ### 49. [P3] resell_offer_buyers_form accepts line_ids from other lists (no ownership/scope validation)
 **Where:** `app/routers/resell.py:1825` (dimension: security-access)
@@ -460,6 +638,8 @@ The offer-to-buyers panel parses ?line_ids= into ints and passes them straight i
 
 
 **FIXED 2026-07-28 (themes D/G/H/I batch PR).** Same defect as #35, one fix — see #35's resolution (`_buyer_panel_context` list-scoping + 422).
+
+**Status: FIXED in #800.**
 
 ## H. Data layer, migration & schema drift
 
@@ -473,6 +653,8 @@ Migration 199 deletes ALL customer_excess Sightings, claiming they are "rebuilt 
 
 **FIXED 2026-07-28 (themes D/G/H/I batch PR).** Idempotent deferred startup backfill `startup._backfill_resell_mirrors`: any open/collecting list with ZERO line-keyed customer_excess sightings is re-synced via `excess_mirror.sync_list_mirror`; healthy and resolved lists are untouched (tests/test_startup_resell_mirror_backfill.py simulates the 199 sweep).
 
+**Status: FIXED in #800.**
+
 ### 52. [P3] ExcessLineItem.status has no @validates guard — the only resell status column that accepts arbitrary raw strings
 **Where:** `app/models/excess.py:116` (dimension: data-tests)
 
@@ -481,6 +663,8 @@ Every other status-bearing resell model validates against its StrEnum via @valid
 **Fix:** Add the same @validates("status") pattern validating against ExcessLineItemStatus, plus a model test mirroring tests/test_resell_models.py's invalid-status cases.
 
 **FIXED 2026-07-24 (P3 batch PR).** Added `@validates("status")` on ExcessLineItem validating against ExcessLineItemStatus (same pattern as the sibling models), with TDD-first tests in tests/test_models_excess.py covering invalid raw strings rejected and every enum member accepted.
+
+**Status: FIXED in #794.**
 
 ### 53. [P3] app/schemas/excess.py is dead to app code and drifted — ExcessListUpdate still whitelists remapped legacy statuses, and tests lock the drift in
 **Where:** `app/schemas/excess.py:44` (dimension: data-tests)
@@ -491,6 +675,8 @@ No router or service imports anything from app/schemas/excess.py — routers use
 
 **FIXED 2026-07-24 (P3 batch PR).** Repo-wide grep re-confirmed the only importers were tests/test_models_excess.py and tests/test_resell_models.py, so the dead app/schemas/excess.py module was DELETED and the schema-only test classes (incl. the legacy-status assertion theater) removed from both files, keeping all genuine ORM-model tests.
 
+**Status: FIXED in #794.**
+
 ### 54. [P3] Stale posting-window comment on the ExcessList model contradicts the phase-5 D1 behavior it sits next to
 **Where:** `app/models/excess.py:62` (dimension: data-tests)
 
@@ -500,6 +686,8 @@ The model comment still describes the pre-phase-5 semantics: "open_at stamped on
 
 **FIXED 2026-07-24 (P3 batch PR).** Rewrote the ExcessList posting-window comment (and the matching APP_MAP_DATABASE.md bullet) to the phase-5 D1 semantics: close_at is the optional owner-set draft deadline; publish preserves a still-future close_at and clears a stale/past one; close_list stamps it at resolution; expiry never writes it (it only fires once a set close_at has passed). Note: this Fix line's own "preserved on publish ... stamped by close/expire" wording was imprecise — the code (excess_mirror.publish_list, excess_service.close_list/expire_overdue_lists) is the authority the comment now matches.
 
+**Status: FIXED in #794.**
+
 ### 39. [P3] recompute_line_rollup docstring omits LATE from the counted statuses
 **Where:** `app/services/excess_service.py:651` (dimension: services-core)
 
@@ -508,6 +696,8 @@ _ROLLUP_OFFER_STATUSES (line 426) is (OPEN, WON, LATE), with a lengthy comment e
 **Fix:** Change the docstring to '(open/won/late)' to match _ROLLUP_OFFER_STATUSES.
 
 **FIXED 2026-07-24 (P3 batch PR).** recompute_line_rollup's docstring now says "(open/won/late — `_ROLLUP_OFFER_STATUSES`)" and notes why LATE counts, matching the implemented constant.
+
+**Status: FIXED in #794.**
 
 
 ## I. Router/service discipline & guards
@@ -522,6 +712,8 @@ resell_import_confirm only guards json.loads (lines 1385-1388) and then passes t
 
 **FIXED 2026-07-28 (themes D/G/H/I batch PR).** `resell_import_confirm` shape-guards the round-tripped payload (must be a list of dicts, else 400) exactly like `resell_assemble_bid`; the three malformed payloads are pinned by tests.
 
+**Status: FIXED in #800.**
+
 ### 33. [P3] resell_add_line inlines line-creation business logic in the router (private service helper, counter bump, commit) and accepts whitespace-only part numbers
 **Where:** `app/routers/resell.py:1149` (dimension: router-correctness)
 
@@ -531,6 +723,8 @@ resell_add_line constructs the ExcessLineItem ORM row, calls the private excess_
 
 
 **FIXED 2026-07-28 (themes D/G/H/I batch PR).** (Same fix closes #42.) Line creation moved into `excess_service.add_line` — `_require_owned_draft`, blank-part-number 400 (stripped), quantity 400, MaterialCard resolve, counter bump, `_safe_commit` — and the router keeps only the HTTP-boundary guards and delegates.
+
+**Status: FIXED in #800.**
 
 ### 34. [P3] resell_import_preview lacks the draft-only 409 guard its confirm counterpart enforces — late failure after upload+review
 **Where:** `app/routers/resell.py:1338` (dimension: router-correctness)
@@ -542,6 +736,8 @@ resell_import_confirm 409s on a non-draft list (resell.py:1381-1382: 'Posted lis
 
 **FIXED 2026-07-28 (themes D/G/H/I batch PR).** `resell_import_preview` now carries the identical draft-only 409 guard as confirm, so a posted list fails at upload time instead of after the user reviews the whole preview.
 
+**Status: FIXED in #800.**
+
 ### 40. [P3] update_excess_list unconditionally clears customer_site_id on every header edit
 **Where:** `app/services/excess_service.py:1214` (dimension: services-core)
 
@@ -551,6 +747,8 @@ update_excess_list gives close_at a dedicated _UNSET_CLOSE_AT identity sentinel 
 
 
 **FIXED 2026-07-28 (themes D/G/H/I batch PR).** The dead `customer_site_id` parameter was DROPPED from `update_excess_list` (no form carries it — the doc's sanctioned alternative), so a header edit can no longer wipe a stored site id; reintroduce it only with an `_UNSET`-style sentinel when a form actually posts it.
+
+**Status: FIXED in #800** — shipped as the "drop the parameter" alternative, not the finding's literal `_UNSET`-sentinel suggestion.
 
 ### 41. [P3] confirm_import bypasses the service-level owned-draft guard the other line mutators enforce
 **Where:** `app/services/excess_service.py:379` (dimension: services-core)
@@ -562,6 +760,8 @@ Phase 4 established _require_owned_draft (lines 1105-1117) 'so a direct service 
 
 **FIXED 2026-07-28 (themes D/G/H/I batch PR).** `confirm_import(db, list_id, user, rows)` now takes the acting user and routes through `_require_owned_draft` (404 → 403 → 409), so a direct service call is owner+draft guarded like every other line mutator; the router keeps its outer guards.
 
+**Status: FIXED in #800.**
+
 ### 42. [P3] resell_add_line builds the line item in the router with a bare db.commit() and a private service helper
 **Where:** `app/routers/resell.py:1160` (dimension: services-core)
 
@@ -572,6 +772,8 @@ resell_add_line constructs the ExcessLineItem ORM row, normalizes the MPN, calls
 
 **FIXED 2026-07-28 (themes D/G/H/I batch PR).** Same defect as #33, one fix — see #33's resolution (`excess_service.add_line`).
 
+**Status: FIXED in #800.**
+
 ### 43. [P3] Dead 'Phase 4: Stats' / 'Phase 4: Normalization backfill' section headers with no code
 **Where:** `app/services/excess_service.py:1358` (dimension: services-core)
 
@@ -580,6 +782,8 @@ The file ends (lines 1356-1363) with two full section-header banners — '# Phas
 **Fix:** Delete the two empty section banners.
 
 **FIXED 2026-07-24 (P3 batch PR).** Deleted the two dead "Phase 4: Stats" / "Phase 4: Normalization backfill" banners at the end of excess_service.py; the file now ends at the last real function.
+
+**Status: FIXED in #794.**
 
 ### 48. [P3] Draft-list existence oracle: owner-only endpoints return 403 (not 404) for another user's private draft
 **Where:** `app/routers/resell.py:896` (dimension: security-access)
@@ -592,6 +796,8 @@ The documented draft-privacy policy is 404-masking: _get_list_for_user (resell.p
 
 **FIXED 2026-07-28 (themes D/G/H/I batch PR).** The whole owner-only sweep (build-bid, assemble, bid PDF, add-line, import preview/confirm, publish, and the outreach cluster incl. `_load_outreach_for_owner` / `_load_manual_outreach_for_owner`) resolves via `_get_list_for_user` FIRST, so a foreign private draft 404-masks before any 403 — pinned by a 15-endpoint probe sweep test.
 
+**Status: FIXED in #800.**
+
 ## J. Seeders & demo data
 
 ### 29. [P2] seed_test_data.py crashes: ExcessLineItem built with removed market_price/demand_score attributes
@@ -603,6 +809,8 @@ seed_excess_lists constructs ExcessLineItem with market_price= and demand_score=
 
 **FIXED 2026-07-24 (P3 batch PR).** Dropped the removed market_price/demand_score kwargs and rewrote seed_excess_lists together with #63 (post-rework lifecycle via the real service chokepoints); also remapped REQ_CONFIGS/quote_configs off removed RequisitionStatus members (ACTIVE/SOURCING/QUOTING/REOPENED/ARCHIVED — the module didn't even import) and fixed the summary SQL still selecting from the dropped `bids` table.
 
+**Status: FIXED in #795.**
+
 ### 30. [P2] scripts/seed_test_data.py has no production guard, unlike the resell demo seeder
 **Where:** `scripts/seed_test_data.py:657` (dimension: gap:demo-seeder)
 
@@ -611,6 +819,8 @@ seed_resell_demo.main() refuses to run without ALLOW_SAMPLE_DATA_SEED (seed_rese
 **Fix:** Add the same ALLOW_SAMPLE_DATA_SEED refusal (checked before SessionLocal) to seed_test_data.main(), plus a guard test mirroring test_seed_resell_demo_guard.py.
 
 **FIXED 2026-07-24 (P3 batch PR).** seed_test_data.main() now refuses with SystemExit(2) before opening SessionLocal unless ALLOW_SAMPLE_DATA_SEED is truthy (same flag/semantics as the other seeders), covered by tests/test_seed_test_data_guard.py mirroring the resell-demo guard tests.
+
+**Status: FIXED in #795.**
 
 ### 60. [P3] Demo 'awarded' list is stamped awarded directly — zero offers, no WON offer, violating the M9 award invariant
 **Where:** `app/management/seed_resell_demo.py:312` (dimension: gap:demo-seeder)
@@ -623,6 +833,8 @@ _build_awarded creates the 'Demo · Awarded FPGA lot' list with status=ExcessLis
 
 **FIXED 2026-07-24 (P3 batch PR).** Review follow-up: on environments where the OLD seeder already hand-stamped this demo (list/lines AWARDED, zero offers), _build_awarded now detects the legacy decay and heals it — reset to OPEN/AVAILABLE, mirror re-synced, then the real submit_offer/award_offer chain — instead of committing a dangling late offer and crashing 409 in award_offer (covered by test_heals_legacy_hand_stamped_awarded_demo).
 
+**Status: FIXED in #795.**
+
 ### 61. [P3] Sample-data 'customer_excess' Sightings lack excess_line_item_id — invisible to the Phase-5 mirror lifecycle
 **Where:** `app/management/seed_sample_data.py:1349` (dimension: gap:demo-seeder)
 
@@ -631,6 +843,8 @@ _seed_wf_e hand-rolls excess→demand Sightings with source_type='customer_exces
 **Fix:** Replace the hand-made sightings with a call to excess_mirror.sync_list_mirror(db, ex1) (as seed_resell_demo does), so the sightings carry excess_line_item_id and live on the managed virtual requisition.
 
 **FIXED 2026-07-24 (P3 batch PR).** _seed_wf_e now mirrors ex1 via excess_mirror.sync_list_mirror (every customer_excess Sighting carries excess_line_item_id on the managed "Customer Excess (list N)" virtual req; the card-less line is lazily healed), and wipe() tears down each sample list's mirror via teardown_list_mirror so the virtual scratch req never orphans.
+
+**Status: FIXED in #795.**
 
 ### 62. [P3] Collecting demo list auto-expires after 3 nights and the 'idempotent' re-seed cannot restore it
 **Where:** `app/management/seed_resell_demo.py:188` (dimension: gap:demo-seeder)
@@ -641,6 +855,8 @@ _build_collecting seeds the flagship 40-line list with close_at = now + 3 days (
 
 **FIXED 2026-07-24 (P3 batch PR).** _build_collecting now calls _refresh_demo_window on find: a decayed demo (status expired, or open/collecting with a lapsed close_at) is reset to COLLECTING with close_at pushed +3d, updated_at stamped, and the mirror re-synced — while awarded/bid_out/closed states a user drove are deliberately never trampled (covered by four new TestCollectingRefresh tests).
 
+**Status: FIXED in #795.**
+
 ### 63. [P3] seed_excess_lists seeds pre-rework legacy statuses, owner self-offers, and offers with zero rollups
 **Where:** `scripts/seed_test_data.py:630` (dimension: gap:demo-seeder)
 
@@ -649,6 +865,8 @@ Beyond the crash in finding #1 (which currently masks this), seed_excess_lists w
 **Fix:** Rewrite the section on top of the fix for finding #1: use post-rework statuses, submit offers via excess_service.submit_offer under a distinct non-owner user, and derive WON via award_offer.
 
 **FIXED 2026-07-24 (P3 batch PR).** seed_excess_lists now builds every list as a DRAFT and derives its shape through the real chokepoints — publish_list (open + mirror), submit_offer from a dedicated non-owner broker user with buyer attribution (open→collecting + real rollups), award_offer (won offer / awarded lines / lost competitors / awarded list), close_list_without_bid (closed) — so no legacy ACTIVE/BIDDING statuses, no self-offers, and no hand-cycled statuses remain (covered by tests/test_seed_test_data_excess.py).
+
+**Status: FIXED in #795.**
 
 
 ### 64. [P3] (leftover, logged 2026-07-24 during the theme-J review): WF-E still hand-crafts an owner self-offer and hand-stamped offer shapes — **FIXED**
@@ -660,6 +878,8 @@ While fixing #61 (sightings half of `_seed_wf_e`), review noted the adjacent off
 
 
 **FIXED 2026-07-28 (themes D/G/H/I batch PR).** The WF-E offer half now submits every offer via `excess_service.submit_offer` from a dedicated, never-owner-redirected broker user (per-broker VendorCard attribution stamped after the chokepoint's guards), letting `recompute_line_rollup` derive `best_offer_id`/`offer_count`; the unreachable self-offer and hand-stamped AMBIGUOUS shapes are gone, and the unmatched-queue showcase survives as a genuinely-unmatched MPN (guard tests mirror tests/test_seed_test_data_excess.py).
+
+**Status: FIXED in #800** — the theme-J batch (#795) had left this WF-E offer half untouched (out of its literal scope); it landed later in the D/G/H/I batch PR.
 
 ## Refuted by the skeptic panel (for the record)
 
