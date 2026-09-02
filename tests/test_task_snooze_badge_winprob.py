@@ -142,7 +142,7 @@ class TestTaskSnoozeService:
         assert snoozed is not None
         assert abs((snoozed.due_at - expected).total_seconds()) < 2
 
-    def test_snooze_no_due_at_sets_company_tomorrow(self, db_session: Session, owned_company: Company, test_user: User):
+    def test_snooze_no_due_at_sets_local_tomorrow(self, db_session: Session, owned_company: Company, test_user: User):
         """Snoozing a task with no due_at sets due_at to the COMPANY-local tomorrow's
         calendar-date sentinel (that date at UTC midnight) — not UTC-day math, which
         from ~7pm Eastern named tonight's date "tomorrow"."""

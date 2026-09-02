@@ -4165,7 +4165,8 @@ Foundation mechanism (migration 181 adds `users.display_timezone`, an IANA name)
 
 2. **Per-request contextvar** — `app/request_context.py` adds
    `current_user_display_tz_var: ContextVar[str | None]`. The async `AuditUserMiddleware`
-   sets it from the session uid via the TTL-cached `resolve_display_tz` (`app/main.py`) +
+   sets it from the session uid via the TTL-cached `resolve_display_tz`
+   (`app/request_context.py`) +
    `finally` reset (no keep-alive cross-request leak). It is deliberately NOT set in
    `require_user` — a ContextVar set in a sync dependency is lost in the threadpool.
    Mirrors the `current_user_id_var` pattern above.

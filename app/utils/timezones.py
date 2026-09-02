@@ -27,7 +27,7 @@ Called by: app/template_env.py (the ``localtime``/``localdate`` Jinja filters an
     app/main.py AuditUserMiddleware (populating the contextvar),
     app/services/task_service.py (``local_day_sentinel``), services/jobs (``as_utc``).
     Reusable by services/emails.
-Depends on: stdlib zoneinfo + app/request_context.py (pure stdlib); app/config.py
+Depends on: stdlib zoneinfo + loguru + app/request_context.py; app/config.py
     (lazy import inside company_zoneinfo, avoiding an import cycle).
 """
 
@@ -38,7 +38,12 @@ from functools import lru_cache
 from typing import overload
 from zoneinfo import ZoneInfo, available_timezones
 
+from loguru import logger
+
 from ..request_context import current_user_display_tz_var
+
+# COMPANY_TIMEZONE values already warned about (warn once per bad value, not per call).
+_warned_company_tz: set[str | None] = set()
 
 # Last-resort zone when even config.company_timezone is unset/invalid, and the pinned
 # business zone for a few server-side renders (quote_send, prepayment_notifications).
@@ -84,6 +89,13 @@ def company_zoneinfo() -> ZoneInfo:
     name = settings.company_timezone
     if name and name in _valid_names():
         return ZoneInfo(name)
+    if name not in _warned_company_tz:  # warn ONCE per bad value, not per call
+        _warned_company_tz.add(name)
+        logger.warning(
+            "COMPANY_TIMEZONE {!r} is not a valid IANA zone — falling back to {}",
+            name,
+            DEFAULT_DISPLAY_TZ,
+        )
     return ZoneInfo(DEFAULT_DISPLAY_TZ)
 
 

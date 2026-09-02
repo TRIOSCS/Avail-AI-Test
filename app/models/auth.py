@@ -68,7 +68,8 @@ class User(Base):
     # Per-user DISPLAY timezone — an IANA zone name (e.g. "America/New_York", "Asia/Tokyo")
     # used to render stored-UTC timestamps in this viewer's own timezone. Auto-detected
     # from the browser (Intl.DateTimeFormat().resolvedOptions().timeZone) and overridable
-    # in the profile page. NULL → fall back to app.utils.timezones.DEFAULT_DISPLAY_TZ.
+    # in the profile page. NULL → fall back to the company zone (COMPANY_TIMEZONE /
+    # settings.company_timezone via app.utils.timezones.company_zoneinfo).
     display_timezone = Column(String(64), nullable=True)
 
     # 8x8 Work Analytics

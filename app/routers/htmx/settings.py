@@ -188,13 +188,16 @@ async def settings_profile_tab(
 ):
     """User profile tab."""
     from ...services.activity_service import get_inbox_sync_status
-    from ...utils.timezones import DEFAULT_DISPLAY_TZ, grouped_timezones
+    from ...utils.timezones import company_zoneinfo, grouped_timezones
 
     ctx = _base_ctx(request, user, "settings")
     ctx["profile_user"] = user
     ctx["inbox_status"] = get_inbox_sync_status(db, user)
     ctx["tz_groups"] = grouped_timezones()
-    ctx["default_display_tz"] = DEFAULT_DISPLAY_TZ
+    # The LIVE business-default zone (settings.company_timezone) — advertised as
+    # "the business default" and preselected for a user with no display_timezone,
+    # so a changed COMPANY_TIMEZONE shows truthfully (not the hardcoded constant).
+    ctx["default_display_tz"] = company_zoneinfo().key
     return template_response("htmx/partials/settings/profile.html", ctx)
 
 

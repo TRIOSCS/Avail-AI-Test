@@ -76,7 +76,7 @@ def _add_task(
 # ── company_zoneinfo / local_day_sentinel helpers ─────────────────────
 
 
-class TestCompanyDayHelpers:
+class TestLocalDayHelpers:
     def test_company_zoneinfo_reads_setting_at_call_time(self, monkeypatch):
         from app.utils.timezones import company_zoneinfo
 
@@ -88,6 +88,25 @@ class TestCompanyDayHelpers:
 
         monkeypatch.setattr(settings, "company_timezone", "Not/AZone")
         assert company_zoneinfo().key == "America/New_York"
+
+    def test_company_zoneinfo_invalid_name_warns_once(self, monkeypatch):
+        from loguru import logger as loguru_logger
+
+        import app.utils.timezones as tz_mod
+
+        monkeypatch.setattr(settings, "company_timezone", "Not/AZone")
+        # Fresh warn-once state for this test only (module-level set survives runs).
+        monkeypatch.setattr(tz_mod, "_warned_company_tz", set())
+        records: list[str] = []
+        sink_id = loguru_logger.add(lambda m: records.append(m), level="WARNING")
+        try:
+            tz_mod.company_zoneinfo()
+            tz_mod.company_zoneinfo()  # second call must NOT warn again
+        finally:
+            loguru_logger.remove(sink_id)
+        warnings = [r for r in records if "Not/AZone" in r]
+        assert len(warnings) == 1
+        assert "America/New_York" in warnings[0]
 
     @freeze_time(_EVENING_EASTERN)
     def test_sentinel_evening_eastern_is_still_the_eastern_day(self):
@@ -131,9 +150,9 @@ class TestCompanyDayHelpers:
 # ── snooze_task: undated → company-local tomorrow sentinel ──────────────
 
 
-class TestSnoozeCompanyDay:
+class TestSnoozeLocalDay:
     @freeze_time(_EVENING_EASTERN)
-    def test_snooze_plus_one_day_lands_on_company_tomorrow(self, db_session, test_user, test_requisition):
+    def test_snooze_plus_one_day_lands_on_local_tomorrow(self, db_session, test_user, test_requisition):
         task = _add_task(db_session, user_id=test_user.id, req=test_requisition)
         snoozed = snooze_task(db_session, task.id, days=1)
         assert snoozed is not None
@@ -142,7 +161,7 @@ class TestSnoozeCompanyDay:
         assert as_utc(snoozed.due_at) == datetime(2026, 1, 15, tzinfo=UTC)
 
     @freeze_time(_EVENING_EASTERN)
-    def test_snooze_default_undated_lands_on_company_tomorrow(self, db_session, test_user, test_requisition):
+    def test_snooze_default_undated_lands_on_local_tomorrow(self, db_session, test_user, test_requisition):
         task = _add_task(db_session, user_id=test_user.id, req=test_requisition)
         snoozed = snooze_task(db_session, task.id)  # days=None default branch
         assert snoozed is not None
@@ -181,9 +200,9 @@ class TestSnoozeCompanyDay:
 # ── get_my_tasks_summary: overdue = prior company-local day ─────────────
 
 
-class TestSummaryOverdueCompanyDay:
+class TestSummaryOverdueLocalDay:
     @freeze_time(_EVENING_EASTERN)
-    def test_overdue_counts_only_prior_company_days(self, db_session, test_user, test_requisition):
+    def test_overdue_counts_only_prior_local_days(self, db_session, test_user, test_requisition):
         # Company today = Jan 14 (Eastern). Jan 13 → overdue; Jan 14 → due today
         # (NOT overdue); Jan 15 → due tomorrow (NOT overdue — the raw
         # ``due_at < now(UTC)`` badge counted BOTH Jan 14 and Jan 15 here).
@@ -216,9 +235,9 @@ class TestSummaryOverdueCompanyDay:
 # ── on_bid_due_soon: due the company-local tomorrow ─────────────────────
 
 
-class TestBidDueSoonCompanyDay:
+class TestBidDueSoonFallbackDay:
     @freeze_time(_EVENING_EASTERN)
-    def test_bid_due_task_sentinel_is_company_tomorrow(self, db_session, test_requisition):
+    def test_bid_due_task_sentinel_is_company_fallback_tomorrow(self, db_session, test_requisition):
         task = on_bid_due_soon(db_session, test_requisition.id, "2026-01-16", "REQ-TEST-001")
         assert task is not None
         # Company tomorrow = Jan 15 sentinel — not the raw now+24h instant
