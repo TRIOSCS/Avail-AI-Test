@@ -12,8 +12,10 @@ different throwaway DB):
 2. Create the full schema on the process-global engine.
 3. Seed the DEFAULT_USER_* admin via the production helper (PBKDF2, ORM —
    keeps column defaults such as m365_connected=False intact).
-4. Serve via uvicorn, with the sync-route threadpool serialized to 1 thread
-   so concurrent requests cannot interleave on the shared sqlite connection.
+4. Serve via uvicorn, with every http request (except the SSE stream paths)
+   holding one whole-request asyncio.Lock, so no two non-SSE requests are ever
+   in flight at once — sync deps on the threadpool, async handler bodies on
+   the loop thread, and response rendering all run under the same lock.
 
 Dev/CI-only — never imported by app runtime code.
 
@@ -87,31 +89,45 @@ def bootstrap() -> None:
     logger.info("e2e bootstrap: user {} ready (role={})", user.email, user.role)
 
 
-class _SerializedThreadpool:
-    """ASGI wrapper that caps the anyio threadpool at 1 token (plan §2.1/F3).
+# Held-open response streams (SSE) must NEVER hold the whole-request lock —
+# they stay open for the client's lifetime and would deadlock every later
+# request. Residual accepted as out-of-scope: an exempt stream's only DB touch
+# is the auth dependency at stream-open, which runs outside the lock; no e2e
+# spec opens an SSE stream (guardrail comments keep it that way).
+_LOCK_EXEMPT_PREFIXES = ("/api/events/stream", "/v2/partials/search/stream")
 
-    Every sync route/dependency runs on the anyio default thread limiter and shares the
-    one StaticPool sqlite connection; concurrent badge-endpoint bursts interleave on it
-    (spurious 401 / InterfaceError / JSONDecodeError, amplified by get_user's
-    session.clear()). The limiter is per-event-loop state, so it must be set from INSIDE
-    the running loop: the first scope this wrapper handles is uvicorn's lifespan scope,
-    which runs in the loop — set it there, then delegate every scope untouched. Async
-    I/O (SSE pings, the event loop itself) is unaffected; at workers:1 the throughput
-    cost is negligible.
+
+class _SerializedRequests:
+    """ASGI wrapper: one asyncio.Lock held for the FULL lifecycle of every http scope
+    (checkpoint review Finding 1, replacing the thread-limiter shim of plan §2.1/F3).
+
+    Why a whole-request lock: all requests share the one StaticPool sqlite connection,
+    and interleaved access corrupts reads (spurious ``db.get`` -> None -> silent 401,
+    JSONDecodeError on JSON columns, corrupted ``is_active`` -> 403 — reviewer-measured
+    ~0.67% at 600 concurrent requests). The earlier anyio thread-limiter shim only
+    serialized threadpool (sync-def) work; async-def handlers (the badge endpoints)
+    query on the EVENT LOOP thread, outside the limiter, so one threadpool thread and
+    the loop thread still interleaved. Holding the lock across the whole http scope
+    serializes sync deps, async handler bodies, and response rendering alike — for
+    non-exempt paths, nothing can interleave on the shared connection. SSE paths are
+    exempt (see _LOCK_EXEMPT_PREFIXES); non-http scopes (lifespan) pass through. At
+    workers:1 the throughput cost is negligible.
     """
 
     def __init__(self, wrapped) -> None:
         self._wrapped = wrapped
-        self._serialized = False
+        self._lock = None  # created lazily inside the running event loop
 
     async def __call__(self, scope, receive, send) -> None:
-        if not self._serialized:
-            self._serialized = True
-            import anyio.to_thread
+        if scope["type"] != "http" or scope["path"].startswith(_LOCK_EXEMPT_PREFIXES):
+            await self._wrapped(scope, receive, send)
+            return
+        if self._lock is None:
+            import asyncio
 
-            anyio.to_thread.current_default_thread_limiter().total_tokens = 1
-            logger.info("e2e server: sync threadpool serialized (limiter tokens=1)")
-        await self._wrapped(scope, receive, send)
+            self._lock = asyncio.Lock()
+        async with self._lock:
+            await self._wrapped(scope, receive, send)
 
 
 def main() -> None:
@@ -126,7 +142,11 @@ def main() -> None:
 
     from app.main import app as fastapi_app
 
-    uvicorn.run(_SerializedThreadpool(fastapi_app), host=args.host, port=args.port, log_level="info")
+    logger.info(
+        "e2e server: whole-request serialization active (exempt prefixes: {})",
+        ", ".join(_LOCK_EXEMPT_PREFIXES),
+    )
+    uvicorn.run(_SerializedRequests(fastapi_app), host=args.host, port=args.port, log_level="info")
 
 
 if __name__ == "__main__":
