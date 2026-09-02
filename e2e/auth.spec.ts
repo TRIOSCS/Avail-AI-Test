@@ -44,13 +44,15 @@ test.describe('Auth Logout', () => {
 });
 
 test.describe('Protected Routes', () => {
+  // This project never gets storageState — anonymous, these MUST be denied
+  // (200 dropped from the sets: it would mean the auth gate is broken).
   test('GET /api/materials requires auth', async ({ request }) => {
     const res = await request.get('/api/materials');
-    expect([200, 401, 307]).toContain(res.status());
+    expect([401, 307]).toContain(res.status());
   });
 
   test('GET /api/sources requires auth', async ({ request }) => {
     const res = await request.get('/api/sources');
-    expect([200, 401, 307]).toContain(res.status());
+    expect([401, 307]).toContain(res.status());
   });
 });

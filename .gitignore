@@ -22,6 +22,7 @@ node_modules/
 .claude/worktrees/
 
 # Dev/test artifacts
+e2e/.auth/
 .playwright-mcp/
 .coverage
 coverage.xml
