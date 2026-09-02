@@ -74,8 +74,7 @@ async def reports_partial(
     user: User = Depends(require_access(AccessKey.REPORTS)),
     db: Session = Depends(get_db),
 ):
-    """The Reports page (full render) or the #gp-panel fragment (HX-Target: gp-
-    panel)."""
+    """The full Reports page, or only the #gp-panel fragment (HX-Target: gp-panel)."""
     basis = coerce(basis, BASES, DEFAULT_BASIS)
     group_by = coerce(group_by, GROUP_BYS, DEFAULT_GROUP_BY)
     period = coerce(period, PERIODS, DEFAULT_PERIOD)

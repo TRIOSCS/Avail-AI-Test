@@ -7,8 +7,8 @@ requisitions.
 Forecast dollars reuse _resolve_deal_value so they reconcile with what the
 requisition list shows per row.
 
-Called by: app/routers/htmx_views.py parts_workspace_partial (the Sales Hub /
-           parts workspace) — pipeline_summary feeds the pipeline chip there.
+Called by: app/routers/htmx/reports.py reports_partial — pipeline_summary feeds the
+           pipeline strip on the Reports page (moved off the Sales Hub, Decision M).
 Depends on: app.models (Requisition, Requirement)
 """
 

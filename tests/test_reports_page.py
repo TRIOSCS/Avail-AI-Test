@@ -196,3 +196,19 @@ def test_v2_shell_heals_reports_partial_with_nav_key(client: TestClient, test_us
     assert resp.status_code == 200
     assert "activeNav: 'reports'" in resp.text  # segment → nav key via _SHELL_NAV_KEYS .get fallback
     assert 'hx-get="/v2/partials/reports"' in resp.text
+
+
+# ── Task 4: chip relocation ───────────────────────────────────────────────
+
+
+def test_workspace_lost_strip_gained_reports_link(client: TestClient):
+    resp = client.get("/v2/partials/parts/workspace")
+    assert resp.status_code == 200
+    body = resp.text
+    assert "weighted forecast" not in body
+    assert "Sales Hub" in body
+    assert 'hx-get="/v2/partials/reports"' in body  # the gated eyebrow signpost
+    src = (_T / "parts/workspace.html").read_text()
+    assert "h-[calc(100vh-116px)] flex" in src  # eyebrow stays 26px → 116px is the ONLY constant
+    assert "100vh-90px" not in src
+    assert "pipeline" not in src

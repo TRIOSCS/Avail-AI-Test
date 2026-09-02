@@ -103,7 +103,7 @@
     </tfoot>
   </table>
 </div>
-<p class="text-xs text-gray-500 mt-2">Revenue and cost are the plan header totals frozen at approval (Σ line sell / Σ line cost). GP $ = revenue − cost. Margin % = GP ÷ revenue. Booked / Realized are AVAIL plan timestamps, not Acctivate SO or invoice dates.</p>
+<p class="text-xs text-gray-600 mt-2">Revenue and cost are the plan header totals frozen at approval (Σ line sell / Σ line cost). GP $ = revenue − cost. Margin % = GP ÷ revenue. Booked / Realized are AVAIL plan timestamps, not Acctivate SO or invoice dates.</p>
 {% else %}
 <p class="text-sm text-gray-500 mt-3">No {{ 'booked' if report.basis == 'booked' else 'realized' }} plans {{ 'you submitted' if report.scope == 'mine' else 'from any user' }} in {{ report.period.label }}. Try 12 months or the other basis.</p>
 {% endif %}

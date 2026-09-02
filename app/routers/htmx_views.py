@@ -435,13 +435,10 @@ async def buy_plans_hub_retired_redirect(bp_id: int | None = None) -> RedirectRe
 async def parts_workspace_partial(
     request: Request,
     user: User = Depends(require_access(AccessKey.REQUISITIONS)),
-    db: Session = Depends(get_db),
 ):
-    """Return the split-panel parts workspace shell."""
-    from ..services import forecast_service
-
+    """Return the split-panel parts workspace shell (pipeline strip → /v2/reports,
+    Decision M)."""
     ctx = _base_ctx(request, user, "requisitions")
-    ctx["pipeline"] = forecast_service.pipeline_summary(db)
     return template_response("htmx/partials/parts/workspace.html", ctx)
 
 

@@ -2,7 +2,7 @@
 
 Covers:
 - GET /v2/partials/reporting → 404 (route + templates deleted)
-- Pipeline chip renders on the parts workspace (open deals / open value / weighted)
+- Pipeline chip moved to /v2/partials/reports (Decision M); gone from the parts workspace
 - Coverage chip renders on the CRM account list ("Coverage NN%")
 - No nav alias resolves to the removed "reporting" id
 - No template includes the deleted reporting/ directory
@@ -59,17 +59,24 @@ class TestNavAliasNoReporting:
         assert resp.status_code == 200
 
 
-class TestPipelineChip:
-    """Pipeline analytics folded into a slim strip on the parts workspace."""
+class TestPipelineChipMoved:
+    """Pipeline analytics live on the Reports page now (Decision M) — gone from the
+    Sales Hub."""
 
-    def test_workspace_renders_pipeline_strip(self, client: TestClient):
-        """The workspace partial renders the open-deals / value / forecast strip."""
+    def test_workspace_no_longer_renders_strip(self, client: TestClient):
         resp = client.get("/v2/partials/parts/workspace")
+        assert resp.status_code == 200
+        assert "weighted forecast" not in resp.text
+        assert "Sales Hub" in resp.text
+
+    def test_reports_page_renders_strip(self, client: TestClient):
+        resp = client.get("/v2/partials/reports")
         assert resp.status_code == 200
         body = resp.text
         assert "open deal" in body
         assert "open value" in body
         assert "weighted forecast" in body
+        assert "all-time" in body
 
 
 class TestCoverageChip:
