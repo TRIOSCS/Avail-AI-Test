@@ -113,6 +113,7 @@ _VIEW_ACCESS: dict[str, AccessKey] = {
     "proactive": AccessKey.PROACTIVE,
     "prospecting": AccessKey.PROSPECTING,
     "my-day": AccessKey.MY_DAY,
+    "reports": AccessKey.REPORTS,
 }
 
 # Ordered (AccessKey, full-page url) list in MODULE order. When a user is denied the view
@@ -129,6 +130,9 @@ _MODULE_ENTRY_URLS: tuple[tuple[AccessKey, str], ...] = (
     (AccessKey.PROACTIVE, "/v2/proactive"),
     (AccessKey.PROSPECTING, "/v2/prospecting"),
     (AccessKey.MY_DAY, "/v2/my-day"),
+    # LAST on purpose: a user whose only module is Reports still lands somewhere, but Reports
+    # is never the redirect target ahead of a real working module.
+    (AccessKey.REPORTS, "/v2/reports"),
 )
 
 
@@ -163,6 +167,7 @@ _VALID_NAV_KEYS: frozenset[str] = frozenset(
         "prospecting",
         "my-day",
         "settings",
+        "reports",
     }
 )
 

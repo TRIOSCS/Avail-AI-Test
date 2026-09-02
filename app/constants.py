@@ -384,6 +384,9 @@ class AccessKey(StrEnum):
     PROACTIVE = "proactive"
     PROSPECTING = "prospecting"
     MY_DAY = "my_day"
+    # Reports page — module key; v1 has no bottom-nav tab (owner question b). Inherited by
+    # every interactive role via _INTERACTIVE_DEFAULTS (owner question c).
+    REPORTS = "reports"
     # Capability access
     SEND_RFQ = "send_rfq"
     APPROVE_OFFERS = "approve_offers"
@@ -420,6 +423,7 @@ MODULE_ACCESS_KEYS = (
     AccessKey.PROACTIVE,
     AccessKey.PROSPECTING,
     AccessKey.MY_DAY,
+    AccessKey.REPORTS,
 )
 CAPABILITY_ACCESS_KEYS = (
     AccessKey.SEND_RFQ,

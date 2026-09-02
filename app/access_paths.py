@@ -27,6 +27,11 @@ Cross-module embedding evidence for each EXCLUDED prefix (why it is shared):
 - buy-plans: customers/tabs/buy_plans_tab.html and requisitions/tabs/buy_plans.html
              embed /v2/partials/buy-plans/{id}
 
+reports (Phase 5): GUARDED — ``/v2/partials/reports`` is referenced only from the
+Reports page's own templates, the access-gated More-menu entry and the access-gated
+Sales Hub eyebrow link; no cross-module embeds (re-verify with a repo-wide grep
+before committing).
+
 Called by: app.main.ModuleAccessMiddleware
 Depends on: app.constants.AccessKey (leaf-ish — only an enum import)
 """
@@ -55,6 +60,9 @@ _GUARDED_BASES: tuple[tuple[str, AccessKey], ...] = (
     ("/v2/partials/prospecting", AccessKey.PROSPECTING),
     ("/v2/partials/prospects", AccessKey.PROSPECTING),
     ("/v2/partials/my-day", AccessKey.MY_DAY),
+    # Reports (Phase 5): the ONE partial (page + #gp-panel fragment) is referenced only from
+    # reports/_gp_panel.html, the More menu and the Sales Hub eyebrow link — module-exclusive.
+    ("/v2/partials/reports", AccessKey.REPORTS),
 )
 
 
