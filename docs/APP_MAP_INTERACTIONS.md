@@ -1608,6 +1608,20 @@ endpoint after the UTC rollover — no data lost, only Claude spend bounded). Mi
 enrichment-worker `daily_cap` / `ai_screen_daily_cap` count-cap pattern; reuses the
 `intel_cache` Redis/PG counter substrate (no migration).
 
+**Untrusted-content delimiters on the AI prompt surfaces (F10).** Every AI call that
+interpolates external text wraps it via `text_utils.wrap_untrusted` (tagged delimiter
+block) + the `UNTRUSTED_EMAIL_NOTICE` system-prompt caution — the `parse_vendor_response`
+pattern extended across the deferred surfaces: `email_intelligence_service`
+(`extract_durable_facts`' From: sender_name; each `summarize_thread` body_text, notice on
+`THREAD_SUMMARY_SYSTEM`), `resell_reply_parse_service.parse_buyer_reply` (tag=reply,
+notice on `REPLY_PARSE_SYSTEM`), `signature_parser` (tag=signature + wrapped sender
+name/email), `attachment_parser` (tag=spreadsheet over headers+sample rows, and the call
+now passes `system=UNTRUSTED_EMAIL_NOTICE`). `email_service` null-guards `vr.subject`
+before `parse_response_ai` (`wrap_untrusted` crashes on None). `web_extractor` /
+`oem_crosswalk_resolver` interpolate only internal MPN/vendor text, so they carry an
+untrusted-web-content caution line in their web-search system prompts instead;
+`detect_specialties_ai` stays excluded (recorded scope decision).
+
 ### 4a. Graph webhook endpoint (push) + validation-echo hardening
 
 Real-time complement to the polling job above. `webhook_service.create_mail_subscription`
@@ -2015,7 +2029,13 @@ buyplan_workflow/ (state machine — package: buyplan_approval.py owns submit/ap
     |                      (queue.approved_unpaid_rows, terminal request + Prepayment.status='approved') merge
     |                      into the live list under Everything else, newest-first, deduped per prepayment.
     |                      Request-modal refusals are inline 400s into #pp-modal-error (hx-target-4xx) — the
-    |                      modal keeps the buyer's input.
+    |                      modal keeps the buyer's input; mark-paid refusals (bad amount, service's
+    |                      non-approved guard) are likewise real 400s into #pp-markpaid-error — never a 200
+    |                      toast, which would let close_modal_on_success close the modal and drop the input.
+    |                      notify_prepayment_approved re-reads Prepayment.status in its own fresh session and
+    |                      skips a stale OK-TO-WIRE when an in-app mark-paid/void raced the fire-and-forget
+    |                      dispatch; resend-pay-link also writes a durable ActivityLog audit row
+    |                      (channel=system, buy_plan-scoped) naming the actor.
     |  Backorder (Ph3):    resource_line already reopens a COMPLETED plan (RESOURCEABLE_LINE_STATUSES includes
     |                      verified); when a cancel fires on a plan that WAS completed, resource_line returns
     |                      was_completed=True (computed pre-reopen) which is threaded to
@@ -5616,7 +5636,12 @@ truth for the composite `buyer_ready_score`; a `ProspectAccount` before_insert/b
 mapper listener (`app/models/prospect_account.py`) writes it through to the persisted, indexed
 `buyer_ready_score` column on every flush, so the `buyer_ready_desc` list sort ranks +
 paginates in SQL instead of loading + snapshotting every row O(N) per request. Migration 170
-backfills existing rows. The single-prospect card/detail still recomputes the full snapshot
+backfills existing rows. The same listener also caches the snapshot's `is_buyer_ready` flag
+and mirrors `enrichment_data['ai_screen']['verdict']` into the flat, indexed
+`ai_screen_verdict` column (String 32 — a non-str/overlong rogue value degrades the mirror
+to NULL rather than failing the flush); migration 218 adds + backfills both (PG-only
+backfills: `#>>'{ai_screen,verdict}'` for the verdict, an inline snapshot-formula replica
+for the flag). The single-prospect card/detail still recomputes the full snapshot
 (reasons/proof-points are not cached). **Warm-intro lookup** (`prospect_warm_intros.detect_warm_intros`)
 scans `sightings.vendor_email` and `site_contacts.email` with a leading-wildcard ILIKE
 (`%@<domain>`); both are pg_trgm GIN-indexed (`ix_sightings_vendor_email_trgm` added in
@@ -5629,9 +5654,15 @@ migration 170; `ix_site_contacts_email_trgm` pre-existing from a513288799de).
 by `ai_screen_min_match=40`. The score threshold override runs after the LLM: even if the
 LLM returns `pass`, the service sets `screened_out` when `trio_match_score < ai_screen_min_match`.
 
-**List route integration** (`htmx_views.py`):
+**List route integration** (`htmx/prospecting.py`):
 - Sort option `ai_match_desc`: ranks by `trio_match_score DESC → opportunity_score DESC → readiness_score DESC`.
-- `_prospect_stats_ctx` gains `"screened_out": <count>` (only when `ai_screen_enabled=True`).
+- Flag-ON grid: filter (`coalesce(ai_screen_verdict,'') != 'screened_out'`), sort, COUNT and
+  paginate all in SQL over the persisted verdict column — same coalesce ordering as the
+  flag-OFF branch; screened-out bucket = LIMIT 50 + its own honest COUNT.
+- `_prospect_stats_ctx` computes all four SUGGESTED-scoped KPIs in one SQL aggregate pass
+  (total; buyer-ready via `sum(is_buyer_ready)` with coalesce-false degrade on
+  pre-backfill NULLs; call-now; `screened_out` — zeroed unless `ai_screen_enabled`) plus a
+  separate CLAIMED count, instead of loading the pool into memory.
 - `screened_out_prospects` context var passed to the list template for the collapsed bucket.
 
 ### SP-Ingest — TRIO source-data pipeline (`app/services/source_ingest/`, SP2)

@@ -18,12 +18,14 @@ Depends on: app.services.prepayment_service, app.services.buyplan_workflow (_lin
 from decimal import Decimal, InvalidOperation
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from loguru import logger
 from sqlalchemy.orm import Session
 from starlette.responses import HTMLResponse
 
-from ..constants import PREPAYMENT_METHODS, PaymentMethod, PrepaymentStatus
+from ..constants import PREPAYMENT_METHODS, ActivityType, PaymentMethod, PrepaymentStatus
 from ..database import get_db
 from ..dependencies import get_buyplan_for_user, is_manager_or_admin, require_user
+from ..models import ActivityLog
 from ..models.buy_plan import BuyPlanLine
 from ..models.quality_plan import Prepayment
 from ..services.approvals.routing import NoEligibleApproverError
@@ -302,7 +304,9 @@ async def prepayment_mark_paid(
     """Record that the wire went out in-app (fallback for the tokenized email link).
 
     Gated to a manager/admin or the plan owner. ``paid_amount`` defaults to the prepayment's
-    ``total_incl_fees``. On the service guard (non-approved) → an error toast (no swap).
+    ``total_incl_fees``. A bad amount or the service's non-approved guard is a REAL 400
+    rendered into the modal's #pp-markpaid-error (hx-target-4xx) — never a 200 toast,
+    which would let close_modal_on_success close the modal on a refused submit.
     """
     pp = db.get(Prepayment, prepayment_id)
     if pp is None:
@@ -312,7 +316,7 @@ async def prepayment_mark_paid(
     try:
         amount = Decimal(paid_amount) if paid_amount else pp.total_incl_fees
     except (InvalidOperation, TypeError):
-        return toast_error_response("Enter a valid paid amount.")
+        return _form_error_response("Enter a valid paid amount.")
 
     try:
         mark_prepayment_paid(
@@ -325,7 +329,7 @@ async def prepayment_mark_paid(
             paid_by_label=current_user.name,
         )
     except ValueError as exc:
-        return toast_error_response(str(exc))
+        return _form_error_response(str(exc))
 
     resp = _lifecycle_rerender(request, current_user, db, pp, origin=origin, scope=scope)
     set_toast(resp, "Prepayment marked paid.", "success", merge=True)
@@ -391,6 +395,24 @@ async def prepayment_resend_pay_link(
     from ..services.prepayment_notifications import notify_prepayment_approved, run_prepayment_notify_bg
 
     await run_prepayment_notify_bg(notify_prepayment_approved, pp.id)
+
+    # Durable audit row (mirrors prepayment_service.unmark_prepayment_paid's correction
+    # log) — a resend is a deliberate action on the money loop and belongs in the
+    # plan's timeline, not just the fire-and-forget notifier's logs.
+    requisition_id = pp.buy_plan.requisition_id if pp.buy_plan is not None else None
+    db.add(
+        ActivityLog(
+            user_id=current_user.id,
+            activity_type=ActivityType.NOTE,
+            channel="system",
+            requisition_id=requisition_id,
+            buy_plan_id=pp.buy_plan_id,
+            subject="Prepayment pay link resent",
+            notes=f"Prepayment #{pp.id} pay link resent by {current_user.name or current_user.email}",
+        )
+    )
+    db.commit()
+    logger.info("Prepayment {} pay link resent by user {}", pp.id, current_user.id)
 
     resp = _lifecycle_rerender(request, current_user, db, pp, origin=origin, scope=scope)
     set_toast(resp, "OK-to-wire email resent to accounting.", "success", merge=True)

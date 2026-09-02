@@ -43,10 +43,8 @@
                 class="btn-primary btn-sm">
           Claim
         </button>
-        <button hx-post="/v2/partials/prospecting/{{ prospect.id }}/dismiss"
-                hx-target="#main-content"
-                hx-confirm="Dismiss {{ prospect.name }}? It leaves the suggested pool."
-                data-loading-disable
+        <button type="button" x-data
+                @click="$dispatch('open-modal', {url: '/v2/partials/prospecting/{{ prospect.id }}/dismiss-form?ctx=detail'})"
                 class="btn-secondary btn-sm">
           Dismiss
         </button>

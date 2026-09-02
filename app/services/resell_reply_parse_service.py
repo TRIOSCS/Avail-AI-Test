@@ -21,6 +21,7 @@ from loguru import logger
 from app.utils import claude_client
 from app.utils.claude_errors import ClaudeError
 from app.utils.normalization import normalize_mpn_key
+from app.utils.text_utils import UNTRUSTED_EMAIL_NOTICE, wrap_untrusted
 
 _MAX_TEXT_CHARS = 20_000
 _MAX_LINES = 100
@@ -50,7 +51,8 @@ REPLY_PARSE_SCHEMA = {
     "required": ["lines"],
 }
 
-REPLY_PARSE_SYSTEM = """You extract a buyer's bid from their reply to an excess-inventory offer list.
+REPLY_PARSE_SYSTEM = (
+    """You extract a buyer's bid from their reply to an excess-inventory offer list.
 
 Context: We offered a list of excess parts; the buyer replied with a bid — often terse, phone-typed, one or two lines.
 The user message starts with the list's part numbers, then the reply text.
@@ -61,6 +63,9 @@ Rules:
 - take_all: true ONLY when the buyer clearly wants the entire list ("take them all", "whole lot").
 - terms: payment/packaging/date-code conditions stated. notes: any other per-line context.
 - Empty lines array when the reply contains no actual bid."""
+    + "\n\n"
+    + UNTRUSTED_EMAIL_NOTICE
+)
 
 
 def _clean_str(value: object, max_len: int = 255) -> str | None:
@@ -89,7 +94,9 @@ async def parse_buyer_reply(reply_text: str, *, line_mpns: list[str]) -> dict | 
     if not text:
         return None
 
-    prompt = "List part numbers: " + ", ".join(line_mpns[:200]) + "\n\nBuyer reply:\n" + text
+    prompt = (
+        "List part numbers: " + ", ".join(line_mpns[:200]) + "\n\nBuyer reply:\n" + wrap_untrusted(text, tag="reply")
+    )
     try:
         # Interactive HTMX caller: single attempt, tightened timeout (P2.8 pattern).
         ai = await claude_client.claude_structured(

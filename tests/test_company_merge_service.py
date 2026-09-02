@@ -6,9 +6,10 @@ and deletes the removed company while preserving all data.
 
 import pytest
 
-from app.models import Company, CustomerSite, User
+from app.models import Company, CustomerSite, DedupDecision, DedupMergeAudit, User
 from app.models.sourcing import Requisition, Sighting
 from app.services.company_merge_service import delete_companies, merge_companies
+from app.services.dedup_decision_service import audited_merge
 from app.services.excess_mirror import _virtual_req_name, publish_list
 from app.services.excess_service import create_excess_list
 from tests.fixtures.excess_import import import_line_items
@@ -219,3 +220,32 @@ def test_merge_renames_colliding_sites(db_session):
 
     refreshed = db_session.get(CustomerSite, remove_site.id)
     assert "E Corporation" in refreshed.site_name
+
+
+def test_audited_merge_writes_audit_row_and_prunes_dismissal(db_session):
+    """A6: audited_merge() wraps merge_companies() with a DedupMergeAudit row and
+    prunes any stale DedupDecision dismissal for the pair — the CRM merge routes
+    (app/routers/htmx/companies/merge.py) now call this wrapper instead of
+    merge_companies() directly."""
+    keep, remove = _make_pair(db_session, {"name": "G Corp"}, {"name": "G Corporation"})
+    remove_id = remove.id
+    lo, hi = sorted((keep.id, remove_id))
+    db_session.add(DedupDecision(entity_type="company", id_a=lo, id_b=hi))
+    db_session.commit()
+
+    actor = User(email="merge-actor@trioscs.com", name="Merge Actor", role="trader", azure_id="merge-actor-1")
+    db_session.add(actor)
+    db_session.commit()
+
+    result = audited_merge(db_session, "company", keep.id, remove_id, actor.id)
+    db_session.commit()
+
+    assert result["sites_moved"] == 0  # result dict still passes through unchanged
+    audit = db_session.query(DedupMergeAudit).one()
+    assert audit.actor_id == actor.id
+    assert audit.entity_type == "company"
+    assert audit.action == "merge"
+    assert (audit.kept_id, audit.kept_name) == (keep.id, "G Corp")
+    assert (audit.removed_id, audit.removed_name) == (remove_id, "G Corporation")
+    assert db_session.query(DedupDecision).count() == 0  # stale dismissal pruned
+    assert db_session.get(Company, remove_id) is None  # the real merge still ran

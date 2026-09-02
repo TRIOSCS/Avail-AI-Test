@@ -107,6 +107,16 @@ def test_failed_singleton_cannot_be_mutated():
     assert _FAILED.status == "failed"
 
 
+def test_system_prompt_cautions_against_untrusted_web_content():
+    """F10 (pairs with the F3 citation work): the LLM reads arbitrary web pages via the
+    web_search tool, so the system prompt must warn that page content is untrusted and
+    instructions embedded in it must not be followed."""
+    from app.services.enrichment_worker.web_extractor import _SYSTEM
+
+    assert "untrusted" in _SYSTEM.lower()
+    assert "instructions" in _SYSTEM.lower()
+
+
 def test_prompt_constrains_category_to_canonical_vocabulary():
     """The extracted category routes through the F1 ladder's normalize_category (off-
     vocab → silently dropped), so the prompt must solicit ladder-admissible keys — a

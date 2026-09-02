@@ -1491,7 +1491,9 @@ async def _parse_sequential_fallback(
     async def _parse_one(vr):
         async with sem:
             try:
-                return vr, await parse_response_ai(vr.body, vr.subject)
+                # F10: vr.subject is nullable; parse_vendor_response's
+                # wrap_untrusted(email_subject, tag='subject') requires a str.
+                return vr, await parse_response_ai(vr.body, vr.subject or "")
             except Exception as e:
                 logger.warning(f"Sequential AI parse failed for VR {vr.id}: {e}")
                 return vr, None

@@ -137,12 +137,8 @@
             class="btn-primary btn-sm flex-1">
       Claim
     </button>
-    <button hx-post="/v2/partials/prospecting/{{ prospect.id }}/dismiss"
-            hx-target="#prospect-{{ prospect.id }}"
-            hx-swap="outerHTML"
-            hx-vals='{"flt_status": "{{ status|default('') }}"}'
-            hx-confirm="Dismiss {{ prospect.name }}? It leaves the suggested pool."
-            data-loading-disable
+    <button type="button" x-data
+            @click="$dispatch('open-modal', {url: '/v2/partials/prospecting/{{ prospect.id }}/dismiss-form?ctx=grid&flt_status={{ status|default('')|urlencode }}'})"
             class="btn-secondary btn-sm flex-1">
       Dismiss
     </button>

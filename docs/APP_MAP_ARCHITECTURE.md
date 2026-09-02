@@ -369,7 +369,12 @@ aggregated internally by `htmx_views.py` itself so `main.py` needed zero new mou
 - `app/routers/htmx/sourcing.py` — **deal/sourcing-cluster split (sourcing-engine slice)**:
   the self-contained sourcing surface (`/v2/sourcing/*` pages + `/v2/partials/sourcing/*`) —
   results page/stream, manual search trigger, lead detail/status/feedback, and the split-panel
-  workspace (page, list, lead panel).
+  workspace (page, list, lead panel). Also owns the cross-requisition buyer leads queue
+  (`GET /v2/partials/leads/queue` — creator-scoped exactly like the JSON `/api/leads/queue`,
+  paginated 25/page, grouped requisition → requirement with per-requirement
+  `_lead_sighting_data` merged into one dict so `lead_card.html` renders unchanged);
+  `lead_status_update` tells the two surfaces apart by the `/v2/sourcing/leads/` referer
+  prefix — queue-page status changes re-render the card, not the detail partial.
 - `app/routers/htmx/quotes.py` — **tail split (quote slice)**: the quote partials
   (`/v2/partials/quotes/*` preview/delete/reopen/edit-metadata, recent-terms,
   `/v2/partials/pricing-history/{mpn}`, the quote detail panel + quote-line CRUD, add-offer,
@@ -378,7 +383,12 @@ aggregated internally by `htmx_views.py` itself so `main.py` needed zero new mou
 - `app/routers/htmx/prospecting.py` — **tail split (prospecting slice)**: the prospect list/grid,
   stats, add-domain, detail panel, claim/dismiss/release/enrich + enrich-status poller, and the
   manager-only `/v2/partials/prospects/{id}/assign[-form]` action (rep picker → assigns the account
-  to a chosen rep; the O-rework successor to the retired reclaim/reassign controls). Owns the
+  to a chosen rep; the O-rework successor to the retired reclaim/reassign controls). The flag-ON
+  AI-screen grid filters/sorts/paginates in SQL over the persisted `ai_screen_verdict` cache
+  column (same coalesce ordering as the flag-OFF branch; screened-out bucket = LIMIT 50 + its own
+  honest COUNT), and `_prospect_stats_ctx` is one SQL aggregate pass including
+  `sum(is_buyer_ready)` with coalesce-false degrade — no more per-request Python snapshot of
+  every row (migration 218 cache columns). Owns the
   prospect-context helpers
   (`_prospect_card_ctx`/`_prospect_detail_ctx`/`_prospect_stats_ctx`/`_prospect_action_response`/
   `_status_visible_under_filter`/`_wants_detail`/`_enrich_is_stale`).
@@ -447,9 +457,11 @@ full-page entry points (`v2_page` + `/v2/quotes` redirect), the parts-workspace 
 (`GET /v2/partials/parts/workspace`), the vendor stock-list import
 (`/v2/partials/vendors/import-stock`), and the shared nav/access-gate constants
 (`_NAV_ID_ALIAS`, `_VIEW_ACCESS`, `_MODULE_ENTRY_URLS`). `v2_page` also owns the canonical
-full-page URLs for the two buyer queues that have **no bottom-nav tab** — `/v2/follow-ups`
-(→ `/v2/partials/follow-ups`) and `/v2/offers/review-queue` (→ `/v2/partials/offers/review-queue`,
-`offers` view segment) — both surfaced via the **Sightings workspace quick-links** bar
+full-page URLs for the three buyer queues that have **no bottom-nav tab** — `/v2/follow-ups`
+(→ `/v2/partials/follow-ups`), `/v2/offers/review-queue` (→ `/v2/partials/offers/review-queue`,
+`offers` view segment), and `/v2/leads/queue` (→ `/v2/partials/leads/queue`, the
+cross-requisition buyer leads queue in `htmx/sourcing.py`) — all surfaced via the
+**Sightings workspace quick-links** bar
 (`sightings/list.html`; `sightings_workspace` computes the pending-review + follow-up counts
 once, off the table-refresh path). The retired Buy Plans hub URLs (`/v2/buy-plans[/{id}]`)
 **308-redirect** to `/v2/approvals?tab=buy-plans` — a detail deep link adds
@@ -510,7 +522,7 @@ authoritative reference. Static-analysis tests in
 | Quotes | 5 | partials/quotes/ — `list.html` removed (standalone Quotes tab retired); detail/macros/line_row/preview/pricing_history remain |
 | Sightings | 7 | partials/sightings/ — incl. `_vendor_search_results.html` ("Find any vendor" server-rendered debounced dropdown, `GET /v2/partials/sightings/vendor-search`, swapped into `#vendor-search-results` inside `vendor_modal.html`'s `rfqVendorModal` Alpine scope). `list.html` (the workspace shell) carries a top **quick-links** bar with count-badged entry points to the offer-review queue + follow-up queue (both nav-swap `#main-content`, pushing their canonical URLs). |
 | Search | 13 | partials/search/ — incl. the Part Dossier ("Bench") at `/v2/search?mpn=`: `dossier_shell/hero/specs/recent/market.html` (routes in `routers/part_dossier.py`). |
-| Prospecting | 8 | partials/prospecting/ — list/_card/_macros/detail/stats/add_result/enrich_status/_action_oob; buyer-ready ranking via `services/prospect_priority.build_priority_snapshot` (single source of truth); background enrich polls `/enrich-status` (HTTP 286 stops); grid actions OOB-remove cards + refresh `#prospect-stats` |
+| Prospecting | 10 | partials/prospecting/ — list/_card/_macros/detail/stats/add_result/enrich_status/_action_oob/assign_modal/dismiss_modal; buyer-ready ranking via `services/prospect_priority.build_priority_snapshot` (single source of truth), ranked/aggregated in SQL through the write-through `buyer_ready_score`/`is_buyer_ready`/`ai_screen_verdict` cache columns (migrations 170+218); background enrich polls `/enrich-status` (HTTP 286 stops); grid actions OOB-remove cards + refresh `#prospect-stats` |
 | Proactive | 4 | partials/proactive/ |
 | Emails | 4 | partials/emails/ |
 | Tickets | 4 | partials/tickets/ |

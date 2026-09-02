@@ -158,14 +158,17 @@ class TestAddDomain:
 
 class TestDismiss:
     def test_dismiss_sets_audit_and_reason(self, client, db_session, test_user):
+        # "not_a_fit" is one of the closed PROSPECT_DISMISS_REASONS values (audit M17) —
+        # anything outside that vocabulary now falls back to "other" (see
+        # TestM17DismissService in test_prospecting_audit_fixes.py).
         p = make_prospect(db_session, status="suggested")
-        resp = client.post(f"/v2/partials/prospecting/{p.id}/dismiss", data={"reason": "not_icp"})
+        resp = client.post(f"/v2/partials/prospecting/{p.id}/dismiss", data={"reason": "not_a_fit"})
         assert resp.status_code == 200
         db_session.refresh(p)
         assert p.status == "dismissed"
         assert p.dismissed_by == test_user.id
         assert p.dismissed_at is not None
-        assert p.dismiss_reason == "not_icp"
+        assert p.dismiss_reason == "not_a_fit"
 
     def test_dismiss_rejects_claimed(self, client, db_session):
         p = make_prospect(db_session, status="claimed")

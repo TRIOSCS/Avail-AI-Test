@@ -5,8 +5,11 @@
   '/v2/partials/prepayments/{id}/mark-paid?scope=...'}). Records that the wire went out:
   captures wire_reference + paid_amount (prefilled from total_incl_fees) and POSTs
   (form-encoded) to /v2/partials/prepayments/{id}/mark-paid, which marks the prepayment paid
-  (paid_via=in_app), re-renders the Prepayment tab body into #ap-hub-body, and toasts. The
-  modal closes on any 2xx.
+  (paid_via=in_app) and re-renders the origin surface: the workspace prepayment pane into
+  #aw-pane, or the Prepayment tab body into #ap-hub-body otherwise. Refusals (bad amount,
+  non-approved) are REAL 400s rendered inline into #pp-markpaid-error (hx-target-4xx,
+  response-targets ext) so the modal stays open with input intact. The modal closes on
+  any 2xx.
   Receives: pp (Prepayment), amount (Decimal, prefill), scope ('all'|'mine'),
             origin ('approvals_workspace'|'' — threads the caller's surface: workspace
             origin re-renders the prepayment pane into #aw-pane, default the tab body).
@@ -26,10 +29,16 @@
     <div>Authorised <span class='font-mono text-gray-900'>{{ pp.currency or "USD" }} {{ "%.2f"|format(pp.total_incl_fees or 0) }}</span></div>
   </div>
 
+  {# Inline refusal surface (SET-03 pattern, settings/users.html; mirrors request_modal.html's
+     #pp-modal-error): the POST's 400s render HERE via hx-target-4xx (response-targets ext,
+     loaded in base.html) — the modal stays open, input intact. Empty div renders zero-height. #}
+  <div id='pp-markpaid-error'></div>
+
   <form hx-post='/v2/partials/prepayments/{{ pp.id }}/mark-paid'
         hx-target='{% if origin == "approvals_workspace" %}#aw-pane{% else %}#ap-hub-body{% endif %}'
         hx-swap='innerHTML'
         hx-push-url='false'
+        hx-target-4xx='#pp-markpaid-error'
         {{ close_modal_on_success() }}
         data-loading-disable
         class='space-y-3'>

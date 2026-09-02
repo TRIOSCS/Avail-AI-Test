@@ -14,16 +14,19 @@ Depends on: conftest (db_session, test_user, client), app.routers.prepayments,
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.constants import BuyPlanStatus
+from app.constants import BuyPlanStatus, PrepaymentStatus
 from app.database import get_db
 from app.dependencies import require_user
-from app.models import User
+from app.models import SystemConfig, User
+from app.models.quality_plan import Prepayment
+from app.services import prepayment_notifications as pn
 
 # Reuse the proven prepay-approval + plan/line builders.
 from tests.test_approvals_hub_tabs import (
@@ -149,3 +152,48 @@ def test_non_prepayment_request_rejected(approver_client: TestClient, db_session
 
     assert r.status_code == 400, r.text
     assert not bg.called
+
+
+# ── A1: the "approved" notify re-checks status in its OWN fresh session ───
+#
+# The resend/approve call sites check status BEFORE dispatching the fire-and-forget
+# background task; between that check and the task actually running (its own fresh
+# SessionLocal), the prepayment can flip away from approved (e.g. an in-app mark-paid
+# races in). notify_prepayment_approved must re-read the committed status and no-op
+# rather than emailing a stale OK-TO-WIRE for a prepayment that's already paid/void.
+
+
+async def test_approved_notify_skips_when_status_no_longer_approved(db_session: Session, test_user: User):
+    req, q, _ = _req_quote(db_session, test_user)
+    bp = _plan(db_session, req, q, status=BuyPlanStatus.ACTIVE.value)
+    pp = Prepayment(
+        buy_plan_id=bp.id,
+        total_incl_fees=2500,
+        currency="USD",
+        created_by_id=test_user.id,
+        status=PrepaymentStatus.PAID.value,  # flipped away from approved before the notify ran
+    )
+    db_session.add(pp)
+    # Both channels configured — WITHOUT the status re-check the mocks below would be
+    # called, proving the guard (not an empty-config no-op) is what stops the send.
+    db_session.add(
+        SystemConfig(key="accounting_group_email", value="accounting@trio.test", updated_at=datetime.now(UTC))
+    )
+    db_session.add(
+        SystemConfig(
+            key="prepayment_teams_webhook",
+            value="https://outlook.office.com/webhook/prepay",
+            updated_at=datetime.now(UTC),
+        )
+    )
+    db_session.commit()
+
+    with (
+        patch.object(pn, "_send_group_email", new=AsyncMock(return_value=True)) as email,
+        patch.object(pn, "post_teams_channel_card", new=AsyncMock()) as card,
+    ):
+        result = await pn.notify_prepayment_approved(pp.id, db=db_session)
+
+    assert result == {"email_sent": False, "teams_sent": False, "recipients": []}
+    assert not email.called
+    assert not card.called

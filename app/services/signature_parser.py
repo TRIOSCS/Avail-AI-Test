@@ -9,6 +9,8 @@ from datetime import UTC, datetime
 
 from loguru import logger
 
+from app.utils.text_utils import UNTRUSTED_EMAIL_NOTICE, wrap_untrusted
+
 # ── Regex patterns for signature extraction ──────────────────────────
 
 _PHONE_RE = re.compile(
@@ -249,11 +251,13 @@ async def parse_signature_ai(body: str, sender_name: str = "", sender_email: str
     # Limit to prevent excessive token usage
     sig_text = sig_block[:2000]
 
+    # F10: sig_text (raw email content), sender_name and sender_email (From-header
+    # values) are all externally supplied, so each gets its own delimiter tag.
     prompt = (
         f"Extract contact information from this email signature.\n"
-        f"Sender name: {sender_name or 'unknown'}\n"
-        f"Sender email: {sender_email or 'unknown'}\n\n"
-        f"Signature block:\n```\n{sig_text}\n```\n\n"
+        f"Sender name: {wrap_untrusted(sender_name or 'unknown', tag='sender_name')}\n"
+        f"Sender email: {wrap_untrusted(sender_email or 'unknown', tag='sender_email')}\n\n"
+        f"Signature block:\n{wrap_untrusted(sig_text, tag='signature')}\n\n"
         f"Return a JSON object with these keys (use null for unknown):\n"
         f'{{"full_name", "title", "company_name", "phone", "mobile", '
         f'"website", "address", "linkedin_url"}}'
@@ -262,7 +266,10 @@ async def parse_signature_ai(body: str, sender_name: str = "", sender_email: str
     try:
         data = await claude_json(
             prompt,
-            system="You extract contact information from email signatures. Return ONLY valid JSON.",
+            system=(
+                "You extract contact information from email signatures. Return ONLY valid JSON.\n\n"
+                + UNTRUSTED_EMAIL_NOTICE
+            ),
             model_tier="fast",
             max_tokens=512,
             timeout=10,

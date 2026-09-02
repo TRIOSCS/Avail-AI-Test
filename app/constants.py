@@ -725,6 +725,27 @@ class ProspectAccountStatus(StrEnum):
     EXPIRED = "expired"
 
 
+# Closed vocabulary offered by the dismiss-reason modal (audit M17). ProspectAccount.
+# dismiss_reason stays a free-form String(255) — no migration — so this tuple is
+# validated in the dismiss flow with a safe fallback to "other", not enforced by the
+# column. Order drives the radio list; PROSPECT_DISMISS_REASON_LABELS holds display text.
+PROSPECT_DISMISS_REASONS: tuple[str, ...] = (
+    "not_a_fit",
+    "no_buyer_demand",
+    "duplicate",
+    "bad_data",
+    "other",
+)
+
+PROSPECT_DISMISS_REASON_LABELS: dict[str, str] = {
+    "not_a_fit": "Not a fit",
+    "no_buyer_demand": "No buyer demand",
+    "duplicate": "Duplicate account",
+    "bad_data": "Bad data",
+    "other": "Other",
+}
+
+
 class CompanyDisposition(StrEnum):
     """Salesperson-set lifecycle disposition for a Company.
 

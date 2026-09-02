@@ -23,7 +23,7 @@
         <p class="text-sm font-medium text-gray-900 truncate">{{ p.company_name }}
           {% if p.has_ai_variants %}
           <span class="badge-mini bg-amber-100 text-amber-800 border border-amber-300 ml-1"
-                title="This offer includes AI-matched variant part numbers — verify before sending">
+                title="This offer includes AI-matched variant part numbers — verify before sending — open Prepare to review and send">
             AI match — verify
           </span>
           {% endif %}
@@ -52,7 +52,7 @@
       <form hx-post="/v2/partials/proactive/prepared/{{ p.id }}/send"
             hx-target="#main-content"
             {% if p.has_ai_variants %}
-            hx-confirm="This offer includes AI-matched variant part numbers — verify before sending. Email {{ p.company_name | e }} ({{ p.recipient_emails | join(', ') | e }})?"
+            hx-confirm="This offer includes AI-matched variant part numbers — verify before sending. Open Prepare to review and send, or email {{ p.company_name | e }} ({{ p.recipient_emails | join(', ') | e }}) now?"
             {% else %}
             hx-confirm="Email this offer to {{ p.company_name | e }} ({{ p.recipient_emails | join(', ') | e }})?"
             {% endif %}

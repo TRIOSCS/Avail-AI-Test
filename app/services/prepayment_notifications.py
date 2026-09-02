@@ -53,6 +53,7 @@ from ..constants import (
     ApprovalGateType,
     ApprovalRecipientStatus,
     ApprovalSubjectType,
+    PrepaymentStatus,
     UserRole,
 )
 from ..models import ActivityLog, User
@@ -240,6 +241,19 @@ async def _notify_inner(db: Session, prepayment_id: int, event: str, reason: str
     prepayment = db.get(Prepayment, prepayment_id)
     if prepayment is None:
         logger.warning("notify_prepayment_{}: prepayment {} not found", event, prepayment_id)
+        return result
+
+    # The caller (resend route, approve decision) checks status BEFORE dispatching this
+    # as a fire-and-forget background task; by the time it actually runs here — its own
+    # fresh session (run_prepayment_notify_bg) — the prepayment may have moved on (e.g.
+    # an in-app mark-paid or a void raced in). Re-read the now-committed status and skip
+    # a stale OK-TO-WIRE rather than emailing accounting/AP against a paid/void prepayment.
+    if event == "approved" and prepayment.status != PrepaymentStatus.APPROVED.value:
+        logger.info(
+            "notify_prepayment_approved: prepayment {} is now {} (not approved) — skipping stale OK-TO-WIRE notice",
+            prepayment_id,
+            prepayment.status,
+        )
         return result
 
     cfg = get_config_values(db, _CONFIG_KEYS)
