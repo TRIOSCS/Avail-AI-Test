@@ -113,6 +113,7 @@ _VIEW_ACCESS: dict[str, AccessKey] = {
     "proactive": AccessKey.PROACTIVE,
     "prospecting": AccessKey.PROSPECTING,
     "my-day": AccessKey.MY_DAY,
+    "reports": AccessKey.REPORTS,
 }
 
 # Ordered (AccessKey, full-page url) list in MODULE order. When a user is denied the view
@@ -129,6 +130,9 @@ _MODULE_ENTRY_URLS: tuple[tuple[AccessKey, str], ...] = (
     (AccessKey.PROACTIVE, "/v2/proactive"),
     (AccessKey.PROSPECTING, "/v2/prospecting"),
     (AccessKey.MY_DAY, "/v2/my-day"),
+    # LAST on purpose: a user whose only module is Reports still lands somewhere, but Reports
+    # is never the redirect target ahead of a real working module.
+    (AccessKey.REPORTS, "/v2/reports"),
 )
 
 
@@ -163,6 +167,7 @@ _VALID_NAV_KEYS: frozenset[str] = frozenset(
         "prospecting",
         "my-day",
         "settings",
+        "reports",
     }
 )
 
@@ -225,6 +230,7 @@ async def v2_shell(request: Request, partial: str = "", db: Session = Depends(ge
 @router.get("/v2/trouble-tickets", response_class=HTMLResponse)
 @router.get("/v2/trouble-tickets/{ticket_id:int}", response_class=HTMLResponse)
 @router.get("/v2/my-day", response_class=HTMLResponse)
+@router.get("/v2/reports", response_class=HTMLResponse)
 async def v2_page(request: Request, db: Session = Depends(get_db)):
     """Full page load — serves base.html with initial content via HTMX."""
 
@@ -254,6 +260,7 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         "leads",
         "trouble-tickets",
         "my-day",
+        "reports",
         "crm",
         # "vendor-contacts" / "contacts" must precede "vendors" / "customers" — the
         # match is a substring test and "/contacts" is contained in "/vendor-contacts".
@@ -428,13 +435,10 @@ async def buy_plans_hub_retired_redirect(bp_id: int | None = None) -> RedirectRe
 async def parts_workspace_partial(
     request: Request,
     user: User = Depends(require_access(AccessKey.REQUISITIONS)),
-    db: Session = Depends(get_db),
 ):
-    """Return the split-panel parts workspace shell."""
-    from ..services import forecast_service
-
+    """Return the split-panel parts workspace shell (pipeline strip → /v2/reports,
+    Decision M)."""
     ctx = _base_ctx(request, user, "requisitions")
-    ctx["pipeline"] = forecast_service.pipeline_summary(db)
     return template_response("htmx/partials/parts/workspace.html", ctx)
 
 

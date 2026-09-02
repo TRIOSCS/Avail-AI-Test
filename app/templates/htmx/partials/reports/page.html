@@ -1,0 +1,39 @@
+{# Reports page — GP rollup (Decision M: first) + the requisition pipeline strip moved off the Sales Hub.
+   Called by: GET /v2/partials/reports (app/routers/htmx/reports.py) — full render; the #gp-panel
+   fragment re-renders via _gp_panel.html on every pill tap (HX-Target: gp-panel).
+   Depends on: reports/_gp_panel.html, shared/_macros.html (stat_card), the |money filter.
+   Receives: report (GpReport), is_manager, pipeline (forecast_service.pipeline_summary),
+             bases/group_bys/periods + the *_labels maps. #}
+<title hx-swap-oob="true">Reports — AvailAI</title>
+<div class="page-readable space-y-6 py-4">
+  <div>
+    <h1 class="h2">Reports</h1>
+    <p class="text-sm text-gray-600 mt-0.5">Gross profit from buy-plan headers frozen at approval, and the requisition pipeline.</p>
+  </div>
+
+  {# ── Section 1: GP rollup (FIRST per Decision M) ── #}
+  <div id="gp-panel">{% include "htmx/partials/reports/_gp_panel.html" %}</div>
+
+  {# ── Section 2: Requisition pipeline (relocated Sales Hub chip — now with the won/lost/
+       win-rate figures the Sales Hub dropped). Tenant-wide by design: pipeline "mine" would be
+       claimed_by_id, a DIFFERENT population from "plans I submitted" — wiring it to the scope
+       toggle is out of v1 (Controller rulings). pipeline_summary always returns a dict
+       (win_rate = 0.0 when nothing is decided), so this renders unconditionally. #}
+  <section class="space-y-1">
+    <p class="text-xs font-semibold uppercase tracking-wider text-gray-500">Requisition pipeline · all users · all-time</p>
+    <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-secondary">
+      <span><span class="figure-accent">{{ pipeline.open_count }}</span> open deal{{ "" if pipeline.open_count == 1 else "s" }}</span>
+      <span class="text-gray-300">·</span>
+      <span><span class="figure-accent">${{ "{:,.0f}".format(pipeline.open_value) }}</span> open value</span>
+      <span class="text-gray-300">·</span>
+      <span><span class="figure-accent">${{ "{:,.0f}".format(pipeline.weighted_value) }}</span> weighted forecast</span>
+      <span class="text-gray-300">·</span>
+      <span><span class="figure-accent">{{ pipeline.won_count }}</span> won (${{ "{:,.0f}".format(pipeline.won_value) }})</span>
+      <span class="text-gray-300">·</span>
+      <span><span class="figure-accent">{{ pipeline.lost_count }}</span> lost</span>
+      <span class="text-gray-300">·</span>
+      <span><span class="figure-accent">{{ "{:.0%}".format(pipeline.win_rate) }}</span> win rate (all-time)</span>
+    </div>
+    <p class="text-xs text-gray-500">Deal value = entered opportunity value or Σ requirement target price — not plan revenue. Win rate = won ÷ (won + lost) requisitions, all-time. Not affected by the controls above.</p>
+  </section>
+</div>

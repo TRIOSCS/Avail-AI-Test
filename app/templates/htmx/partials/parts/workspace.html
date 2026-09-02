@@ -2,41 +2,25 @@
    Left: filterable parts table with top scrollbar. Right: detail tabs for selected part.
    Called by: GET /v2/requisitions (full page load → partial swap)
    Depends on: parts/list.html, Alpine.js, HTMX
-   Receives: pipeline (forecast_service.pipeline_summary) for the slim context strip.
+   Receives: nothing beyond _base_ctx (access gates the Reports link). The context-strip figures moved to /v2/reports (Decision M).
 #}
 
 <title hx-swap-oob="true">Sales Hub — AvailAI</title>
 
-{# ── Pipeline context strip — slim, subordinate header (no card/dashboard). Open deals,
-     open value, and stage-weighted forecast, near the requisitions they summarize. The
-     split-panel height below subtracts this 26px strip so the layout doesn't overflow. #}
-{% if pipeline %}
-{# border-line-base replaces border-gray-200 (finding 12) #}
+{# Page eyebrow — answers "Where am I?" (finding 9). The strip figures moved to
+   /v2/reports (Decision M); the split-panel height below still subtracts this 26px bar. #}
 <div class="h-[26px] flex items-center gap-4 px-3 text-secondary bg-gray-50 border-b border-line-base">
-  {# Page eyebrow answers "Where am I?" (finding 9) #}
   <span class="font-semibold text-gray-700 mr-1">Sales Hub</span>
-  <span class="text-gray-300">·</span>
-  <span><span class="figure-accent">{{ pipeline.open_count }}</span> open deal{{ "" if pipeline.open_count == 1 else "s" }}</span>
-  <span class="text-gray-300">·</span>
-  <span><span class="figure-accent">${{ "{:,.0f}".format(pipeline.open_value) }}</span> open value</span>
-  <span class="text-gray-300">·</span>
-  <span><span class="figure-accent">${{ "{:,.0f}".format(pipeline.weighted_value) }}</span> weighted forecast</span>
-  {# View toggle — discoverable switch to the flat Requisitions list (finding REQ-12) #}
-  <div class="ml-auto">
+  <div class="ml-auto flex items-center gap-2">
+    {% if (access | default({})).get('reports', True) %}
+    <a href="/v2/reports" hx-get="/v2/partials/reports" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="/v2/reports"
+       class="px-2 py-1 rounded-sm text-xs font-medium text-gray-600 hover:text-accent-600 hover:bg-accent-50 transition-colors">Reports</a>
+    {% endif %}
     {% with active='workspace' %}{% include "htmx/partials/requisitions/_view_toggle.html" %}{% endwith %}
   </div>
 </div>
-{% else %}
-{# No pipeline data: still render the page identity eyebrow (finding 9) #}
-<div class="h-[26px] flex items-center gap-2 px-3 text-xs bg-gray-50 border-b border-line-base">
-  <span class="font-semibold text-gray-700">Sales Hub</span>
-  <div class="ml-auto">
-    {% with active='workspace' %}{% include "htmx/partials/requisitions/_view_toggle.html" %}{% endwith %}
-  </div>
-</div>
-{% endif %}
 
-<div class="{{ 'h-[calc(100vh-116px)]' if pipeline else 'h-[calc(100vh-90px)]' }} flex"
+<div class="h-[calc(100vh-116px)] flex"
      x-data="{
        ...window.ratioSplitMixin('parts-split', 0.50, 0.2, 0.8),
        selectedPartId: null,

@@ -2848,8 +2848,10 @@ there is NO app-token sendMail path.
 
 **Reporting fold.** The retired `/v2/reporting` page's analytics now live where the work
 happens: the **Supervise** lens strip (open value / avg margin / approvals / halted /
-overdue / flagged counts), the **Sales Hub** pipeline chip (`forecast_service.pipeline_summary`
-in `parts_workspace_partial`), and the **CRM** coverage chip (`reporting_service.coverage_report`
+overdue / flagged counts), the **Reports page** pipeline strip (`forecast_service.pipeline_summary`
+in `routers/htmx/reports.py` — `/v2/reports`, beside the GP rollup from
+`services/gp_report_service.py`; moved off the Sales Hub in Phase 5, Decision M — the Sales
+Hub keeps a gated Reports eyebrow link), and the **CRM** coverage chip (`reporting_service.coverage_report`
 in `crm_service.cdm_list_ctx`). `coverage_report` is global (population-wide, filter-independent),
 so it is short-TTL cached (`@cached_endpoint`) to stay off the aggregation queries on every
 CRM list refresh while the chip still re-renders.

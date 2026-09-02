@@ -55,7 +55,7 @@ scripts/ux-repair-state/history.jsonl
 scripts/ux-repair-state/failed_patches.json
 coverage-report.txt
 docs/superpowers/specs/2026-03-28-coverage-report.txt
-reports/
+/reports/
 node_modules
 .superpowers/
 

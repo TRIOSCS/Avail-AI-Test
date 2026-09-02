@@ -59,6 +59,7 @@ class TestModuleKeyForPathGuarded:
             ("/v2/partials/prospecting/stats", AccessKey.PROSPECTING),
             ("/v2/partials/prospecting/9/claim", AccessKey.PROSPECTING),
             ("/v2/partials/my-day", AccessKey.MY_DAY),
+            ("/v2/partials/reports", AccessKey.REPORTS),
         ],
     )
     def test_guarded_prefix_returns_key(self, path, key):

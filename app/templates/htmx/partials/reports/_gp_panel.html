@@ -1,0 +1,109 @@
+{# Reports GP panel — pills + caption + headline tiles + coverage note + table / empty state.
+   The fragment HTMX swaps into #gp-panel on every pill tap; page.html includes it on full render
+   (so it must NOT contain id="gp-panel" itself).
+   Called by: reports/page.html (include); GET /v2/partials/reports with HX-Target: gp-panel.
+   Depends on: shared/_macros.html stat_card, the |money filter (renders — for None).
+   Receives: report (GpReport), is_manager, bases/group_bys/periods,
+             basis_labels/basis_short_labels/group_labels/group_pill_labels/period_labels/scope_labels. #}
+{% from "htmx/partials/shared/_macros.html" import stat_card %}
+
+{# One pill: the three OTHER dimensions stay current, this one is replaced (the
+   approvals/_workspace_list.html:72-79 pattern). URLs are literal template text so the &
+   separators stay raw & (autoescape rewrites & only inside {{ }} output —
+   tests/test_approvals_hub_tabs.py:971-972). hx-replace-url (approvals_hub.html:39 precedent)
+   keeps the address bar truthful and bookmarkable WITHOUT a history entry per tap; a reload of
+   /v2/reports?… reproduces the view via the v2_page else-fallback. NO hx-push-url anywhere on
+   this page (inherited attribute — nothing may introduce it). No Alpine state: active classes
+   are server-rendered. #}
+{% macro pill(qbasis, qgroup, qscope, qperiod, label, active) -%}
+<button type="button"
+        hx-get="/v2/partials/reports?basis={{ qbasis }}&group_by={{ qgroup }}&scope={{ qscope }}&period={{ qperiod }}"
+        hx-target="#gp-panel" hx-swap="innerHTML"
+        hx-replace-url="/v2/reports?basis={{ qbasis }}&group_by={{ qgroup }}&scope={{ qscope }}&period={{ qperiod }}"
+        class="px-2.5 py-1 rounded-full transition-colors {{ 'bg-accent-500 text-white shadow-sm' if active else 'text-brand-600 hover:text-brand-800' }}">{{ label }}</button>
+{%- endmacro %}
+{% set t = report.total %}
+{% set priced = t.plan_count - t.unpriced_count %}
+
+<div class="flex flex-wrap items-center gap-2">
+  <div class="inline-flex items-center rounded-full bg-brand-100 p-0.5 text-xs font-medium">
+    {% for g in group_bys %}{{ pill(report.basis, g, report.scope, report.period.key, group_pill_labels[g], g == report.group_by) }}{% endfor %}
+  </div>
+  <div class="inline-flex items-center rounded-full bg-brand-100 p-0.5 text-xs font-medium">
+    {% for b in bases %}{{ pill(b, report.group_by, report.scope, report.period.key, basis_short_labels[b], b == report.basis) }}{% endfor %}
+  </div>
+  <div class="inline-flex items-center rounded-full bg-brand-100 p-0.5 text-xs font-medium">
+    {{ pill(report.basis, report.group_by, 'mine', report.period.key, 'Mine', report.scope == 'mine') }}
+    {# The All pill is manager/admin only (resell/workspace.html:26 idiom) — a non-manager
+       sees a single active Mine pill and no scope=all URL anywhere. #}
+    {% if is_manager %}{{ pill(report.basis, report.group_by, 'all', report.period.key, 'All', report.scope == 'all') }}{% endif %}
+  </div>
+  <div class="inline-flex items-center rounded-full bg-brand-100 p-0.5 text-xs font-medium">
+    {% for pk in periods %}{{ pill(report.basis, report.group_by, report.scope, pk, period_labels[pk], pk == report.period.key) }}{% endfor %}
+  </div>
+</div>
+
+{# Caption — basis + scope + period always travel with the figures (honesty rule). #}
+<p class="text-xs text-gray-500 mt-2">{{ basis_labels[report.basis] }} · {{ scope_labels[report.scope] }} · {{ report.period.label }}</p>
+
+{# Headline tiles — all fed from report.total (no extra query). #}
+<div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3">
+  {{ stat_card("GP $", t.gross_profit | money, basis_short_labels[report.basis] ~ " · " ~ period_labels[report.period.key]) }}
+  {{ stat_card("Revenue", t.revenue | money) }}
+  {{ stat_card("Margin", "{:.1f}%".format(t.margin_pct) if t.margin_pct is not none else "—") }}
+  {{ stat_card("Plans", t.plan_count, priced ~ " priced") }}
+</div>
+
+{# Coverage note — unpriced plans are counted, never summed, never hidden. #}
+{% if t.plan_count > 0 %}
+  {% if t.unpriced_count > 0 %}
+<p class="text-xs text-amber-700 mt-2">{{ t.unpriced_count }} of {{ t.plan_count }} plans in this period have no priced header (revenue or cost blank) — counted in Plans, not summed. Zero-line order types (Stock Sale / Testing Service / Comps) are always unpriced in AVAIL; their dollars live in the ERP.</p>
+  {% else %}
+<p class="text-xs text-gray-500 mt-2">All {{ t.plan_count }} plans priced.</p>
+  {% endif %}
+{% endif %}
+
+{% if report.rows %}
+<div class="overflow-x-auto mt-3">
+  <table class="w-full text-sm tabular-nums">
+    <thead>
+      <tr class="text-left text-xs text-gray-500 border-b border-line-base">
+        <th class="py-1.5 pr-2 font-medium">{{ group_labels[report.group_by] }}</th>
+        <th class="py-1.5 pr-2 font-medium">Plans</th>
+        <th class="py-1.5 pr-2 font-medium">Priced</th>
+        <th class="py-1.5 pr-2 font-medium text-right">Revenue</th>
+        <th class="py-1.5 pr-2 font-medium text-right">Cost</th>
+        <th class="py-1.5 pr-2 font-medium text-right">GP $</th>
+        <th class="py-1.5 font-medium text-right">Margin %</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in report.rows %}
+      <tr class="border-b border-line-base">
+        <td class="py-1.5 pr-2">{{ row.label }}</td>
+        <td class="py-1.5 pr-2">{{ row.plan_count }}</td>
+        <td class="py-1.5 pr-2">{{ row.plan_count - row.unpriced_count }} of {{ row.plan_count }}{% if row.unpriced_count > 0 %}<span class="text-amber-700"> · {{ row.unpriced_count }} unpriced</span>{% endif %}</td>
+        <td class="py-1.5 pr-2 text-right">{{ row.revenue | money }}</td>
+        <td class="py-1.5 pr-2 text-right">{{ row.cost | money }}</td>
+        <td class="py-1.5 pr-2 text-right">{{ row.gross_profit | money }}</td>
+        <td class="py-1.5 text-right">{{ "{:.1f}".format(row.margin_pct) if row.margin_pct is not none else "—" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr class="font-semibold border-t border-line-base">
+        <td class="py-1.5 pr-2">Total</td>
+        <td class="py-1.5 pr-2">{{ t.plan_count }}</td>
+        <td class="py-1.5 pr-2">{{ priced }} of {{ t.plan_count }}{% if t.unpriced_count > 0 %}<span class="text-amber-700"> · {{ t.unpriced_count }} unpriced</span>{% endif %}</td>
+        <td class="py-1.5 pr-2 text-right">{{ t.revenue | money }}</td>
+        <td class="py-1.5 pr-2 text-right">{{ t.cost | money }}</td>
+        <td class="py-1.5 pr-2 text-right">{{ t.gross_profit | money }}</td>
+        <td class="py-1.5 text-right">{{ "{:.1f}".format(t.margin_pct) if t.margin_pct is not none else "—" }}</td>
+      </tr>
+    </tfoot>
+  </table>
+</div>
+<p class="text-xs text-gray-600 mt-2">Revenue and cost are the plan header totals frozen at approval (Σ line sell / Σ line cost). GP $ = revenue − cost. Margin % = GP ÷ revenue. Booked / Realized are AVAIL plan timestamps, not Acctivate SO or invoice dates.</p>
+{% else %}
+<p class="text-sm text-gray-500 mt-3">No {{ 'booked' if report.basis == 'booked' else 'realized' }} plans {{ 'you submitted' if report.scope == 'mine' else 'from any user' }} in {{ report.period.label }}. Try 12 months or the other basis.</p>
+{% endif %}

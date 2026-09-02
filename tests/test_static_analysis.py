@@ -64,8 +64,8 @@ def test_htmx_ajax_calls_have_indicator():
         ("app/templates/htmx/partials/parts/cell_edit.html", 12),
         ("app/templates/htmx/partials/parts/cell_edit.html", 26),
         ("app/templates/htmx/partials/parts/cell_edit.html", 37),
-        ("app/templates/htmx/partials/parts/workspace.html", 98),
-        ("app/templates/htmx/partials/parts/workspace.html", 104),
+        ("app/templates/htmx/partials/parts/workspace.html", 82),
+        ("app/templates/htmx/partials/parts/workspace.html", 88),
         ("app/templates/htmx/partials/parts/list.html", 194),
     }
 

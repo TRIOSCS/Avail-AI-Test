@@ -67,6 +67,7 @@ NAV_ID_TO_ACCESS: dict[str, AccessKey] = {
     "proactive": AccessKey.PROACTIVE,
     "prospecting": AccessKey.PROSPECTING,
     "my-day": AccessKey.MY_DAY,
+    "reports": AccessKey.REPORTS,
 }
 
 # Human-friendly labels for every access key, shown in the access editor. Keyed by the
@@ -82,6 +83,7 @@ _ACCESS_KEY_LABELS: dict[AccessKey, str] = {
     AccessKey.PROACTIVE: "Proactive",
     AccessKey.PROSPECTING: "Prospecting",
     AccessKey.MY_DAY: "My Day",
+    AccessKey.REPORTS: "Reports",
     AccessKey.SEND_RFQ: "Send RFQs",
     AccessKey.APPROVE_OFFERS: "Approve offers",
     AccessKey.EXPORT_DATA: "Export data",

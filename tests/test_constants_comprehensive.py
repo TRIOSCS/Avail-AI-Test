@@ -384,7 +384,8 @@ def test_module_access_keys():
     assert isinstance(MODULE_ACCESS_KEYS, tuple)
     assert AccessKey.REQUISITIONS in MODULE_ACCESS_KEYS
     assert AccessKey.MY_DAY in MODULE_ACCESS_KEYS
-    assert len(MODULE_ACCESS_KEYS) == 10
+    assert AccessKey.REPORTS in MODULE_ACCESS_KEYS
+    assert len(MODULE_ACCESS_KEYS) == 11
 
 
 def test_capability_access_keys():
