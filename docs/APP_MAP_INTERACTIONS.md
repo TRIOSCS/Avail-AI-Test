@@ -4169,14 +4169,26 @@ Foundation mechanism (migration 181 adds `users.display_timezone`, an IANA name)
    overrides it with the loaded user's `display_timezone`. Mirrors the `current_user_id_var`
    pattern above.
 
-3. **Display layer** — `app/utils/timezones.py` (`DEFAULT_DISPLAY_TZ = "America/New_York"`,
-   the fallback for unknown/NULL/invalid): `format_localtime` / `format_localdate` /
-   `to_display_tz` convert a UTC datetime into the current viewer's zone (or an explicit zone
-   arg for server-side use like emails). `template_env.py` exposes them as the `|localtime`
-   and `|localdate` Jinja filters, and `_task_due_state` now judges "today"/"overdue" by
-   `current_display_zoneinfo()` (was a hardcoded `America/New_York`) — a buyer in Asia/Tokyo
-   near UTC midnight sees a task due on THEIR calendar day as "today". Distinct from
-   `users.timezone` (the Graph mailbox Windows-format zone for RFQ scheduling).
+3. **Display layer** — `app/utils/timezones.py`: the fallback for an unknown/NULL/invalid
+   viewer zone is the COMPANY operating zone, `company_zoneinfo()` — config-driven via
+   `COMPANY_TIMEZONE` / `settings.company_timezone` (default `America/New_York`; the
+   `DEFAULT_DISPLAY_TZ` constant only backstops an invalid setting value).
+   `format_localtime` / `format_localdate` / `to_display_tz` convert a UTC datetime into
+   the current viewer's zone (or an explicit zone arg for server-side use like emails).
+   `template_env.py` exposes them as the `|localtime` and `|localdate` Jinja filters, and
+   `_task_due_state` judges "today"/"overdue" by `current_display_zoneinfo()` — a buyer in
+   Asia/Tokyo near UTC midnight sees a task due on THEIR calendar day as "today". Distinct
+   from `users.timezone` (the Graph mailbox Windows-format zone for RFQ scheduling).
+
+   **Company day-boundary math** — `company_day_sentinel(days_ahead, now=None)` returns the
+   UTC-midnight calendar-date sentinel for the company-local date N days from today
+   (task `due_at` convention: the DATE half is the meant day, time is 00:00 UTC, read back
+   via `due.date()`). Used by `task_service` so "which day is it" runs in the company zone,
+   not UTC: `get_my_tasks_summary`'s overdue badge (`due_at < company_day_sentinel(0)` —
+   due DATE on a prior company day), `snooze_task`'s undated tomorrow/N-days targets, and
+   `on_bid_due_soon`'s due-tomorrow auto task. Rolling windows and pure timestamps
+   (created_at/completed_at, the Done-list 30-day cutoff, the manual 24h due-date floor)
+   stay UTC.
 
    `template_env.py` also exposes `|localday` — the DATE-object companion to `|localdate`
    (convert to the viewer's zone, then `.date()`). The activity/timeline day-group headers
