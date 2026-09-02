@@ -79,7 +79,12 @@ export default defineConfig({
       dependencies: ['setup'],
       use: { storageState: STORAGE_STATE },
     },
-    { name: 'workflows', testMatch: /workflows\.spec\.ts$/ },
+    {
+      name: 'workflows',
+      testMatch: /workflows\.spec\.ts$/,
+      dependencies: ['setup'],
+      use: { storageState: STORAGE_STATE },
+    },
     { name: 'materials-ui', testMatch: /materials-ui\.spec\.ts$/ },
     { name: 'sales-hub-ui', testMatch: /sales-hub-ui\.spec\.ts$/ },
   ],

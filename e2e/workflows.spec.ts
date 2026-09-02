@@ -1,28 +1,30 @@
 /**
  * workflows.spec.ts — Multi-step workflow tests for AvailAI.
  *
- * Tests complete user journeys through the app: navigation, tab switching,
- * form submissions, and cross-page consistency.
+ * Runs AUTHED (storageState from e2e/auth.setup.ts, seeded admin on an EMPTY
+ * DB), except the 'Legacy settings routes' describe, which pins an empty
+ * storageState because its 401-before-redirect assertions are only meaningful
+ * anonymous (authed, those routes 302 to /connectors).
+ *
+ * NO test here may CREATE rows: the suite shares one serial in-memory DB and
+ * other projects assert empty states. Statuses pinned from an observed authed
+ * run against the seeded launcher, never guessed.
  *
  * Called by: npx playwright test --project=workflows
- * Depends on: running app server in TESTING=1 mode
+ * Depends on: running app server in TESTING=1 mode (scripts/e2e_server.py)
  */
 
 import { test, expect } from '@playwright/test';
 
 test.describe('Navigation Workflows', () => {
   test('sidebar navigation loads correct partials', async ({ request }) => {
-    // Each partial should return without server error
-    // (200 = success, 401/307 = auth required — both are valid, not dead ends)
     for (const url of ['/v2/partials/requisitions', '/v2/partials/vendors', '/v2/partials/companies']) {
       const res = await request.get(url, {
         headers: { 'HX-Request': 'true' },
       });
-      expect(res.status(), `${url} crashed`).toBeLessThan(500);
-      if (res.status() === 200) {
-        const html = await res.text();
-        expect(html.length, `${url} empty`).toBeGreaterThan(50);
-      }
+      expect(res.status(), `${url} must render for the seeded admin`).toBe(200);
+      const html = await res.text();
+      expect(html.length, `${url} empty`).toBeGreaterThan(50);
     }
   });
 
@@ -30,18 +32,16 @@ test.describe('Navigation Workflows', () => {
     const res = await request.get('/v2/partials/materials/workspace', {
       headers: { 'HX-Request': 'true' },
     });
-    expect(res.status()).toBeLessThan(500);
-    if (res.status() === 200) {
-      const html = await res.text();
-      expect(html).toContain('materialsFilter');
-    }
+    expect(res.status()).toBe(200);
+    const html = await res.text();
+    expect(html).toContain('materialsFilter');
   });
 
   test('materials faceted search with commodity filter', async ({ request }) => {
     const res = await request.get('/v2/partials/materials/faceted?commodity=capacitors', {
       headers: { 'HX-Request': 'true' },
     });
-    expect(res.status()).toBeLessThan(500);
+    expect(res.status()).toBe(200);
   });
 
   test('search form renders and accepts queries', async ({ request }) => {
@@ -49,13 +49,13 @@ test.describe('Navigation Workflows', () => {
     let res = await request.get('/v2/partials/search', {
       headers: { 'HX-Request': 'true' },
     });
-    expect(res.status()).toBeLessThan(500);
+    expect(res.status()).toBe(200);
 
     // Submit search
     res = await request.get('/v2/partials/search/global?q=LM317T', {
       headers: { 'HX-Request': 'true' },
     });
-    expect(res.status()).toBeLessThan(500);
+    expect(res.status()).toBe(200);
   });
 });
 
@@ -64,38 +64,64 @@ test.describe('Form Submission Workflows', () => {
     const res = await request.get('/v2/partials/requisitions/create-form', {
       headers: { 'HX-Request': 'true' },
     });
-    expect(res.status()).toBeLessThan(500);
-    if (res.status() === 200) {
-      const html = await res.text();
-      expect(html).toContain('name');
-    }
+    expect(res.status()).toBe(200);
+    const html = await res.text();
+    expect(html).toContain('name');
   });
 
   test('create company form renders', async ({ request }) => {
     const res = await request.get('/v2/partials/companies/create-form', {
       headers: { 'HX-Request': 'true' },
     });
-    expect(res.status()).toBeLessThan(500);
+    expect(res.status()).toBe(200);
   });
 });
 
 test.describe('Settings & Admin', () => {
   test('settings page loads all sections', async ({ request }) => {
-    // 'sources' and 'api-keys' now redirect to /connectors; 'system', 'profile',
-    // 'data-ops' should render or return auth redirect — not crash.
+    // 'sources' and 'api-keys' redirect to /connectors (covered below,
+    // anonymous); the three real sections must render for the seeded admin.
     const sections = ['system', 'profile', 'data-ops'];
     for (const section of sections) {
       const res = await request.get(`/v2/partials/settings/${section}`, {
         headers: { 'HX-Request': 'true' },
       });
-      // 200 = success, 401/307/403 = auth required or admin-only — both fine, not a dead end
-      expect(res.status(), `Settings ${section} crashed`).toBeLessThan(500);
+      expect(res.status(), `Settings ${section} must render for the seeded admin`).toBe(200);
     }
   });
 
-  // Auth runs BEFORE the legacy-route redirect (2026-07 security hardening), so an
-  // anonymous request gets 401 — the authenticated 302 → /connectors mapping is
-  // covered by tests/test_connectors_settings.py::test_old_routes_redirect.
+  test('/connectors renders authed with the true empty state', { tag: '@needs-data' }, async ({ request }) => {
+    const res = await request.get('/v2/partials/settings/connectors', {
+      headers: { 'HX-Request': 'true' },
+    });
+    expect(res.status(), '/connectors must render for the seeded admin').toBe(200);
+    const html = await res.text();
+    expect(html.trim().length, '/connectors returned empty response').toBeGreaterThan(10);
+    // Empty DB truth: _build_connector_groups drops empty groups and
+    // seed_api_sources() is TESTING-gated, so zero groups render — the page
+    // shows its empty state instead.
+    expect(html, '/connectors must show the no-connectors empty state').toContain('No connectors yet.');
+    // round-2 (owner-gated): with ApiSource rows seeded, assert the group
+    // headings instead — distinctive ones only ('Browser Workers',
+    // 'Part Sourcing', 'Enrichment', 'Communications', 'Manual'); bare 'AI'
+    // is an unfalsifiable substring, never assert it.
+  });
+
+  test('API health check renders for the admin', async ({ request }) => {
+    const res = await request.get('/v2/partials/admin/api-health', {
+      headers: { 'HX-Request': 'true' },
+    });
+    expect(res.status()).toBe(200);
+  });
+});
+
+// These two assertions are only meaningful WITHOUT a session: auth runs BEFORE
+// the legacy-route redirect (2026-07 security hardening), so anonymous → 401.
+// Authed they 302 to /connectors (observed) — the authenticated mapping is
+// covered by tests/test_connectors_settings.py::test_old_routes_redirect.
+test.describe('Legacy settings routes (anonymous by design)', () => {
+  test.use({ storageState: { cookies: [], origins: [] } });
+
   test('/sources requires auth before redirecting', async ({ request }) => {
     const res = await request.get('/v2/partials/settings/sources', {
       maxRedirects: 0,
@@ -111,36 +137,6 @@ test.describe('Settings & Admin', () => {
     });
     expect(res.status()).toBe(401);
   });
-
-  test('/connectors renders the 6 group headings', async ({ request }) => {
-    const res = await request.get('/v2/partials/settings/connectors', {
-      headers: { 'HX-Request': 'true' },
-    });
-    // 200 = authed admin, 401/307/403 = not authed or not admin — not a crash
-    expect(res.status(), '/connectors crashed').toBeLessThan(500);
-    if (res.status() === 200) {
-      const html = await res.text();
-      const expectedLabels = [
-        'Part Sourcing',
-        'Enrichment',
-        'AI',
-        'Communications',
-        'Browser Workers',
-        'Manual',
-      ];
-      for (const label of expectedLabels) {
-        expect(html, `Missing group heading: ${label}`).toContain(label);
-      }
-    }
-  });
-
-  test('API health check renders', async ({ request }) => {
-    const res = await request.get('/v2/partials/admin/api-health', {
-      headers: { 'HX-Request': 'true' },
-    });
-    // May require admin — 200, 401, 403 all acceptable
-    expect([200, 401, 403]).toContain(res.status());
-  });
 });
 
 test.describe('Dashboard', () => {
@@ -148,6 +144,6 @@ test.describe('Dashboard', () => {
     const res = await request.get('/v2/partials/dashboard', {
       headers: { 'HX-Request': 'true' },
     });
-    expect(res.status()).toBeLessThan(500);
+    expect(res.status()).toBe(200);
   });
 });
