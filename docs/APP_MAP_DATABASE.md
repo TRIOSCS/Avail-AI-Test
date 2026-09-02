@@ -1115,6 +1115,8 @@ Key columns:
 | trio_match_score | Integer | default 0, indexed; AI procurement-fit score (0-100); 0 until screened (SP3) |
 | opportunity_score | Integer | default 0, indexed; AI opportunity size score (0-100); 0 until screened (SP3) |
 | buyer_ready_score | Integer | nullable, indexed (`ix_prospect_accounts_buyer_ready_score`); write-through CACHE of `prospect_priority.build_priority_snapshot()`'s composite score, kept in lockstep by the `ProspectAccount` before_insert/before_update listener so the `buyer_ready_desc` list sort ranks in SQL. Recompute stays the source of truth; backfilled in migration 170 |
+| is_buyer_ready | Boolean | nullable, indexed (`ix_prospect_accounts_is_buyer_ready`); write-through CACHE of the snapshot's `is_buyer_ready` flag (same listener), backing the stats panel's `sum(is_buyer_ready)` SQL aggregate (coalesce-false honest-degrade on pre-backfill NULLs). Migration 218; its PG-only backfill replicates the snapshot formula inline (snapshot-at-2026-08-29 policy, documented in the migration) |
+| ai_screen_verdict | String 32 | nullable, indexed (`ix_prospect_accounts_ai_screen_verdict`); flat MIRROR of `enrichment_data['ai_screen']['verdict']` — the JSONB stays the source of truth — written by the same listener so the flag-ON grid filters/sorts in SQL. A non-str or >32-char rogue/legacy JSONB value degrades the mirror to NULL (honest cache miss) instead of failing the flush. Migration 218; PG-only backfill via `#>>'{ai_screen,verdict}'` |
 | swept_from_owner_id | INT FK users (SET NULL) | owner whose account was auto-swept by the daily 90-day sweep (SP4) |
 | swept_at | UTCDateTime | when the account was swept into the pool (SP4) |
 | parked_by_id | INT FK users (SET NULL) | user who manually parked the account via the sales-park flow (SP4) |
@@ -1124,7 +1126,9 @@ Key columns:
 `{trio_match_score, opportunity_score, excess_likelihood, verdict, rationale, evidence, confidence, model, screened_at, grounding_fingerprint, needs_more_enrichment?}`.
 `grounding_fingerprint` (SHA-256 of the assembled context) drives cache invalidation — a
 re-screen with materially new grounding produces a different hash and bypasses the cached verdict.
-Verdict values: `pass`, `screened_out`, `insufficient_data`, `disabled`, `cap_reached`, `error`.
+Verdict values: `pass`, `screened_out`, `insufficient_data`, `disabled`, `cap_reached`, `error` —
+only the first three are ever persisted into `enrichment_data` (and thus the `ai_screen_verdict`
+mirror column); `disabled`/`cap_reached`/`error` are return-only.
 
 **`discovery_batches`** — Import batch tracking. Audit trail for every prospect
 discovery/enrichment run (`app/models/discovery_batch.py`); sole writer is
