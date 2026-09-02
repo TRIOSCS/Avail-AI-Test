@@ -1,7 +1,11 @@
 // Smoke tests for AvailAI — verifies the app is running and key pages load.
-// Tests homepage, static assets, and API versioning.
+// Runs AUTHED (storageState from e2e/auth.setup.ts, seeded admin): `/` follows
+// its 302 into the real /v2/requisitions app shell, not the login page.
+// Tests homepage shell, static assets, and API versioning.
+// NO test here may CREATE rows: the suite shares one serial in-memory DB and
+// later projects assert empty states.
 // Called by: npx playwright test --project=smoke
-// Depends on: app/main.py, app/routers/auth.py
+// Depends on: app/routers/auth.py, scripts/e2e_server.py (webServer seeding)
 
 import { test, expect } from '@playwright/test';
 
@@ -17,7 +21,12 @@ test.describe('App Health', () => {
     });
     expect(res.status()).toBe(200);
     const text = await res.text();
+    // Near-vacuous either way: 'AVAIL' appears on the login page too (kept as
+    // a cheap sanity marker). The assertion that proves the session cookie
+    // reached the app is the authed-shell nav module below — the anonymous
+    // login page has no bottom-nav modules.
     expect(text).toContain('AVAIL');
+    expect(text).toContain('Sales Hub');
   });
 
   test('homepage contains required meta tags', async ({ request }) => {
@@ -25,6 +34,8 @@ test.describe('App Health', () => {
       headers: { 'Accept': 'text/html' },
     });
     const html = await res.text();
+    // Near-vacuous markers (base.html emits both on every page, login
+    // included) — kept for template-regression value only.
     expect(html).toContain('viewport');
     expect(html).toContain('AvailAI');
   });

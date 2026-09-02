@@ -15,10 +15,19 @@ const isCI = !!process.env.CI;
 // wherever this config file actually lives.
 const repoRoot = __dirname;
 
+// Session state written by e2e/auth.setup.ts (the seeded admin's session
+// cookie). A project runs authed by declaring dependencies: ['setup'] and
+// use: { storageState: STORAGE_STATE } — applies to BOTH page and request
+// fixtures. Gitignored (e2e/.auth/).
+export const STORAGE_STATE = path.join(repoRoot, 'e2e/.auth/admin.json');
+
 export default defineConfig({
   testDir: './e2e',
   timeout: 30000,
   retries: 0,
+  // Serial by design (R3): one shared in-memory DB across all tests,
+  // empty-state assertions, and the launcher's threadpool serialization all
+  // assume workers: 1. Raising this is a deliberate future change, not a tweak.
   workers: 1,
   reporter: isCI ? [['list'], ['html', { open: 'never' }]] : 'list',
   use: {
@@ -43,11 +52,26 @@ export default defineConfig({
     reuseExistingServer: false,
   },
   projects: [
+    // Logs the seeded admin in once and writes STORAGE_STATE. A project flips
+    // authed (dependencies + storageState) ONLY in the same commit that
+    // converts its spec files, so the nine-CI-project run stays green at
+    // every commit. Filtered --project runs auto-include dependencies, so
+    // CI's explicit project list needs no change.
+    { name: 'setup', testMatch: /auth\.setup\.ts$/ },
     { name: 'api', testMatch: /api\.spec\.ts$/ },
+    // auth stays anonymous forever — its purpose IS the anonymous baseline
+    // (connected===false, protected-route 401 probes).
     { name: 'auth', testMatch: /auth\.spec\.ts$/ },
-    { name: 'smoke', testMatch: /smoke\.spec\.ts$/ },
+    {
+      name: 'smoke',
+      testMatch: /smoke\.spec\.ts$/,
+      dependencies: ['setup'],
+      use: { storageState: STORAGE_STATE },
+    },
     { name: 'data-validation', testMatch: /data-validation\.spec\.ts$/ },
     { name: 'accessibility', testMatch: /accessibility\.spec\.ts$/ },
+    // visual stays anonymous — its committed baseline is login-page.png
+    // (author's nightly cron + npm run test:visual stay valid).
     { name: 'visual', testMatch: /visual\.spec\.ts$/ },
     { name: 'dead-ends', testMatch: /dead-ends\.spec\.ts$/ },
     { name: 'workflows', testMatch: /workflows\.spec\.ts$/ },
