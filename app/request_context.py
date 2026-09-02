@@ -27,7 +27,8 @@ current_user_id_var: contextvars.ContextVar[int | None] = contextvars.ContextVar
 # sets it in the ASYNC request context — so it propagates to both async endpoints and the
 # threadpool that runs sync dependencies/endpoints (a sync dependency's .set() runs in a
 # discarded thread-context copy, which is why require_user must NOT set it). None → callers
-# fall back to app.utils.timezones.DEFAULT_DISPLAY_TZ.
+# fall back to the company zone (settings.company_timezone via
+# app.utils.timezones.company_zoneinfo).
 current_user_display_tz_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "current_user_display_tz_var", default=None
 )
@@ -52,7 +53,8 @@ def _query_display_tz(uid: int) -> str | None:
     Lazy imports avoid a circular import (database/models import this module's contextvars
     transitively). Opens its own short-lived session — the middleware runs outside FastAPI
     dependency injection, so there is no request-scoped session to borrow. A DB error must
-    never propagate into the request: callers then fall back to DEFAULT_DISPLAY_TZ.
+    never propagate into the request: callers then fall back to the company zone
+    (settings.company_timezone).
     """
     try:
         from sqlalchemy import select

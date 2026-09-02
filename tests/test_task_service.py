@@ -199,14 +199,28 @@ class TestGetMyTasksSummary:
         assert summary["overdue"] == 0
 
     def test_overdue_count(self, db_session: Session, test_requisition, test_user):
-        task = RequisitionTask(
+        """Overdue = due DATE on a prior COMPANY-local day.
+
+        A task due earlier TODAY is calendar-day "due today", never overdue (matches
+        _task_due_state).
+        """
+        from app.utils.timezones import local_day_sentinel
+
+        prior_day = RequisitionTask(
             requisition_id=test_requisition.id,
             title="Overdue",
             source="system",
             assigned_to_id=test_user.id,
-            due_at=datetime.now(UTC) - timedelta(hours=2),
+            due_at=local_day_sentinel(-1),
         )
-        db_session.add(task)
+        due_today = RequisitionTask(
+            requisition_id=test_requisition.id,
+            title="Due today",
+            source="system",
+            assigned_to_id=test_user.id,
+            due_at=local_day_sentinel(0),
+        )
+        db_session.add_all([prior_day, due_today])
         db_session.commit()
         summary = get_my_tasks_summary(db_session, test_user.id)
         assert summary["overdue"] == 1

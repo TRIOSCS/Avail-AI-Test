@@ -142,8 +142,10 @@ class TestTaskSnoozeService:
         assert snoozed is not None
         assert abs((snoozed.due_at - expected).total_seconds()) < 2
 
-    def test_snooze_no_due_at_sets_tomorrow(self, db_session: Session, owned_company: Company, test_user: User):
-        """Snoozing a task with no due_at sets due_at to tomorrow (midnight UTC)."""
+    def test_snooze_no_due_at_sets_local_tomorrow(self, db_session: Session, owned_company: Company, test_user: User):
+        """Snoozing a task with no due_at sets due_at to the COMPANY-local tomorrow's
+        calendar-date sentinel (that date at UTC midnight) — not UTC-day math, which
+        from ~7pm Eastern named tonight's date "tomorrow"."""
         task = create_company_task(
             db_session,
             company_id=owned_company.id,
@@ -153,11 +155,11 @@ class TestTaskSnoozeService:
             assigned_to_id=test_user.id,
         )
         from app.services.task_service import snooze_task
+        from app.utils.timezones import as_utc, local_day_sentinel
 
         snoozed = snooze_task(db_session, task.id)
-        tomorrow = (datetime.now(UTC) + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
         assert snoozed is not None
-        assert abs((snoozed.due_at - tomorrow).total_seconds()) < 2
+        assert as_utc(snoozed.due_at) == local_day_sentinel(1)
 
     def test_snooze_returns_none_for_missing_task(self, db_session: Session):
         """snooze_task returns None when the task doesn't exist."""

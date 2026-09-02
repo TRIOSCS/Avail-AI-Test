@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.constants import TaskStatus
 from app.models.crm import Company
 from app.models.task import RequisitionTask
-from app.utils.timezones import as_utc
+from app.utils.timezones import as_utc, local_day_sentinel
 
 # How far back the My Day "Done" filter reaches, and the hard row cap on that query.
 # The completed-task list is otherwise unbounded (a long-tenured user could load
@@ -258,8 +258,17 @@ def get_my_tasks(
 
 
 def get_my_tasks_summary(db: Session, user_id: int) -> dict[str, int]:
-    """Get task counts for sidebar badge: assigned_to_me, waiting_on, overdue."""
-    now = datetime.now(UTC)
+    """Get task counts for sidebar badge: assigned_to_me, waiting_on, overdue.
+
+    Overdue means the due DATE fell on a prior day of the VIEWER's calendar (their
+    display_timezone, company-default fallback) — the SAME zone _task_due_state
+    buckets by, so the badge and the list can never disagree. due_at values are
+    UTC-midnight date sentinels, so comparing against today's sentinel
+    (local_day_sentinel(0)) counts exactly the prior-day ones. The old raw
+    ``due_at < now(UTC)`` counted a task due TODAY as overdue all day — and, from
+    ~7pm Eastern, even one due tomorrow.
+    """
+    today_start = local_day_sentinel(0)
     assigned_to_me = (
         db.query(func.count(RequisitionTask.id))
         .filter(
@@ -282,7 +291,7 @@ def get_my_tasks_summary(db: Session, user_id: int) -> dict[str, int]:
         .filter(
             RequisitionTask.assigned_to_id == user_id,
             RequisitionTask.status != TaskStatus.DONE,
-            RequisitionTask.due_at < now,
+            RequisitionTask.due_at < today_start,
         )
         .scalar()
     ) or 0
@@ -754,7 +763,11 @@ def on_bid_due_soon(db: Session, requisition_id: int, deadline: str, req_name: s
         task_type="sourcing",
         source_ref=f"bid_due:{requisition_id}",
         priority=3,
-        due_at=datetime.now(UTC) + timedelta(days=1),
+        # Due tomorrow as a calendar-date sentinel (background job → no viewer
+        # context → the company-default day) — a raw now+24h instant carried a
+        # meaningless time and, in the evening, a UTC date one day too far out
+        # (rendered "due the day after tomorrow").
+        due_at=local_day_sentinel(1),
     )
 
 
@@ -851,11 +864,18 @@ def auto_create_resell_followup_task(
 def snooze_task(db: Session, task_id: int, *, days: int | None = None) -> RequisitionTask | None:
     """Push a task's due_at forward.
 
-    Default (``days=None``): +1 week if the task already has a due date, else tomorrow at
-    midnight UTC — the delta the CRM/vendor Snooze action relies on. When ``days`` is given
-    (the Tasks-page quick options +1d / +3d / +1w), advance an existing due_at by exactly
-    that many days, or, for an undated task, set it that many days out at midnight UTC.
-    Returns the updated task, or None if not found.
+    Default (``days=None``): +1 week if the task already has a due date, else the
+    VIEWER's tomorrow — the delta the CRM/vendor Snooze action relies on. When ``days``
+    is given (the Tasks-page quick options +1d / +3d / +1w), advance an existing
+    due_at by exactly that many days, or, for an undated task, set it that many
+    viewer-local days out. Undated targets are calendar-date sentinels
+    (local_day_sentinel: the meant date at UTC midnight) with "today" judged in the
+    SAME zone _task_due_state buckets by — the viewer's display_timezone, falling
+    back to settings.company_timezone — so a Tokyo-configured viewer snoozing
+    "tomorrow" gets THEIR tomorrow, and raw UTC-midnight math no longer makes
+    "tomorrow" mean tonight's date from ~7pm Eastern onward. Dated tasks advance by
+    pure day arithmetic on the existing sentinel (tz-agnostic). Returns the updated
+    task, or None if not found.
     """
     task = db.get(RequisitionTask, task_id)
     if not task:
@@ -864,11 +884,11 @@ def snooze_task(db: Session, task_id: int, *, days: int | None = None) -> Requis
         if task.due_at:
             task.due_at = task.due_at + timedelta(weeks=1)
         else:
-            task.due_at = (datetime.now(UTC) + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+            task.due_at = local_day_sentinel(1)
     elif task.due_at:
         task.due_at = task.due_at + timedelta(days=days)
     else:
-        task.due_at = (datetime.now(UTC) + timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0)
+        task.due_at = local_day_sentinel(days)
     db.commit()
     db.refresh(task)
     return task

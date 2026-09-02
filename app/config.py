@@ -309,6 +309,15 @@ class Settings(BaseSettings):
     sighting_weight_freshness: float = 0.15
     sighting_weight_completeness: float = 0.10
 
+    # --- Company timezone (Decision O residual: the config-driven BUSINESS DEFAULT) ---
+    # The fallback zone whenever a viewer's display_timezone is unknown (NULL /
+    # invalid / no request context, e.g. background jobs) — a set per-user
+    # display_timezone always wins. Used for day-boundary math on calendar-dated
+    # work (task due buckets, snooze-to-tomorrow) via app/utils/timezones.py.
+    # Storage stays UTC (UTCDateTime); this only decides where a calendar day
+    # starts and ends. IANA name, like the neighboring tz knobs.
+    company_timezone: str = "America/New_York"
+
     # --- Buy plan (CSV env vars, parsed to list[str] by model_validator) ---
     stock_sale_vendor_names: str | list[str] = "trio,trio supply chain,stock,internal"
     stock_sale_notify_emails: str | list[str] = "logistics@trioscs.com,accounting@trioscs.com"

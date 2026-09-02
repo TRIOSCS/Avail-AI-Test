@@ -4164,19 +4164,38 @@ Foundation mechanism (migration 181 adds `users.display_timezone`, an IANA name)
    (grouped `<optgroup>` from `grouped_timezones()`) posts the SAME endpoint for a manual override.
 
 2. **Per-request contextvar** — `app/request_context.py` adds
-   `current_user_display_tz_var: ContextVar[str | None]`. `AuditUserMiddleware` establishes a
-   baseline (`None`) + `finally` reset (no keep-alive cross-request leak); `require_user`
-   overrides it with the loaded user's `display_timezone`. Mirrors the `current_user_id_var`
-   pattern above.
+   `current_user_display_tz_var: ContextVar[str | None]`. The async `AuditUserMiddleware`
+   sets it from the session uid via the TTL-cached `resolve_display_tz`
+   (`app/request_context.py`) +
+   `finally` reset (no keep-alive cross-request leak). It is deliberately NOT set in
+   `require_user` — a ContextVar set in a sync dependency is lost in the threadpool.
+   Mirrors the `current_user_id_var` pattern above.
 
-3. **Display layer** — `app/utils/timezones.py` (`DEFAULT_DISPLAY_TZ = "America/New_York"`,
-   the fallback for unknown/NULL/invalid): `format_localtime` / `format_localdate` /
-   `to_display_tz` convert a UTC datetime into the current viewer's zone (or an explicit zone
-   arg for server-side use like emails). `template_env.py` exposes them as the `|localtime`
-   and `|localdate` Jinja filters, and `_task_due_state` now judges "today"/"overdue" by
-   `current_display_zoneinfo()` (was a hardcoded `America/New_York`) — a buyer in Asia/Tokyo
-   near UTC midnight sees a task due on THEIR calendar day as "today". Distinct from
-   `users.timezone` (the Graph mailbox Windows-format zone for RFQ scheduling).
+3. **Display layer** — `app/utils/timezones.py`: the fallback for an unknown/NULL/invalid
+   viewer zone is the COMPANY operating zone, `company_zoneinfo()` — config-driven via
+   `COMPANY_TIMEZONE` / `settings.company_timezone` (default `America/New_York`; the
+   `DEFAULT_DISPLAY_TZ` constant only backstops an invalid setting value).
+   `format_localtime` / `format_localdate` / `to_display_tz` convert a UTC datetime into
+   the current viewer's zone (or an explicit zone arg for server-side use like emails).
+   `template_env.py` exposes them as the `|localtime` and `|localdate` Jinja filters, and
+   `_task_due_state` judges "today"/"overdue" by `current_display_zoneinfo()` — a buyer in
+   Asia/Tokyo near UTC midnight sees a task due on THEIR calendar day as "today". Distinct
+   from `users.timezone` (the Graph mailbox Windows-format zone for RFQ scheduling).
+
+   **Day-boundary write math** — `local_day_sentinel(days_ahead, now=None)` returns the
+   UTC-midnight calendar-date sentinel for the CURRENT VIEWER's day N days out (task
+   `due_at` convention: the DATE half is the meant day, time is 00:00 UTC, read back via
+   `due.date()`), judged in the SAME zone `_task_due_state` buckets by —
+   `current_display_zoneinfo()` (per-user `display_timezone`, company-default fallback; a
+   background job with no request context resolves to the company zone). Used by
+   `task_service` so "which day is it" never runs on the raw UTC clock:
+   `get_my_tasks_summary`'s overdue badge (`due_at < local_day_sentinel(0)` — due DATE on
+   a prior viewer-local day), `snooze_task`'s undated tomorrow/N-days targets, and
+   `on_bid_due_soon`'s due-tomorrow auto task. Rolling windows and pure timestamps
+   (created_at/completed_at, the Done-list 30-day cutoff, the manual 24h due-date floor)
+   stay UTC. Known residue: the resell "not yet this round" nudge writes a non-midnight
+   `due_at=now(UTC)` instant (routers/resell.py), which can mis-bucket for viewers whose
+   local day differs from the UTC day.
 
    `template_env.py` also exposes `|localday` — the DATE-object companion to `|localdate`
    (convert to the viewer's zone, then `.date()`). The activity/timeline day-group headers
