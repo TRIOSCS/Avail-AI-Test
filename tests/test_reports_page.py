@@ -212,3 +212,16 @@ def test_workspace_lost_strip_gained_reports_link(client: TestClient):
     assert "h-[calc(100vh-116px)] flex" in src  # eyebrow stays 26px → 116px is the ONLY constant
     assert "100vh-90px" not in src
     assert "pipeline" not in src
+
+
+# ── Task 5: More-menu reachability ────────────────────────────────────────
+
+
+def test_more_menu_has_gated_reports_link_and_bar_unchanged():
+    src = (_T / "shared/mobile_nav.html").read_text()
+    assert 'href="/v2/reports"' in src
+    assert "'/v2/reports':'reports'" in src  # urlToNav map row (Back-restore wiring)
+    assert "activeNav === 'reports'" in src  # More button + link active states
+    nav_items = src.split("nav_items = [", 1)[1].split("] %}", 1)[0]
+    assert "('reports'," not in nav_items  # bottom-nav tab set UNCHANGED (Controller ruling)
+    assert "more_nav_items" not in src  # tests/test_nav_wayfinding.py:257-277 depends on this
