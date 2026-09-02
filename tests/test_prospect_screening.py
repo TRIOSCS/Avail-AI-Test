@@ -568,6 +568,28 @@ def test_listener_mirrors_ai_screen_verdict_on_orm_flush(db_session):
     assert _verdict_cache_column(db_session, p.id) == "pass"
 
 
+def test_listener_degrades_invalid_verdict_to_null_mirror(db_session):
+    """A rogue/legacy JSONB verdict that cannot fit the String(32) cache column — too
+    long or not a string — must degrade the mirror to NULL (honest cache miss), not
+    poison every subsequent flush of the row."""
+    from sqlalchemy.orm.attributes import flag_modified
+
+    overlong = "x" * 40  # would overflow String(32) on PG
+    p = _prospect(db_session, enrichment_data={"ai_screen": {"verdict": overlong}})
+    assert _verdict_cache_column(db_session, p.id) is None
+
+    p.enrichment_data = {**p.enrichment_data, "ai_screen": {"verdict": 12345}}  # non-str
+    flag_modified(p, "enrichment_data")
+    db_session.commit()  # flush succeeds — the guard nulls the mirror instead of writing junk
+    assert _verdict_cache_column(db_session, p.id) is None
+
+    # Recovery: a legit verdict on the same row mirrors normally again
+    p.enrichment_data = {**p.enrichment_data, "ai_screen": {"verdict": "pass"}}
+    flag_modified(p, "enrichment_data")
+    db_session.commit()
+    assert _verdict_cache_column(db_session, p.id) == "pass"
+
+
 async def test_screen_prospect_syncs_verdict_cache_column(db_session, monkeypatch):
     """The screening worker path (screen_prospect → ORM commit) keeps the persisted
     ai_screen_verdict column in lockstep — the before_update listener fires because the

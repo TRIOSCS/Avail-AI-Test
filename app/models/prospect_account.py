@@ -167,6 +167,10 @@ def _sync_buyer_ready_score(_mapper, _connection, target: "ProspectAccount") -> 
     enrichment_data: dict = target.enrichment_data if isinstance(target.enrichment_data, dict) else {}
     ai_screen = enrichment_data.get("ai_screen")
     verdict = ai_screen.get("verdict") if isinstance(ai_screen, dict) else None
+    # Column is String(32): a non-str or >32-char rogue/legacy JSONB value must degrade
+    # to NULL (honest cache miss) rather than fail every subsequent flush of the row.
+    if not (isinstance(verdict, str) and len(verdict) <= 32):
+        verdict = None
     target.ai_screen_verdict = verdict  # type: ignore[assignment]  # instrumented attr write (legacy Column model)
 
 
