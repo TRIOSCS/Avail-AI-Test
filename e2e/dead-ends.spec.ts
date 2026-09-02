@@ -1,31 +1,37 @@
 /**
  * dead-ends.spec.ts — Dead-End Detector for AvailAI.
  *
- * Hits every major HTMX partial endpoint and verifies:
- * 1. Returns 200 (not 500, not empty)
- * 2. Response contains actual HTML content (not blank)
- * 3. No bare error text without styling
+ * Runs AUTHED (storageState from e2e/auth.setup.ts, seeded admin on an EMPTY
+ * DB). Hits every major HTMX partial endpoint and verifies:
+ * 1. Live routes return a hard 200 with actual HTML content (not blank)
+ * 2. Retired routes and missing-parent lookups return a clean 404
+ * 3. Invalid POSTs return their observed validation/contract status, never 5xx
+ *
+ * NO test here may CREATE rows: the suite shares one serial in-memory DB and
+ * other projects assert empty states. All POSTs are invalid-payload probes.
+ * Statuses below were pinned from an observed authed run against the seeded
+ * launcher (scripts/e2e_server.py), never guessed.
  *
  * Called by: npx playwright test --project=dead-ends
- * Depends on: running app server in TESTING=1 mode
+ * Depends on: running app server in TESTING=1 mode (scripts/e2e_server.py)
  */
 
 import { test, expect } from '@playwright/test';
 
-// All list partials that should render without any path params
+// Live list partials — every one must render for the seeded admin. The
+// request fixture follows redirects, so the two renamed/relocated partials
+// (/v2/partials/companies → /v2/partials/customers, /v2/partials/buy-plans →
+// /v2/partials/approvals?tab=buy-plans) land on their live 200 targets.
 const LIST_PARTIALS = [
   '/v2/partials/requisitions',
   '/v2/partials/vendors',
   '/v2/partials/companies',
-  '/v2/partials/quotes',
   '/v2/partials/buy-plans',
   '/v2/partials/materials',
   '/v2/partials/materials/workspace',
   '/v2/partials/prospecting',
   '/v2/partials/proactive',
-  '/v2/partials/strategic',
   '/v2/partials/follow-ups',
-  '/v2/partials/excess',
   '/v2/partials/settings',
   '/v2/partials/settings/connectors',
   '/v2/partials/dashboard',
@@ -33,7 +39,16 @@ const LIST_PARTIALS = [
   '/v2/partials/offers/review-queue',
 ];
 
-// Full pages that should render the app shell
+// Retired partial routes — authed they 404 (observed). Asserting 404 documents
+// the retirement honestly instead of repointing the detector; the /v2/quotes
+// FULL page below stays live via its redirect.
+const RETIRED_PARTIALS = [
+  '/v2/partials/quotes',
+  '/v2/partials/strategic',
+  '/v2/partials/excess',
+];
+
+// Full pages that must render the authed app shell (redirects followed).
 const FULL_PAGES = [
   '/v2',
   '/v2/requisitions',
@@ -49,69 +64,74 @@ const FULL_PAGES = [
 
 test.describe('Dead-End Detector — List Partials', () => {
   for (const url of LIST_PARTIALS) {
-    test(`${url} returns non-empty HTML or auth redirect`, async ({ request }) => {
+    test(`${url} renders authed with real content`, async ({ request }) => {
       const res = await request.get(url, {
         headers: { 'HX-Request': 'true' },
       });
 
-      // Should not be a server error — 200, 401, 307 are all acceptable
-      // (401/307 = auth required, which is correct behavior for unauthenticated requests)
-      expect(res.status(), `${url} crashed with ${res.status()}`).toBeLessThan(500);
+      // Authed, a live partial has exactly one honest status.
+      expect(res.status(), `${url} must render for the seeded admin`).toBe(200);
 
-      // If we got a successful response, verify it has content
-      if (res.status() === 200) {
-        const html = await res.text();
-        expect(html.trim().length, `${url} returned empty response`).toBeGreaterThan(10);
-        expect(html).not.toMatch(/^(Internal Server Error|Not Found)$/);
-      }
+      const html = await res.text();
+      expect(html.trim().length, `${url} returned empty response`).toBeGreaterThan(10);
+      expect(html).not.toMatch(/^(Internal Server Error|Not Found)$/);
+    });
+  }
+
+  for (const url of RETIRED_PARTIALS) {
+    test(`${url} is a retired route (404)`, async ({ request }) => {
+      const res = await request.get(url, {
+        headers: { 'HX-Request': 'true' },
+      });
+      // retired route — documents the retirement (observed authed 404); if
+      // this route comes back to life, move it up into LIST_PARTIALS.
+      expect(res.status(), `${url} is expected to be retired`).toBe(404);
     });
   }
 });
 
 test.describe('Dead-End Detector — Full Pages', () => {
   for (const url of FULL_PAGES) {
-    test(`${url} loads without server error`, async ({ request }) => {
+    test(`${url} renders the authed app shell`, async ({ request }) => {
       const res = await request.get(url, {
         headers: { 'Accept': 'text/html' },
       });
 
-      // Should not crash — 200 or auth redirect (401/307) are acceptable
-      expect(res.status(), `${url} crashed with ${res.status()}`).toBeLessThan(500);
+      expect(res.status(), `${url} must render for the seeded admin`).toBe(200);
 
-      if (res.status() === 200) {
-        const html = await res.text();
-        // Should contain either the app shell or the login page — both are valid
-        expect(html.trim().length, `${url} returned empty page`).toBeGreaterThan(100);
-      }
+      const html = await res.text();
+      expect(html.trim().length, `${url} returned empty page`).toBeGreaterThan(100);
     });
   }
 });
 
 test.describe('Dead-End Detector — Form Endpoints Accept POST', () => {
-  // These POST endpoints should return non-500 even with minimal/empty data
-  // (they should return validation errors or auth errors, not crashes)
-  const POST_ENDPOINTS = [
-    '/v2/partials/requisitions/create',
-    '/v2/partials/companies/create',
+  // Invalid-payload probes ONLY (empty body) — must return the pinned
+  // validation/contract status, never a crash and never a created row.
+  const POST_ENDPOINTS: Array<{ url: string; expected: number; why: string }> = [
+    // Empty form → FastAPI form validation error.
+    { url: '/v2/partials/requisitions/create', expected: 422, why: 'form validation' },
+    // Observed authed 405: the companies create partial no longer accepts
+    // POST (flagged for owner visibility in the conversion PR).
+    { url: '/v2/partials/companies/create', expected: 405, why: 'route no longer accepts POST' },
   ];
 
-  for (const url of POST_ENDPOINTS) {
-    test(`POST ${url} doesn't crash on empty submission`, async ({ request }) => {
+  for (const { url, expected, why } of POST_ENDPOINTS) {
+    test(`POST ${url} returns ${expected} on empty submission`, async ({ request }) => {
       const res = await request.post(url, {
         headers: { 'HX-Request': 'true', 'Content-Type': 'application/x-www-form-urlencoded' },
         data: '',
       });
-
-      // Should return validation error (4xx), auth redirect (401/307), or success (2xx) — NOT a crash (5xx)
-      expect(res.status(), `POST ${url} crashed with ${res.status()}`).toBeLessThan(500);
+      expect(res.status(), `POST ${url} expected ${expected} (${why})`).toBe(expected);
     });
   }
 });
 
 test.describe('Dead-End Detector — Unified Attachments (Task 5)', () => {
-  // The per-kind list endpoints back the shared attachments panel. With
-  // HX-Request they return the list partial (HTML); without, JSON. Either way
-  // they must not 5xx — unauthenticated requests are expected to auth-redirect.
+  // Authed + empty DB, every parent id 1 is missing, so the routes 404 by
+  // contract (attachments_extra.py, requisitions/attachments.py,
+  // crm/offers.py). round-2 (owner-gated): positive attachment coverage —
+  // 200 + panel HTML — needs a seeded parent row.
   const ATTACHMENT_LIST_ENDPOINTS = [
     '/api/requisitions/1/attachments',
     '/api/requirements/1/attachments',
@@ -122,18 +142,14 @@ test.describe('Dead-End Detector — Unified Attachments (Task 5)', () => {
   ];
 
   for (const url of ATTACHMENT_LIST_ENDPOINTS) {
-    test(`${url} (HX) returns non-empty HTML or auth/404, never 5xx`, async ({ request }) => {
+    test(`${url} 404s on the missing parent`, { tag: '@needs-data' }, async ({ request }) => {
       const res = await request.get(url, { headers: { 'HX-Request': 'true' } });
-      expect(res.status(), `${url} crashed with ${res.status()}`).toBeLessThan(500);
-      if (res.status() === 200) {
-        const html = await res.text();
-        expect(html.trim().length, `${url} returned empty response`).toBeGreaterThan(10);
-      }
+      // round-2: becomes toBe(200) + content assert once a parent is seeded.
+      expect(res.status(), `${url} must 404 on a missing parent`).toBe(404);
     });
   }
 
-  // The 5 detail surfaces that host the panel must render (or auth-redirect),
-  // never crash. The contact files-modal is loaded via $dispatch('open-modal').
+  // The detail surfaces hosting the panel — same missing-parent contract.
   const ATTACHMENT_SURFACES = [
     '/v2/partials/customers/1/tab/files',
     '/v2/partials/materials/1/tab/files',
@@ -141,43 +157,41 @@ test.describe('Dead-End Detector — Unified Attachments (Task 5)', () => {
   ];
 
   for (const url of ATTACHMENT_SURFACES) {
-    test(`${url} renders the panel surface without server error`, async ({ request }) => {
+    test(`${url} 404s on the missing parent`, { tag: '@needs-data' }, async ({ request }) => {
       const res = await request.get(url, { headers: { 'HX-Request': 'true' } });
-      expect(res.status(), `${url} crashed with ${res.status()}`).toBeLessThan(500);
-      if (res.status() === 200) {
-        const html = await res.text();
-        expect(html.trim().length, `${url} returned empty response`).toBeGreaterThan(10);
-      }
+      // round-2: becomes toBe(200) + panel-surface assert with seeded data.
+      expect(res.status(), `${url} must 404 on a missing parent`).toBe(404);
     });
   }
 });
 
 test.describe('Dead-End Detector — 404 Handling', () => {
-  test('non-existent requisition returns error, not crash', async ({ request }) => {
+  test('non-existent requisition returns 404, not crash', async ({ request }) => {
     const res = await request.get('/v2/partials/requisitions/999999', {
       headers: { 'HX-Request': 'true' },
     });
-    expect(res.status()).toBeLessThan(500);
+    expect(res.status()).toBe(404);
   });
 
-  test('non-existent vendor returns error, not crash', async ({ request }) => {
+  test('non-existent vendor returns 404, not crash', async ({ request }) => {
     const res = await request.get('/v2/partials/vendors/999999', {
       headers: { 'HX-Request': 'true' },
     });
-    expect(res.status()).toBeLessThan(500);
+    expect(res.status()).toBe(404);
   });
 
-  test('non-existent company returns error, not crash', async ({ request }) => {
+  test('non-existent company returns 404, not crash', async ({ request }) => {
+    // 301-redirects to /v2/partials/customers/999999 (followed) → 404 there.
     const res = await request.get('/v2/partials/companies/999999', {
       headers: { 'HX-Request': 'true' },
     });
-    expect(res.status()).toBeLessThan(500);
+    expect(res.status()).toBe(404);
   });
 
-  test('non-existent quote returns error, not crash', async ({ request }) => {
+  test('non-existent quote returns 404, not crash', async ({ request }) => {
     const res = await request.get('/v2/partials/quotes/999999', {
       headers: { 'HX-Request': 'true' },
     });
-    expect(res.status()).toBeLessThan(500);
+    expect(res.status()).toBe(404);
   });
 });

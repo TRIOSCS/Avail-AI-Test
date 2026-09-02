@@ -73,7 +73,12 @@ export default defineConfig({
     // visual stays anonymous — its committed baseline is login-page.png
     // (author's nightly cron + npm run test:visual stay valid).
     { name: 'visual', testMatch: /visual\.spec\.ts$/ },
-    { name: 'dead-ends', testMatch: /dead-ends\.spec\.ts$/ },
+    {
+      name: 'dead-ends',
+      testMatch: /dead-ends\.spec\.ts$/,
+      dependencies: ['setup'],
+      use: { storageState: STORAGE_STATE },
+    },
     { name: 'workflows', testMatch: /workflows\.spec\.ts$/ },
     { name: 'materials-ui', testMatch: /materials-ui\.spec\.ts$/ },
     { name: 'sales-hub-ui', testMatch: /sales-hub-ui\.spec\.ts$/ },
