@@ -532,3 +532,186 @@ async def test_screen_prospect_llm_insufficient_data_sets_flag(db_session, monke
     assert p.enrichment_data["ai_screen"]["needs_more_enrichment"] is True
     # Scores NOT written for insufficient_data from LLM
     assert (p.trio_match_score or 0) == 0
+
+
+# ── Migration 218: persisted ai_screen_verdict cache + SQL grid paths ─────────
+
+
+def _verdict_cache_column(db: Session, prospect_id: int):
+    """Read ai_screen_verdict straight from the table (not the ORM identity map),
+    proving the listener actually flushed the cache column to the DB."""
+    from sqlalchemy import text
+
+    return db.execute(
+        text("SELECT ai_screen_verdict FROM prospect_accounts WHERE id = :pid"),
+        {"pid": prospect_id},
+    ).scalar()
+
+
+def test_listener_mirrors_ai_screen_verdict_on_orm_flush(db_session):
+    """Setting enrichment_data['ai_screen']['verdict'] on an ORM flush writes through
+    the persisted ai_screen_verdict cache column (migration 218 listener) — and a row
+    never screened keeps a NULL mirror."""
+    from sqlalchemy.orm.attributes import flag_modified
+
+    p = _prospect(db_session, enrichment_data={})
+    assert _verdict_cache_column(db_session, p.id) is None  # never screened → NULL
+
+    p.enrichment_data = {**(p.enrichment_data or {}), "ai_screen": {"verdict": "screened_out"}}
+    flag_modified(p, "enrichment_data")
+    db_session.commit()
+    assert _verdict_cache_column(db_session, p.id) == "screened_out"
+
+    p.enrichment_data = {**p.enrichment_data, "ai_screen": {"verdict": "pass"}}
+    flag_modified(p, "enrichment_data")
+    db_session.commit()
+    assert _verdict_cache_column(db_session, p.id) == "pass"
+
+
+async def test_screen_prospect_syncs_verdict_cache_column(db_session, monkeypatch):
+    """The screening worker path (screen_prospect → ORM commit) keeps the persisted
+    ai_screen_verdict column in lockstep — the before_update listener fires because the
+    service writes through the ORM, never raw SQL."""
+    monkeypatch.setattr(settings, "ai_screen_enabled", True)
+    monkeypatch.setattr(settings, "ai_screen_daily_cap", 999)
+    monkeypatch.setattr(settings, "ai_screen_min_match", 40)
+
+    p = _prospect(db_session, industry="Retail", enrichment_data={}, readiness_signals={})
+    verdict = {
+        "trio_match_score": 15,
+        "opportunity_score": 10,
+        "excess_likelihood": 5,
+        "verdict": "pass",  # below min_match → service overrides to screened_out
+        "rationale": "Retail company, no electronics manufacturing.",
+        "evidence": ["industry=Retail"],
+        "confidence": 90,
+        "model": "claude-sonnet-4-6",
+        "screened_at": "2026-06-18T00:00:00+00:00",
+    }
+
+    from app.services import prospect_screening as ps
+
+    with patch.object(ps, "_call_screen_llm", new_callable=AsyncMock, return_value=verdict):
+        with patch("app.cache.intel_cache.get_count", return_value=0):
+            with patch("app.cache.intel_cache.incr_count", return_value=1):
+                result = await ps.screen_prospect(p, db_session)
+
+    assert result["verdict"] == "screened_out"
+    assert _verdict_cache_column(db_session, p.id) == "screened_out"
+
+
+class TestScreenVerdictSqlGrid:
+    """AI-screen grid paths over the persisted ai_screen_verdict column (migration 218,
+    audit M5+M6): flag-ON filters/sorts/paginates + buckets in SQL; flag-OFF
+    unchanged."""
+
+    @staticmethod
+    def _seed(db, name, domain, trio=None, verdict=None):
+        p = ProspectAccount(
+            name=name,
+            domain=domain,
+            status="suggested",
+            discovery_source="manual",
+            created_at=datetime.now(UTC),
+            trio_match_score=trio,
+            enrichment_data={"ai_screen": {"verdict": verdict}} if verdict else {},
+        )
+        db.add(p)
+        db.commit()
+        return p
+
+    @staticmethod
+    def _grid_ctx(client, monkeypatch, url) -> dict:
+        """GET the grid with template_response captured, returning the render ctx."""
+        from fastapi.responses import HTMLResponse
+
+        from app.routers.htmx import prospecting as router
+
+        captured: dict = {}
+
+        def _capture(template, ctx, *a, **k):
+            captured["ctx"] = ctx
+            return HTMLResponse("<html/>")
+
+        monkeypatch.setattr(router, "template_response", _capture)
+        resp = client.get(url)
+        assert resp.status_code == 200
+        return captured["ctx"]
+
+    def test_flag_on_excludes_screened_out_and_buckets_with_true_count(self, client, db_session, monkeypatch):
+        """Main grid = non-screened rows ranked by trio_match (name would sort the other
+        way, proving score drives); screened-out rows land ONLY in the bucket, best-
+        first, with an honest total.
+
+        A never-screened row (NULL verdict) stays in the main grid.
+        """
+        monkeypatch.setattr("app.config.settings.ai_screen_enabled", True)
+        self._seed(db_session, "ZZZ_TopPass", "top-218.com", trio=90, verdict="pass")
+        self._seed(db_session, "MMM_Unscreened", "mid-218.com", trio=70)  # NULL verdict
+        self._seed(db_session, "AAA_LowPass", "low-218.com", trio=50, verdict="pass")
+        self._seed(db_session, "ZZZ_BucketTop", "so-top-218.com", trio=95, verdict="screened_out")
+        self._seed(db_session, "AAA_BucketLow", "so-low-218.com", trio=10, verdict="screened_out")
+
+        ctx = self._grid_ctx(client, monkeypatch, "/v2/partials/prospecting?sort=ai_match_desc")
+        assert [x.name for x in ctx["prospects"]] == ["ZZZ_TopPass", "MMM_Unscreened", "AAA_LowPass"]
+        assert ctx["total"] == 3
+        assert [x.name for x in ctx["screened_out_prospects"]] == ["ZZZ_BucketTop", "AAA_BucketLow"]
+        assert ctx["screened_out_total"] == 2
+
+    def test_flag_on_paginates_in_sql_and_caps_bucket(self, client, db_session, monkeypatch):
+        """Pagination happens in SQL (page 2 holds only the third-ranked row) and the
+        bucket is LIMITed to _SCREENED_OUT_CAP best-first while screened_out_total stays
+        the honest full count."""
+        from app.routers.htmx import prospecting as router
+
+        monkeypatch.setattr("app.config.settings.ai_screen_enabled", True)
+        monkeypatch.setattr(router, "_SCREENED_OUT_CAP", 2)
+        self._seed(db_session, "ZZZ_TopPass", "top-218.com", trio=90, verdict="pass")
+        self._seed(db_session, "MMM_MidPass", "mid-218.com", trio=70, verdict="pass")
+        self._seed(db_session, "AAA_LowPass", "low-218.com", trio=50, verdict="pass")
+        self._seed(db_session, "ZZZ_SoTop", "so-a-218.com", trio=60, verdict="screened_out")
+        self._seed(db_session, "MMM_SoMid", "so-b-218.com", trio=40, verdict="screened_out")
+        self._seed(db_session, "AAA_SoLow", "so-c-218.com", trio=20, verdict="screened_out")
+
+        ctx = self._grid_ctx(client, monkeypatch, "/v2/partials/prospecting?sort=ai_match_desc&per_page=2&page=2")
+        assert [x.name for x in ctx["prospects"]] == ["AAA_LowPass"]
+        assert ctx["total"] == 3
+        assert ctx["total_pages"] == 2
+        # Capped best-first, honest total beyond the cap.
+        assert [x.name for x in ctx["screened_out_prospects"]] == ["ZZZ_SoTop", "MMM_SoMid"]
+        assert ctx["screened_out_total"] == 3
+
+    def test_flag_on_filters_on_cache_column_not_jsonb(self, client, db_session, monkeypatch):
+        """A row whose JSONB says screened_out but whose cache column is NULL (a pre-
+        backfill row) lands in the MAIN grid — pinning the persisted column, not a
+        Python JSONB re-derive, as the filter source.
+
+        Migration 218's PG backfill closes this gap for real rows; a regression back to
+        the in-memory JSONB split fails here.
+        """
+        from sqlalchemy import text
+
+        monkeypatch.setattr("app.config.settings.ai_screen_enabled", True)
+        p = self._seed(db_session, "DriftRow", "drift-218.com", trio=80, verdict="screened_out")
+        db_session.execute(text("UPDATE prospect_accounts SET ai_screen_verdict = NULL WHERE id = :pid"), {"pid": p.id})
+        db_session.commit()
+        db_session.expire_all()
+
+        ctx = self._grid_ctx(client, monkeypatch, "/v2/partials/prospecting?sort=ai_match_desc")
+        assert [x.name for x in ctx["prospects"]] == ["DriftRow"]
+        assert ctx["screened_out_prospects"] == []
+        assert ctx["screened_out_total"] == 0
+
+    def test_flag_off_grid_unchanged_by_verdicts(self, client, db_session, monkeypatch):
+        """AI-screen OFF: verdicts do not filter — screened-out rows stay in the main
+        grid (still trio-ranked) and the bucket stays empty."""
+        monkeypatch.setattr("app.config.settings.ai_screen_enabled", False)
+        self._seed(db_session, "AAA_Screened", "so-218.com", trio=95, verdict="screened_out")
+        self._seed(db_session, "ZZZ_TopPass", "top-218.com", trio=90, verdict="pass")
+        self._seed(db_session, "MMM_Unscreened", "mid-218.com", trio=20)
+
+        ctx = self._grid_ctx(client, monkeypatch, "/v2/partials/prospecting?sort=ai_match_desc")
+        assert [x.name for x in ctx["prospects"]] == ["AAA_Screened", "ZZZ_TopPass", "MMM_Unscreened"]
+        assert ctx["total"] == 3
+        assert ctx["screened_out_prospects"] == []
+        assert ctx["screened_out_total"] == 0

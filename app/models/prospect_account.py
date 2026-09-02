@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 
-from sqlalchemy import Column, ForeignKey, Index, Integer, String, Text, event
+from sqlalchemy import Boolean, Column, ForeignKey, Index, Integer, String, Text, event
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
@@ -49,6 +49,21 @@ class ProspectAccount(Base):
     # (order_by + offset/limit) instead of snapshotting every row O(N) per request.
     # Nullable only so a brand-new row exists before the first flush populates it.
     buyer_ready_score = Column(Integer, nullable=True)
+
+    # Persisted CACHE of build_priority_snapshot()["is_buyer_ready"] (migration 218) —
+    # a separate boolean mirror of the same snapshot dict buyer_ready_score already
+    # caches, kept in lockstep by the same before_insert/before_update listener so the
+    # stats panel can SUM this column in SQL instead of re-snapshotting every SUGGESTED
+    # row. Nullable pre-backfill/pre-first-flush; callers coalesce to False.
+    is_buyer_ready = Column(Boolean, nullable=True)
+
+    # Persisted CACHE of enrichment_data['ai_screen']['verdict'] (migration 218) — a flat,
+    # indexed mirror of one JSONB key so the AI-screen-on prospecting lane can
+    # filter/sort/paginate in SQL instead of loading the whole pool into Python. The
+    # JSONB blob stays the source of truth; the listener below re-derives this column
+    # from it on every flush. One of "pass" / "screened_out" / "insufficient_data", or
+    # NULL before the account is ever screened.
+    ai_screen_verdict = Column(String(32), nullable=True)
 
     # Discovery tracking
     discovery_source = Column(String(50), nullable=False)
@@ -118,23 +133,41 @@ class ProspectAccount(Base):
         Index("ix_prospect_accounts_trio_match_score", "trio_match_score"),
         Index("ix_prospect_accounts_opportunity_score", "opportunity_score"),
         Index("ix_prospect_accounts_buyer_ready_score", "buyer_ready_score"),
+        Index("ix_prospect_accounts_is_buyer_ready", "is_buyer_ready"),
+        Index("ix_prospect_accounts_ai_screen_verdict", "ai_screen_verdict"),
     )
 
 
 def _sync_buyer_ready_score(_mapper, _connection, target: "ProspectAccount") -> None:
-    """Write-through the ``buyer_ready_score`` cache before every insert/update.
+    """Write-through the ``buyer_ready_score`` / ``is_buyer_ready`` /
+    ``ai_screen_verdict`` caches before every insert/update.
 
     build_priority_snapshot() is the single source of truth for the composite buyer-
-    ready score; recomputing here on each flush keeps the persisted column consistent
-    with it so the prospecting list ranks in SQL instead of snapshotting every row in
-    memory. The scorer is a pure function of the instance's own attributes (no DB/IO),
-    so this is safe inside a flush. Imported lazily to keep the model layer free of a
-    hard service import (prospect_priority itself imports nothing from app, so there is
-    no cycle either way).
+    ready score and its is_buyer_ready flag; recomputing here on each flush keeps both
+    persisted columns consistent with it so the prospecting list and stats panel can
+    rank/aggregate in SQL instead of snapshotting every row in memory (migration 218
+    added is_buyer_ready alongside the pre-existing buyer_ready_score). The scorer is a
+    pure function of the instance's own attributes (no DB/IO), so this is safe inside a
+    flush. Imported lazily to keep the model layer free of a hard service import
+    (prospect_priority itself imports nothing from app, so there is no cycle either
+    way).
+
+    ai_screen_verdict is a flat, indexed mirror of
+    enrichment_data['ai_screen']['verdict'] (the JSONB blob stays the source of truth) —
+    re-derived here too so every ORM write that sets enrichment_data (e.g.
+    prospect_screening.screen_prospect) keeps the mirror in lockstep at zero extra cost,
+    without prospect_screening needing to know about it.
     """
     from ..services.prospect_priority import build_priority_snapshot
 
-    target.buyer_ready_score = build_priority_snapshot(target)["buyer_ready_score"]
+    snapshot = build_priority_snapshot(target)
+    target.buyer_ready_score = snapshot["buyer_ready_score"]
+    target.is_buyer_ready = snapshot["is_buyer_ready"]
+
+    enrichment_data: dict = target.enrichment_data if isinstance(target.enrichment_data, dict) else {}
+    ai_screen = enrichment_data.get("ai_screen")
+    verdict = ai_screen.get("verdict") if isinstance(ai_screen, dict) else None
+    target.ai_screen_verdict = verdict  # type: ignore[assignment]  # instrumented attr write (legacy Column model)
 
 
 event.listen(ProspectAccount, "before_insert", _sync_buyer_ready_score)

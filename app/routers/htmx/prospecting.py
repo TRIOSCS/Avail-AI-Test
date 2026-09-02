@@ -17,6 +17,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from loguru import logger
+from sqlalchemy import case, false, select
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
@@ -138,28 +139,37 @@ def _prospect_stats_ctx(db: Session) -> dict:
     """Canonical prospecting KPIs (single definition, shared by the stats route and the
     OOB refresh after grid actions).
 
-    "Buyer ready" = is_buyer_ready over SUGGESTED.
+    "Buyer ready" = is_buyer_ready over SUGGESTED, read from the persisted
+    ``is_buyer_ready`` cache column (write-through by the ProspectAccount
+    before_insert/before_update listener — migration 218) instead of re-snapshotting
+    every SUGGESTED row in Python. All four SUGGESTED-scoped counts are computed in
+    ONE SQL aggregate pass rather than loading the pool into memory (audit M6).
+    coalesce(is_buyer_ready, false()) honest-degrades any row that predates the
+    migration's backfill to "not buyer ready" instead of erroring on NULL.
     """
     from ...config import settings as _settings
 
-    suggested = db.query(ProspectAccount).filter(ProspectAccount.status == ProspectAccountStatus.SUGGESTED).all()
+    suggested_filter = ProspectAccount.status == ProspectAccountStatus.SUGGESTED
+    total, buyer_ready, call_now, screened_out_raw = db.execute(
+        select(
+            sqlfunc.count(ProspectAccount.id),
+            sqlfunc.sum(case((sqlfunc.coalesce(ProspectAccount.is_buyer_ready, false()), 1), else_=0)),
+            sqlfunc.sum(case((sqlfunc.coalesce(ProspectAccount.readiness_score, 0) >= 70, 1), else_=0)),
+            sqlfunc.sum(case((ProspectAccount.ai_screen_verdict == "screened_out", 1), else_=0)),
+        ).where(suggested_filter)
+    ).one()
     claimed = (
-        db.query(sqlfunc.count(ProspectAccount.id))
-        .filter(ProspectAccount.status == ProspectAccountStatus.CLAIMED)
-        .scalar()
+        db.execute(
+            select(sqlfunc.count(ProspectAccount.id)).where(ProspectAccount.status == ProspectAccountStatus.CLAIMED)
+        ).scalar()
         or 0
     )
-    screened_out_count = (
-        sum(1 for p in suggested if (p.enrichment_data or {}).get("ai_screen", {}).get("verdict") == "screened_out")
-        if _settings.ai_screen_enabled
-        else 0
-    )
     return {
-        "total": len(suggested),
-        "buyer_ready": sum(1 for p in suggested if build_priority_snapshot(p)["is_buyer_ready"]),
-        "call_now": sum(1 for p in suggested if (p.readiness_score or 0) >= 70),
+        "total": total or 0,
+        "buyer_ready": buyer_ready or 0,
+        "call_now": call_now or 0,
         "claimed": claimed,
-        "screened_out": screened_out_count,
+        "screened_out": (screened_out_raw or 0) if _settings.ai_screen_enabled else 0,
     }
 
 
@@ -227,16 +237,18 @@ async def prospecting_list_partial(
     """
     scope = "mine" if scope == "mine" else "all"
 
-    base = db.query(ProspectAccount)
+    conditions = []
     if status:
-        base = base.filter(ProspectAccount.status == status)
+        conditions.append(ProspectAccount.status == status)
     else:
-        base = base.filter(ProspectAccount.status.in_(_PROSPECT_DEFAULT_STATUSES))
+        conditions.append(ProspectAccount.status.in_(_PROSPECT_DEFAULT_STATUSES))
     if q.strip():
         sb = SearchBuilder(q.strip())
-        base = base.filter(sb.ilike_filter(ProspectAccount.name, ProspectAccount.domain))
+        conditions.append(sb.ilike_filter(ProspectAccount.name, ProspectAccount.domain))
     if scope == "mine":
-        base = base.filter(ProspectAccount.claimed_by == user.id)
+        conditions.append(ProspectAccount.claimed_by == user.id)
+
+    base = db.query(ProspectAccount).filter(*conditions)
 
     total = base.count()
     total_pages = max(1, (total + per_page - 1) // per_page)
@@ -247,31 +259,49 @@ async def prospecting_list_partial(
         from ...config import settings as _settings
 
         if _settings.ai_screen_enabled:
-            # AI-screen on: the screened-out split is a JSONB verdict predicate we keep in
-            # Python (portable across PG/SQLite — this module deliberately runs no JSONB SQL
-            # queries). The main grid is sorted + paginated below; the screened-out bucket
-            # is sorted best-first and CAPPED at _SCREENED_OUT_CAP so it never renders the
-            # whole (only-grows) bucket unpaginated (audit M5). screened_out_total keeps the
-            # header count honest.
-            rows = base.all()
-            screened_out_rows = [
-                p for p in rows if (p.enrichment_data or {}).get("ai_screen", {}).get("verdict") == "screened_out"
-            ]
-            rows = [p for p in rows if (p.enrichment_data or {}).get("ai_screen", {}).get("verdict") != "screened_out"]
-            rows.sort(
-                key=lambda p: (
-                    -(p.trio_match_score or 0),
-                    -(p.opportunity_score or 0),
-                    -(p.readiness_score or 0),
-                    (p.name or "").lower(),
-                )
+            # AI-screen on: ai_screen_verdict is a persisted, indexed mirror of
+            # enrichment_data->ai_screen->verdict (migration 218, write-through by the
+            # ProspectAccount before_insert/before_update listener), so the screened-out
+            # split + the main grid both rank/paginate in SQL instead of hydrating the
+            # whole (only-grows) pool into memory (audit M5/M6). coalesce(.,'') groups a
+            # row that predates the backfill (NULL verdict) with "not screened out",
+            # matching its pre-migration behavior. Main-grid ordering matches the
+            # coalesce ordering the AI-screen-off branch uses below; the screened-out
+            # bucket is sorted best-first and CAPPED at _SCREENED_OUT_CAP (SQL LIMIT) so
+            # it never renders the whole bucket unpaginated. screened_out_total (a
+            # separate SQL COUNT) keeps the header count honest beyond the cap.
+            not_screened_out = sqlfunc.coalesce(ProspectAccount.ai_screen_verdict, "") != "screened_out"
+            is_screened_out = ProspectAccount.ai_screen_verdict == "screened_out"
+
+            total = (
+                db.execute(select(sqlfunc.count(ProspectAccount.id)).where(*conditions, not_screened_out)).scalar() or 0
             )
-            screened_out_total = len(screened_out_rows)
-            screened_out_rows.sort(key=lambda p: (-(p.trio_match_score or 0), (p.name or "").lower()))
-            screened_out_rows = screened_out_rows[:_SCREENED_OUT_CAP]
-            total = len(rows)
             total_pages = max(1, (total + per_page - 1) // per_page)
-            prospects = rows[offset : offset + per_page]
+            prospects = db.scalars(
+                select(ProspectAccount)
+                .where(*conditions, not_screened_out)
+                .order_by(
+                    sqlfunc.coalesce(ProspectAccount.trio_match_score, 0).desc(),
+                    sqlfunc.coalesce(ProspectAccount.opportunity_score, 0).desc(),
+                    sqlfunc.coalesce(ProspectAccount.readiness_score, 0).desc(),
+                    sqlfunc.lower(ProspectAccount.name),
+                )
+                .offset(offset)
+                .limit(per_page)
+            ).all()
+
+            screened_out_total = (
+                db.execute(select(sqlfunc.count(ProspectAccount.id)).where(*conditions, is_screened_out)).scalar() or 0
+            )
+            screened_out_rows = db.scalars(
+                select(ProspectAccount)
+                .where(*conditions, is_screened_out)
+                .order_by(
+                    sqlfunc.coalesce(ProspectAccount.trio_match_score, 0).desc(),
+                    sqlfunc.lower(ProspectAccount.name),
+                )
+                .limit(_SCREENED_OUT_CAP)
+            ).all()
         else:
             # AI-screen off (default): trio_match/opportunity/readiness are all persisted
             # indexed columns, so rank + paginate in SQL instead of hydrating the whole

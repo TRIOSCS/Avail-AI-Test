@@ -337,3 +337,73 @@ class TestBuildPrioritySnapshotAllBranches:
             )
         )
         assert len(snapshot["priority_reasons"]) <= 4
+
+
+# ── Migration 218: persisted is_buyer_ready cache (listener write-through) ────
+
+
+class TestIsBuyerReadyPersistedCache:
+    """The ProspectAccount before_insert/before_update listener mirrors
+    build_priority_snapshot()["is_buyer_ready"] into the persisted
+    prospect_accounts.is_buyer_ready column (migration 218) so the stats panel can SUM
+    it in SQL.
+
+    Values are read back with raw SQL to prove they were flushed to the table, not
+    merely set on the in-memory instance.
+    """
+
+    @staticmethod
+    def _db_prospect(db, **kw):
+        import uuid
+
+        from app.models.prospect_account import ProspectAccount
+
+        p = ProspectAccount(
+            name=f"Cache {uuid.uuid4().hex[:6]}",
+            domain=f"cache-{uuid.uuid4().hex[:8]}.com",
+            status="suggested",
+            discovery_source="manual",
+            **kw,
+        )
+        db.add(p)
+        db.commit()
+        return p
+
+    @staticmethod
+    def _column_value(db, prospect_id):
+        from sqlalchemy import text
+
+        return db.execute(
+            text("SELECT is_buyer_ready FROM prospect_accounts WHERE id = :pid"),
+            {"pid": prospect_id},
+        ).scalar()
+
+    def test_insert_persists_true_for_a_ready_prospect(self, db_session):
+        p = self._db_prospect(
+            db_session,
+            fit_score=78,
+            readiness_score=64,
+            readiness_signals={"intent": {"strength": "strong"}},
+            contacts_preview=[{"name": "DM", "verified": True, "seniority": "decision_maker"}],
+        )
+        assert build_priority_snapshot(p)["is_buyer_ready"] is True  # live formula agrees
+        assert bool(self._column_value(db_session, p.id)) is True
+
+    def test_insert_persists_false_not_null_for_a_weak_prospect(self, db_session):
+        p = self._db_prospect(db_session, fit_score=30, readiness_score=15)
+        assert build_priority_snapshot(p)["is_buyer_ready"] is False
+        val = self._column_value(db_session, p.id)
+        # False (0), never NULL — a fresh row must not depend on the coalesce degrade.
+        assert val is not None
+        assert bool(val) is False
+
+    def test_update_refreshes_the_flag(self, db_session):
+        p = self._db_prospect(db_session, fit_score=30, readiness_score=15)
+        assert bool(self._column_value(db_session, p.id)) is False
+
+        p.fit_score = 85
+        p.readiness_score = 72
+        p.readiness_signals = {"intent": {"strength": "strong"}}
+        p.contacts_preview = [{"name": "DM", "verified": True, "seniority": "decision_maker"}]
+        db_session.commit()
+        assert bool(self._column_value(db_session, p.id)) is True
