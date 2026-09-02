@@ -29,9 +29,17 @@ export default defineConfig({
     trace: 'retain-on-failure',
   },
   webServer: {
-    command: `TESTING=1 DATABASE_URL=sqlite:// REDIS_URL="" CACHE_BACKEND=none PYTHONPATH=${path.resolve(repoRoot)} python3 -m uvicorn app.main:app --host 127.0.0.1 --port ${port}`,
+    // scripts/e2e_server.py boots the TESTING app with schema + a seeded
+    // DEFAULT_USER_* admin in the SAME process (StaticPool sqlite is
+    // per-process), then serves with the sync threadpool serialized.
+    // APP_URL=http://… is mandatory: env beats a checkout's .env
+    // (pydantic-settings), so the session cookie can never come out Secure
+    // and get dropped over http. RATE_LIMIT_ENABLED=false: /auth/login is
+    // 5/minute and the limiter is live under TESTING. Credentials are
+    // committed, NON-secret (TESTING-only process, throwaway in-memory DB).
+    command: `TESTING=1 DATABASE_URL=sqlite:// REDIS_URL="" CACHE_BACKEND=none RATE_LIMIT_ENABLED=false APP_URL=http://127.0.0.1:${port} DEFAULT_USER_EMAIL=e2e-admin@availai.test DEFAULT_USER_PASSWORD=e2e-local-only-pw DEFAULT_USER_ROLE=admin PYTHONPATH=${path.resolve(repoRoot)} python3 scripts/e2e_server.py --host 127.0.0.1 --port ${port}`,
     port,
-    timeout: 15000,
+    timeout: 30000, // create_all (~127 tables) adds boot time over the old bare-uvicorn 15s
     reuseExistingServer: false,
   },
   projects: [
