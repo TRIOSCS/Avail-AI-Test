@@ -79,7 +79,12 @@ export default defineConfig({
       dependencies: ['setup'],
       use: { storageState: STORAGE_STATE },
     },
-    { name: 'accessibility', testMatch: /accessibility\.spec\.ts$/ },
+    {
+      name: 'accessibility',
+      testMatch: /accessibility\.spec\.ts$/,
+      dependencies: ['setup'],
+      use: { storageState: STORAGE_STATE },
+    },
     // visual stays anonymous — its committed baseline is login-page.png
     // (author's nightly cron + npm run test:visual stay valid).
     { name: 'visual', testMatch: /visual\.spec\.ts$/ },

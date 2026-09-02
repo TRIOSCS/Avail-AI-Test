@@ -432,6 +432,9 @@ jobs:
     # webServer playwright.config.ts starts runs with TESTING=1,
     # DATABASE_URL=sqlite:// (in-memory) and CACHE_BACKEND=none, so the whole
     # job is self-contained.
+    # Phase 5 (2026-09-02): the suite boots via scripts/e2e_server.py (schema
+    # + seeded DEFAULT_USER_* admin) and runs authed via the `setup` project's
+    # storageState; the `auth` and `visual` projects stay anonymous by design.
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 15
