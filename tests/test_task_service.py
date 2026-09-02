@@ -204,21 +204,21 @@ class TestGetMyTasksSummary:
         A task due earlier TODAY is calendar-day "due today", never overdue (matches
         _task_due_state).
         """
-        from app.utils.timezones import company_day_sentinel
+        from app.utils.timezones import local_day_sentinel
 
         prior_day = RequisitionTask(
             requisition_id=test_requisition.id,
             title="Overdue",
             source="system",
             assigned_to_id=test_user.id,
-            due_at=company_day_sentinel(-1),
+            due_at=local_day_sentinel(-1),
         )
         due_today = RequisitionTask(
             requisition_id=test_requisition.id,
             title="Due today",
             source="system",
             assigned_to_id=test_user.id,
-            due_at=company_day_sentinel(0),
+            due_at=local_day_sentinel(0),
         )
         db_session.add_all([prior_day, due_today])
         db_session.commit()

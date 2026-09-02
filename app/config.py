@@ -309,12 +309,13 @@ class Settings(BaseSettings):
     sighting_weight_freshness: float = 0.15
     sighting_weight_completeness: float = 0.10
 
-    # --- Company timezone (Decision O: ONE company-wide zone, no per-user zones) ---
-    # The business operating zone for DAY-BOUNDARY math on calendar-dated work —
-    # task due-date bucketing ("overdue"/"due today") and snooze-to-tomorrow. Storage
-    # stays UTC (UTCDateTime); this only decides where a calendar day starts and
-    # ends. Also the fallback display zone when a viewer's display_timezone is
-    # unknown (app/utils/timezones.py). IANA name, like the neighboring tz knobs.
+    # --- Company timezone (Decision O residual: the config-driven BUSINESS DEFAULT) ---
+    # The fallback zone whenever a viewer's display_timezone is unknown (NULL /
+    # invalid / no request context, e.g. background jobs) — a set per-user
+    # display_timezone always wins. Used for day-boundary math on calendar-dated
+    # work (task due buckets, snooze-to-tomorrow) via app/utils/timezones.py.
+    # Storage stays UTC (UTCDateTime); this only decides where a calendar day
+    # starts and ends. IANA name, like the neighboring tz knobs.
     company_timezone: str = "America/New_York"
 
     # --- Buy plan (CSV env vars, parsed to list[str] by model_validator) ---

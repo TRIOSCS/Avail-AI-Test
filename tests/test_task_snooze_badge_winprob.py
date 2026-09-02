@@ -155,11 +155,11 @@ class TestTaskSnoozeService:
             assigned_to_id=test_user.id,
         )
         from app.services.task_service import snooze_task
-        from app.utils.timezones import as_utc, company_day_sentinel
+        from app.utils.timezones import as_utc, local_day_sentinel
 
         snoozed = snooze_task(db_session, task.id)
         assert snoozed is not None
-        assert as_utc(snoozed.due_at) == company_day_sentinel(1)
+        assert as_utc(snoozed.due_at) == local_day_sentinel(1)
 
     def test_snooze_returns_none_for_missing_task(self, db_session: Session):
         """snooze_task returns None when the task doesn't exist."""

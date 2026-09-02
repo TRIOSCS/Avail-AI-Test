@@ -1,22 +1,24 @@
-"""Company-timezone day-boundary tests for tasks (Decision O: ONE company zone).
+"""Task day-boundary writes honor the viewer's calendar day (H2 residual).
 
 Task due dates are calendar-date sentinels — UTC midnight of the picked date, with
 ``due.date()`` read back as the calendar day. Deciding "which calendar day is it
-right now" must therefore run in the company operating zone
-(``settings.company_timezone``), never raw UTC: at 8:30pm Eastern (01:30 UTC the
-next day) "tomorrow" still means the next EASTERN day, and a task due today is not
-overdue. Covers:
+right now" must run in the SAME zone the shipped bucketing predicate
+(``_task_due_state``) uses — the viewer's display_timezone, falling back to the
+company-configurable default (``settings.company_timezone``) — never raw UTC: at
+8:30pm Eastern (01:30 UTC the next day) "tomorrow" still means the next EASTERN
+day, and a task due today is not overdue. Covers:
 
   - timezones.company_zoneinfo — reads settings.company_timezone at call time,
     invalid names fall back to the hardcoded business default.
-  - timezones.company_day_sentinel — evening-Eastern instants resolve to the
-    company-local date, DST-correct via zoneinfo (never a fixed offset).
+  - timezones.local_day_sentinel — evening-Eastern instants resolve to the
+    viewer-local date (viewer zone wins when set; company fallback otherwise),
+    DST-correct via zoneinfo (never a fixed offset).
   - task_service.snooze_task on an undated task — +1 day at 8:30pm Eastern lands
-    on the company tomorrow, not the day after.
+    on the viewer's tomorrow, not the day after (Tokyo viewer gets THEIR tomorrow).
   - task_service.get_my_tasks_summary — "overdue" counts only tasks whose due
-    DATE fell on a prior company-local day (due-today / due-tomorrow never count).
-  - task_service.on_bid_due_soon — the auto task's due_at is the company-local
-    tomorrow's sentinel.
+    DATE fell on a prior viewer-local day (due-today / due-tomorrow never count).
+  - task_service.on_bid_due_soon — the auto task's due_at is tomorrow's sentinel
+    (background job → company-fallback day).
   - template_env._task_due_state — the no-viewer-zone fallback bucket zone comes
     from settings.company_timezone (config-driven, not hardcoded).
 
@@ -71,7 +73,7 @@ def _add_task(
     return t
 
 
-# ── company_zoneinfo / company_day_sentinel helpers ─────────────────────
+# ── company_zoneinfo / local_day_sentinel helpers ─────────────────────
 
 
 class TestCompanyDayHelpers:
@@ -89,27 +91,41 @@ class TestCompanyDayHelpers:
 
     @freeze_time(_EVENING_EASTERN)
     def test_sentinel_evening_eastern_is_still_the_eastern_day(self):
-        from app.utils.timezones import company_day_sentinel
+        from app.utils.timezones import local_day_sentinel
 
         # 01:30 UTC = Jan 14 20:30 EST → company today = Jan 14, tomorrow = Jan 15.
-        assert company_day_sentinel(0) == datetime(2026, 1, 14, tzinfo=UTC)
-        assert company_day_sentinel(1) == datetime(2026, 1, 15, tzinfo=UTC)
+        assert local_day_sentinel(0) == datetime(2026, 1, 14, tzinfo=UTC)
+        assert local_day_sentinel(1) == datetime(2026, 1, 15, tzinfo=UTC)
 
     def test_sentinel_accepts_explicit_now(self):
-        from app.utils.timezones import company_day_sentinel
+        from app.utils.timezones import local_day_sentinel
 
         # Same boundary instant passed explicitly (naive = stored-UTC convention too).
         instant = datetime(2026, 1, 15, 1, 30, tzinfo=UTC)
-        assert company_day_sentinel(0, now=instant) == datetime(2026, 1, 14, tzinfo=UTC)
-        assert company_day_sentinel(3, now=instant.replace(tzinfo=None)) == datetime(2026, 1, 17, tzinfo=UTC)
+        assert local_day_sentinel(0, now=instant) == datetime(2026, 1, 14, tzinfo=UTC)
+        assert local_day_sentinel(3, now=instant.replace(tzinfo=None)) == datetime(2026, 1, 17, tzinfo=UTC)
+
+    def test_sentinel_viewer_zone_wins_over_company_fallback(self):
+        from app.utils.timezones import local_day_sentinel
+
+        # Same instant, two viewers: no display tz → company fallback (Eastern,
+        # today = Jan 14); a Tokyo viewer (10:30 JST) → today = Jan 15.
+        instant = datetime(2026, 1, 15, 1, 30, tzinfo=UTC)
+        token = current_user_display_tz_var.set("Asia/Tokyo")
+        try:
+            tokyo_today = local_day_sentinel(0, now=instant)
+        finally:
+            current_user_display_tz_var.reset(token)
+        assert tokyo_today == datetime(2026, 1, 15, tzinfo=UTC)
+        assert local_day_sentinel(0, now=instant) == datetime(2026, 1, 14, tzinfo=UTC)
 
     @freeze_time("2026-07-15 04:30:00")
     def test_sentinel_dst_uses_zoneinfo_not_fixed_offset(self):
-        from app.utils.timezones import company_day_sentinel
+        from app.utils.timezones import local_day_sentinel
 
         # July: Eastern is EDT (UTC-4), so 04:30 UTC = Jul 15 00:30 EDT → today is
         # Jul 15. A hardcoded winter offset (UTC-5) would say Jul 14 23:30 → Jul 14.
-        assert company_day_sentinel(0) == datetime(2026, 7, 15, tzinfo=UTC)
+        assert local_day_sentinel(0) == datetime(2026, 7, 15, tzinfo=UTC)
 
 
 # ── snooze_task: undated → company-local tomorrow sentinel ──────────────
@@ -131,6 +147,21 @@ class TestSnoozeCompanyDay:
         snoozed = snooze_task(db_session, task.id)  # days=None default branch
         assert snoozed is not None
         assert as_utc(snoozed.due_at) == datetime(2026, 1, 15, tzinfo=UTC)
+
+    @freeze_time(_EVENING_EASTERN)
+    def test_snooze_honors_viewer_zone_when_set(self, db_session, test_user, test_requisition):
+        # Per-user display_timezone WINS over the company fallback: at 01:30 UTC a
+        # Tokyo viewer's today is ALREADY Jan 15 (10:30 JST), so their "tomorrow"
+        # is Jan 16 — while the company-fallback answer is Jan 15. Company-only
+        # day math would hand a Tokyo viewer the wrong day.
+        task = _add_task(db_session, user_id=test_user.id, req=test_requisition)
+        token = current_user_display_tz_var.set("Asia/Tokyo")
+        try:
+            snoozed = snooze_task(db_session, task.id, days=1)
+        finally:
+            current_user_display_tz_var.reset(token)
+        assert snoozed is not None
+        assert as_utc(snoozed.due_at) == datetime(2026, 1, 16, tzinfo=UTC)
 
     @freeze_time(_EVENING_EASTERN)
     def test_snooze_dated_task_still_advances_by_exact_days(self, db_session, test_user, test_requisition):

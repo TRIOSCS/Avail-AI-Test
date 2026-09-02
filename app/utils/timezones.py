@@ -4,12 +4,15 @@ Storage stays UTC (the ``UTCDateTime`` convention is unchanged). This module is 
 single mechanism for rendering those UTC instants in a specific user's IANA timezone:
 
   - ``is_valid_timezone`` / ``resolve_zoneinfo`` — validate + resolve an IANA name.
-  - ``company_zoneinfo`` / ``company_day_sentinel`` — the ONE company operating zone
-    (``settings.company_timezone``) and company-local day-boundary math for the
-    calendar-date ``due_at`` sentinel convention (UTC midnight of the meant date).
+  - ``company_zoneinfo`` — the business-DEFAULT zone (``settings.company_timezone``),
+    the fallback whenever a viewer's zone is unknown; per-user display_timezone wins.
+  - ``local_day_sentinel`` — day-boundary math for the calendar-date ``due_at``
+    sentinel convention (the meant date at UTC midnight): the CURRENT VIEWER's
+    calendar day N days out, matching ``_task_due_state``'s bucketing zone.
   - ``current_display_zoneinfo`` — the CURRENT request's viewer zone, read from the
-    ``current_user_display_tz_var`` contextvar (set by ``require_user``), falling back
-    to the company zone when unknown.
+    ``current_user_display_tz_var`` contextvar (set by the async AuditUserMiddleware —
+    a sync dependency would lose the ContextVar in the threadpool), falling back to
+    the company zone when unknown.
   - ``to_display_tz`` / ``format_localtime`` / ``format_localdate`` — convert/format a
     UTC datetime, defaulting to the current viewer zone but accepting an explicit zone
     (for server-side use like emails, where there is no request contextvar).
@@ -21,7 +24,8 @@ declaring private copies.
 
 Called by: app/template_env.py (the ``localtime``/``localdate`` Jinja filters and
     ``_task_due_state``), app/routers/htmx/settings.py (the timezone endpoint),
-    app/dependencies.py (populating the contextvar), services/jobs (``as_utc``).
+    app/main.py AuditUserMiddleware (populating the contextvar),
+    app/services/task_service.py (``local_day_sentinel``), services/jobs (``as_utc``).
     Reusable by services/emails.
 Depends on: stdlib zoneinfo + app/request_context.py (pure stdlib); app/config.py
     (lazy import inside company_zoneinfo, avoiding an import cycle).
@@ -66,12 +70,14 @@ def is_valid_timezone(name: str | None) -> bool:
 
 
 def company_zoneinfo() -> ZoneInfo:
-    """The single company-wide operating zone (``settings.company_timezone``).
+    """The business-DEFAULT zone (``settings.company_timezone``), config-driven.
 
-    Decision O: ONE company timezone — the zone that decides where a calendar day
-    starts/ends for day-boundary math (task due buckets, snooze-to-tomorrow). Read
-    at call time so env/monkeypatched settings take effect; an invalid name falls
-    back to DEFAULT_DISPLAY_TZ. ZoneInfo caches instances by key, so this is cheap.
+    Decision O residual: the ONE company-configurable default — the zone every
+    timezone fallback resolves to when a viewer's display_timezone is unknown
+    (NULL / invalid / no request context, e.g. background jobs). A set per-user
+    display_timezone always wins (``current_display_zoneinfo``). Read at call time
+    so env/monkeypatched settings take effect; an invalid name falls back to
+    DEFAULT_DISPLAY_TZ. ZoneInfo caches instances by key, so this is cheap.
     """
     from ..config import settings
 
@@ -81,19 +87,24 @@ def company_zoneinfo() -> ZoneInfo:
     return ZoneInfo(DEFAULT_DISPLAY_TZ)
 
 
-def company_day_sentinel(days_ahead: int = 0, now: datetime | None = None) -> datetime:
-    """UTC-midnight sentinel for the company-local date *days_ahead* days from today.
+def local_day_sentinel(days_ahead: int = 0, now: datetime | None = None) -> datetime:
+    """UTC-midnight sentinel for the CURRENT VIEWER's calendar day *days_ahead* days
+    out.
 
     Task ``due_at`` values are calendar-date sentinels: the DATE half is the day the
     user means, stored at 00:00 UTC (``_parse_task_due_date``), and consumers read it
-    back with ``due.date()`` — never a zone conversion. This helper produces that
-    sentinel for "today"/"tomorrow"/"N days out" with TODAY judged in the COMPANY
-    zone: at 8:30pm Eastern (01:30 UTC next day) ``company_day_sentinel(1)`` is the
-    next EASTERN day, where raw UTC math would skip a day. *now* defaults to the
-    current instant; naive values are treated as stored-UTC (``as_utc``).
+    back with ``due.date()`` — NEVER a zone conversion (a local-midnight instant would
+    roll the date for east-of-UTC zones). This helper produces that sentinel for
+    "today"/"tomorrow"/"N days out" with TODAY judged in the SAME zone
+    ``_task_due_state`` buckets by — ``current_display_zoneinfo()``: the viewer's
+    display_timezone, falling back to the company zone (no request context, e.g.
+    background jobs, resolves to the company zone too). At 8:30pm Eastern (01:30 UTC
+    next day) ``local_day_sentinel(1)`` is the next EASTERN day, where raw UTC math
+    would skip a day; a Tokyo-configured viewer gets THEIR tomorrow. *now* defaults
+    to the current instant; naive values are treated as stored-UTC (``as_utc``).
     """
     instant = as_utc(now) if now is not None else datetime.now(UTC)
-    day = instant.astimezone(company_zoneinfo()).date() + timedelta(days=days_ahead)
+    day = instant.astimezone(current_display_zoneinfo()).date() + timedelta(days=days_ahead)
     return datetime.combine(day, time.min, tzinfo=UTC)
 
 
