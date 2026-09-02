@@ -1,5 +1,8 @@
 // Data validation tests for AvailAI — verifies API input validation and error handling.
 // Tests malformed requests, boundary conditions, and response schemas.
+// Runs AUTHED (storageState from e2e/auth.setup.ts) — validation semantics are
+// auth-independent, so the assertions are unchanged apart from dropping the
+// 401/307 members from two status sets. No test may CREATE rows.
 // Called by: npx playwright test --project=data-validation
 // Depends on: app/routers/materials.py, app/routers/auth.py
 
@@ -22,12 +25,12 @@ test.describe('Input Validation', () => {
 
   test('GET /api/materials rejects negative offset', async ({ request }) => {
     const res = await request.get('/api/materials?offset=-1');
-    expect([200, 400, 401, 422, 307]).toContain(res.status());
+    expect([200, 400, 422]).toContain(res.status());
   });
 
   test('GET /api/materials handles very large limit', async ({ request }) => {
     const res = await request.get('/api/materials?limit=999999');
-    expect([200, 400, 401, 422, 307]).toContain(res.status());
+    expect([200, 400, 422]).toContain(res.status());
   });
 });
 

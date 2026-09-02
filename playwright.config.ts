@@ -58,7 +58,12 @@ export default defineConfig({
     // every commit. Filtered --project runs auto-include dependencies, so
     // CI's explicit project list needs no change.
     { name: 'setup', testMatch: /auth\.setup\.ts$/ },
-    { name: 'api', testMatch: /api\.spec\.ts$/ },
+    {
+      name: 'api',
+      testMatch: /api\.spec\.ts$/,
+      dependencies: ['setup'],
+      use: { storageState: STORAGE_STATE },
+    },
     // auth stays anonymous forever — its purpose IS the anonymous baseline
     // (connected===false, protected-route 401 probes).
     { name: 'auth', testMatch: /auth\.spec\.ts$/ },
@@ -68,7 +73,12 @@ export default defineConfig({
       dependencies: ['setup'],
       use: { storageState: STORAGE_STATE },
     },
-    { name: 'data-validation', testMatch: /data-validation\.spec\.ts$/ },
+    {
+      name: 'data-validation',
+      testMatch: /data-validation\.spec\.ts$/,
+      dependencies: ['setup'],
+      use: { storageState: STORAGE_STATE },
+    },
     { name: 'accessibility', testMatch: /accessibility\.spec\.ts$/ },
     // visual stays anonymous — its committed baseline is login-page.png
     // (author's nightly cron + npm run test:visual stay valid).
@@ -85,7 +95,17 @@ export default defineConfig({
       dependencies: ['setup'],
       use: { storageState: STORAGE_STATE },
     },
-    { name: 'materials-ui', testMatch: /materials-ui\.spec\.ts$/ },
-    { name: 'sales-hub-ui', testMatch: /sales-hub-ui\.spec\.ts$/ },
+    {
+      name: 'materials-ui',
+      testMatch: /materials-ui\.spec\.ts$/,
+      dependencies: ['setup'],
+      use: { storageState: STORAGE_STATE },
+    },
+    {
+      name: 'sales-hub-ui',
+      testMatch: /sales-hub-ui\.spec\.ts$/,
+      dependencies: ['setup'],
+      use: { storageState: STORAGE_STATE },
+    },
   ],
 });

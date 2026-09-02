@@ -1,73 +1,72 @@
 /**
  * materials-ui.spec.ts — UI cleanup verification for materials page.
  *
- * Verifies the accent migration (brand-* → accent-*) and new page-header/
- * Needs-review chip are present in the rendered HTML.
+ * Verifies the accent migration (brand-* → accent-*) and page-header chrome
+ * in the rendered HTML. Runs AUTHED (storageState from e2e/auth.setup.ts,
+ * seeded admin on an EMPTY DB), so content assertions are live — the old
+ * if-200 guards (from the era when no spec logged in) are gone. The commodity
+ * tree accent test needs seeded material_cards and is a round-two skip.
  *
- * QC 08-08 found this spec orphaned (matched by no config project) and
- * failing 8/18 once harnessed: it asserted rendered-HTML content
- * unconditionally, but no spec in this suite performs a real login — every
- * other harnessed spec (dead-ends.spec.ts, workflows.spec.ts,
- * approvals-workspace.*.spec.ts) treats an unauthenticated 401/307 as a
- * legitimate response and only makes content assertions on a 200. This
- * file now follows that same convention instead of assuming auth.
+ * NO test here may CREATE rows: the suite shares one serial in-memory DB and
+ * other projects assert empty states.
  *
  * Called by: npx playwright test --project=materials-ui
- * Depends on: running app server in TESTING=1 mode
+ * Depends on: running app server in TESTING=1 mode (scripts/e2e_server.py)
  */
 
 import { test, expect } from '@playwright/test';
 
 test.describe('materials workspace UI', () => {
-  test('workspace partial returns non-empty HTML or auth redirect', async ({ request }) => {
+  test('workspace partial renders authed with page chrome', async ({ request }) => {
     const res = await request.get('/v2/partials/materials/workspace', {
       headers: { 'HX-Request': 'true' },
     });
-    expect(res.status()).toBeLessThan(500);
-    if (res.status() === 200) {
-      const html = await res.text();
-      // Page header "Materials" title
-      expect(html).toContain('Materials');
-      // Needs-review attention chip
-      expect(html).toContain('Needs review');
-      // Accent classes present (accent migration)
-      expect(html).toContain('accent-');
-      // No hand-rolled Add-part bg-brand-500 button remains
-      expect(html).not.toContain('bg-brand-500 text-white text-sm font-medium rounded-lg hover:bg-brand-600');
-    }
+    expect(res.status()).toBe(200);
+    const html = await res.text();
+    // Page header "Materials" title
+    expect(html).toContain('Materials');
+    // Workspace root marker (replaces the stale 'Needs review' chip assert —
+    // that literal no longer exists anywhere under app/).
+    expect(html).toContain('id="materials-workspace"');
+    // Accent classes present (accent migration)
+    expect(html).toContain('accent-');
+    // No hand-rolled Add-part bg-brand-500 button remains
+    expect(html).not.toContain('bg-brand-500 text-white text-sm font-medium rounded-lg hover:bg-brand-600');
   });
 
   test('materials workspace partial uses .chip for removable filter pills', async ({ request }) => {
     const res = await request.get('/v2/partials/materials/workspace', {
       headers: { 'HX-Request': 'true' },
     });
-    expect(res.status()).toBeLessThan(500);
-    if (res.status() === 200) {
-      const html = await res.text();
-      // .chip class replaces hand-rolled inline-flex... rounded-full blocks
-      expect(html).toContain('class="chip');
-    }
+    expect(res.status()).toBe(200);
+    const html = await res.text();
+    // .chip class replaces hand-rolled inline-flex... rounded-full blocks
+    // (removable_chip is emitted unconditionally in the template source).
+    expect(html).toContain('class="chip');
   });
 
-  test('materials list partial returns non-empty HTML or auth redirect', async ({ request }) => {
+  test('materials faceted list renders authed', async ({ request }) => {
     const res = await request.get('/v2/partials/materials/faceted', {
       headers: { 'HX-Request': 'true' },
     });
-    expect(res.status()).toBeLessThan(500);
+    expect(res.status()).toBe(200);
+    const html = await res.text();
+    expect(html.trim().length, 'faceted list returned empty response').toBeGreaterThan(10);
   });
 
-  test('commodity tree partial uses accent active state', async ({ request }) => {
+  test('commodity tree partial uses accent active state', { tag: '@needs-data' }, async ({ request }) => {
+    test.skip(true, 'round-2 (owner-gated): needs seeded content data');
+    // The tree renders branches only when count > 0 (tree.html count-gate);
+    // with zero material_cards the asserted accent classes cannot appear.
+    // round-2: with seeded material_cards, assert accent-100/accent-500 and
+    // the absence of the old bg-brand-100 active state.
     const res = await request.get('/v2/partials/materials/filters/tree', {
       headers: { 'HX-Request': 'true' },
     });
-    expect(res.status()).toBeLessThan(500);
-    if (res.status() === 200) {
-      const html = await res.text();
-      // Active branch uses accent-100 / accent-800 / accent-500 now
-      expect(html).toContain('accent-100');
-      expect(html).toContain('accent-500');
-      // Old brand-100 active state must not appear
-      expect(html).not.toContain("bg-brand-100 text-brand-800");
-    }
+    expect(res.status()).toBe(200);
+    const html = await res.text();
+    expect(html).toContain('accent-100');
+    expect(html).toContain('accent-500');
+    expect(html).not.toContain('bg-brand-100 text-brand-800');
   });
 });
