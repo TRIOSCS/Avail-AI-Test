@@ -404,7 +404,8 @@ def _task_due_state(task, now_utc: datetime) -> tuple[bool, bool]:
     (not datetimes) also sidesteps the naive/aware TypeError under SQLite.
 
     "Today" is the CURRENT VIEWER's local day (``current_display_zoneinfo()`` — their
-    ``display_timezone``, falling back to the business default when unknown): ``now`` is a
+    ``display_timezone``, falling back to the company zone,
+    ``settings.company_timezone``, when unknown): ``now`` is a
     real instant, so it is converted before taking its date. A buyer in Asia/Tokyo near UTC
     midnight therefore sees a task due on THEIR calendar day as "today", not "overdue".
     ``due_at`` is NOT converted — it is a UTC-midnight sentinel for the calendar date the

@@ -4,9 +4,12 @@ Storage stays UTC (the ``UTCDateTime`` convention is unchanged). This module is 
 single mechanism for rendering those UTC instants in a specific user's IANA timezone:
 
   - ``is_valid_timezone`` / ``resolve_zoneinfo`` — validate + resolve an IANA name.
+  - ``company_zoneinfo`` / ``company_day_sentinel`` — the ONE company operating zone
+    (``settings.company_timezone``) and company-local day-boundary math for the
+    calendar-date ``due_at`` sentinel convention (UTC midnight of the meant date).
   - ``current_display_zoneinfo`` — the CURRENT request's viewer zone, read from the
     ``current_user_display_tz_var`` contextvar (set by ``require_user``), falling back
-    to ``DEFAULT_DISPLAY_TZ`` when unknown.
+    to the company zone when unknown.
   - ``to_display_tz`` / ``format_localtime`` / ``format_localdate`` — convert/format a
     UTC datetime, defaulting to the current viewer zone but accepting an explicit zone
     (for server-side use like emails, where there is no request contextvar).
@@ -20,23 +23,25 @@ Called by: app/template_env.py (the ``localtime``/``localdate`` Jinja filters an
     ``_task_due_state``), app/routers/htmx/settings.py (the timezone endpoint),
     app/dependencies.py (populating the contextvar), services/jobs (``as_utc``).
     Reusable by services/emails.
-Depends on: stdlib zoneinfo + app/request_context.py (pure stdlib).
+Depends on: stdlib zoneinfo + app/request_context.py (pure stdlib); app/config.py
+    (lazy import inside company_zoneinfo, avoiding an import cycle).
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time, timedelta
 from functools import lru_cache
 from typing import overload
 from zoneinfo import ZoneInfo, available_timezones
 
 from ..request_context import current_user_display_tz_var
 
-# Fallback zone when a viewer's timezone is unknown (NULL display_timezone / no request
-# context / an invalid stored value). America/New_York is the business operating zone —
-# the SAME zone the background workers hard-code and the buyplan auto-complete default
-# (config.buyplan_auto_complete_tz) use — so an un-detected user's "today"/"overdue" and
-# rendered timestamps match the prior app-wide behaviour rather than jumping to UTC.
+# Last-resort zone when even config.company_timezone is unset/invalid, and the pinned
+# business zone for a few server-side renders (quote_send, prepayment_notifications).
+# America/New_York is the business operating zone — the SAME zone the background workers
+# hard-code and the buyplan auto-complete default (config.buyplan_auto_complete_tz) use.
+# Runtime fallbacks resolve through company_zoneinfo() (config-driven) first; this
+# constant only backstops an invalid COMPANY_TIMEZONE env value.
 DEFAULT_DISPLAY_TZ = "America/New_York"
 
 _DEFAULT_TIME_FMT = "%b %d, %Y %H:%M"
@@ -60,15 +65,47 @@ def is_valid_timezone(name: str | None) -> bool:
     return name in _valid_names()
 
 
+def company_zoneinfo() -> ZoneInfo:
+    """The single company-wide operating zone (``settings.company_timezone``).
+
+    Decision O: ONE company timezone — the zone that decides where a calendar day
+    starts/ends for day-boundary math (task due buckets, snooze-to-tomorrow). Read
+    at call time so env/monkeypatched settings take effect; an invalid name falls
+    back to DEFAULT_DISPLAY_TZ. ZoneInfo caches instances by key, so this is cheap.
+    """
+    from ..config import settings
+
+    name = settings.company_timezone
+    if name and name in _valid_names():
+        return ZoneInfo(name)
+    return ZoneInfo(DEFAULT_DISPLAY_TZ)
+
+
+def company_day_sentinel(days_ahead: int = 0, now: datetime | None = None) -> datetime:
+    """UTC-midnight sentinel for the company-local date *days_ahead* days from today.
+
+    Task ``due_at`` values are calendar-date sentinels: the DATE half is the day the
+    user means, stored at 00:00 UTC (``_parse_task_due_date``), and consumers read it
+    back with ``due.date()`` — never a zone conversion. This helper produces that
+    sentinel for "today"/"tomorrow"/"N days out" with TODAY judged in the COMPANY
+    zone: at 8:30pm Eastern (01:30 UTC next day) ``company_day_sentinel(1)`` is the
+    next EASTERN day, where raw UTC math would skip a day. *now* defaults to the
+    current instant; naive values are treated as stored-UTC (``as_utc``).
+    """
+    instant = as_utc(now) if now is not None else datetime.now(UTC)
+    day = instant.astimezone(company_zoneinfo()).date() + timedelta(days=days_ahead)
+    return datetime.combine(day, time.min, tzinfo=UTC)
+
+
 def resolve_zoneinfo(name: str | None) -> ZoneInfo:
-    """Return a ZoneInfo for *name*, or the DEFAULT_DISPLAY_TZ zone when it is not
-    valid.
+    """Return a ZoneInfo for *name*, or the company zone (``company_zoneinfo``) when it
+    is not valid.
 
     ZoneInfo caches instances by key internally, so repeated calls are cheap.
     """
     if name and is_valid_timezone(name):
         return ZoneInfo(name)
-    return ZoneInfo(DEFAULT_DISPLAY_TZ)
+    return company_zoneinfo()
 
 
 def current_display_zoneinfo() -> ZoneInfo:
