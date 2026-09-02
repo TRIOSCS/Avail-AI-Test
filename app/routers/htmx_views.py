@@ -230,6 +230,7 @@ async def v2_shell(request: Request, partial: str = "", db: Session = Depends(ge
 @router.get("/v2/trouble-tickets", response_class=HTMLResponse)
 @router.get("/v2/trouble-tickets/{ticket_id:int}", response_class=HTMLResponse)
 @router.get("/v2/my-day", response_class=HTMLResponse)
+@router.get("/v2/reports", response_class=HTMLResponse)
 async def v2_page(request: Request, db: Session = Depends(get_db)):
     """Full page load — serves base.html with initial content via HTMX."""
 
@@ -259,6 +260,7 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         "leads",
         "trouble-tickets",
         "my-day",
+        "reports",
         "crm",
         # "vendor-contacts" / "contacts" must precede "vendors" / "customers" — the
         # match is a substring test and "/contacts" is contained in "/vendor-contacts".
