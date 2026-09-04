@@ -209,7 +209,7 @@ def _lead_detail_ctx(request: Request, user: User, db: Session, lead_id: int) ->
     drift between them. Raises 404 for an unknown lead.
     """
     from ...models.sourcing_lead import LeadEvidence, SourcingLead
-    from ...services.sourcing_leads import _source_category
+    from ...services.sourcing_leads import _source_category, listing_links_for_sighting
 
     lead = db.query(SourcingLead).filter(SourcingLead.id == lead_id).first()
     if not lead:
@@ -260,6 +260,7 @@ def _lead_detail_ctx(request: Request, user: User, db: Session, lead_id: int) ->
             "requirement": requirement,
             "vendor_card": vendor_card,
             "best_sighting": best_sighting,
+            "listing_links": listing_links_for_sighting(best_sighting),
         }
     )
     return ctx
