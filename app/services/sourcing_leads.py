@@ -555,6 +555,50 @@ def _source_reference(sighting: Sighting) -> str:
     )
 
 
+LISTING_URL_KEYS = ("click_url", "octopart_url", "vendor_url")
+
+
+def _safe_listing_url(value: object) -> str | None:
+    """Absolute http(s) URLs only.
+
+    raw_data is vendor-supplied, so a javascript:/data: value (or a relative path, or
+    junk) must never reach an href. Anything that is not an absolute http(s) URL returns
+    None and renders nothing.
+    """
+    if not isinstance(value, str):
+        return None
+    url = value.strip()
+    if not url.startswith(("http://", "https://")):
+        return None
+    return url
+
+
+def listing_links_for_sighting(sighting: Sighting | None) -> dict[str, str | None]:
+    """Source-listing URLs a buyer can click through to, read off Sighting.raw_data.
+
+    Sightings carry the originating listing under click_url / octopart_url / vendor_url
+    (none of them promoted to columns). Every key is always present — None when absent
+    or rejected — so templates can test them directly.
+    """
+    raw = (sighting.raw_data or {}) if sighting is not None else {}
+    if not isinstance(raw, dict):
+        return dict.fromkeys(LISTING_URL_KEYS)
+
+    links: dict[str, str | None] = {}
+    for key in LISTING_URL_KEYS:
+        value = raw.get(key)
+        safe = _safe_listing_url(value)
+        if value and not safe:
+            logger.debug(
+                "Dropped non-http listing url on sighting {}: {}={!r}",
+                getattr(sighting, "id", None),
+                key,
+                value,
+            )
+        links[key] = safe
+    return links
+
+
 def _source_name(source_type: str) -> str:
     st = (source_type or "").strip()
     return st.title() if st else "Unknown"
