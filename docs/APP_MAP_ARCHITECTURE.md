@@ -59,7 +59,7 @@ deploy can't race DDL — the loser blocks until the winner finishes, then
 no-ops. Per-process DB pool sizing (`DB_POOL_SIZE`/`DB_MAX_OVERFLOW`, default
 5+5) is budgeted against Postgres `max_connections=100` across every process
 that imports `app/database.py`; the full connection-budget table (2 app
-workers + scheduler + enrichment-worker + 3 host workers = 70 of 100, 30
+workers + scheduler + enrichment-worker + 4 host workers = 70 of 100, 30
 headroom) lives in the comment above the module-level `engine` in
 `app/database.py`.
 
@@ -571,12 +571,23 @@ authoritative reference. Static-analysis tests in
    Teams API         DigiKey              Explorium API
    8x8 API           Mouser
                      Element14
-                     eBay
                      OEMSecrets
                      SourceEngine
-                     ICS/NC Workers (browser)
+                     ICS/NC/TBF Workers (browser)
+                     eBay Worker (Browse API poller)
                      Email Mining (local)
 ```
+
+**Synchronous vs worker-backed supplier sources.** The synchronous column above
+is what `search_service._build_connectors` fans out on a search. Four supplier
+sources are NOT in it: `icsource`, `netcomponents` and `thebrokersite` (browser
+workers), plus `ebay` — a queue-driven **Browse API poller**
+(`app/services/ebay_worker`, systemd `avail-ebay-worker`). A requirement reaches
+all four through `search_service._worker_enqueues()`, and their results land as
+Sightings asynchronously. `EbayConnector` still exists — the Settings →
+Connectors Test button, the `health_monitor` credential ping, and
+`enrichment.harvest_ebay_titles` all build it via `connector_registry` — it is
+simply no longer part of the search fan-out.
 
 ## Background Jobs (APScheduler)
 
@@ -586,7 +597,7 @@ authoritative reference. Static-analysis tests in
 | requirement_refresh | 4 hours | Re-search stale requirements |
 | proactive_matcher | 4 hours | Match live offers to requirement history (24mo, any status) + hotlists |
 | proactive_digest_drafts | Weekly (Mon 07:00) | Generate per-salesperson digest DRAFTS (human reviews + sends) |
-| hotlist_research | Weekly (Sun 02:00) — **FLAG-OFF** (`hotlist_research_enabled=False`) | Re-search hotlist demand (part-level + requisition-level) through ICS/NC/TBF; cap `hotlist_research_max_parts`/run, workers' 7-day dedup bounds connector load. Owner enables later (see master backlog) |
+| hotlist_research | Weekly (Sun 02:00) — **FLAG-OFF** (`hotlist_research_enabled=False`) | Re-search hotlist demand (part-level + requisition-level) through ICS/NC/TBF/eBay; cap `hotlist_research_max_parts`/run, workers' 7-day dedup bounds connector load. Owner enables later (see master backlog) |
 | vendor_scorer | Daily | Update vendor reliability scores |
 | health_check | 5 min | DB, Redis, API connector health |
 | backup | 6 hours | pg_dump |
@@ -666,6 +677,31 @@ sources' counts. See APP_MAP_INTERACTIONS § Cross-app alerts.
 | `sources/` | Concrete sources, registered centrally on import: `OfferConfirmedSource`→`requisitions` (Sales Hub, FYI), `BuyplanActionSource`→`buy-plans` (ACTION), `InboundCustomerSource`→`crm` (FYI). Tab keys match the `mobile_nav.html` nav ids. |
 
 Router `app/routers/alerts.py` (registered in `main.py`): `GET /v2/partials/alerts/{tab_key}/badge` (emerald nav pill, fail-quiet) + `POST /v2/partials/alerts/{kind}/seen` (idempotent; returns the owning tab's refreshed nav badge as an OOB swap). Constants: `AlertKind` StrEnum (`app/constants.py`). Config: `alert_recency_days` (30) + `alerts_epoch` (`app/config.py`). Frontend: emerald count badges in `mobile_nav.html` (Sales Hub / Buy Plans / CRM, polled every 60s — same pattern as Proactive); the shared spotlight module + `.alert-rail`/`.tab-alert-pill` styles in `htmx_app.js` / `styles.css`; rows stamped by the `alert_row_attrs` macro in `partials/shared/_alert_macros.html` (fed by `markers_for_tab` via the parts list, buy_plans list, and CDM account list).
+
+## Search Worker Modules (`app/services/{ics,nc,tbf,ebay}_worker/`)
+
+Four queue-driven search workers run as host systemd units, sharing the queue /
+save / breaker plumbing in `app/services/search_worker_base/` (`QueueManager`,
+`save_sightings`, `CircuitBreakerBase`, `SearchScheduler`, `AIGate`,
+`monitoring`). Three drive a real browser; the fourth polls an HTTP API.
+
+| Worker | Transport | Package | Modules beyond the shared base |
+|--------|-----------|---------|--------------------------------|
+| ICS / NC / TBF | Patchright + system Chrome (Xvfb) | `ics_worker/`, `nc_worker/`, `tbf_worker/` | `session_manager`, `search_engine`, `result_parser`, `ai_gate`, `circuit_breaker` |
+| eBay | HTTPS — Browse API `item_summary/search` | `ebay_worker/` | `search_client`, `result_parser`, `scheduler`, `circuit_breaker` — **no** session manager, search engine, human-behavior or AI gate |
+
+`ebay_worker` modules:
+
+| Module | Purpose |
+|--------|---------|
+| `search_client.py` | Paged `item_summary/search` calls (limit/offset up to `EBAY_MAX_PAGES`), marketplace header, buying-option filter. The OAuth bearer comes from `app/connectors/ebay.get_ebay_access_token`, so worker and connector share ONE process-wide cached token. Item detail pages are never fetched. |
+| `result_parser.py` | JSON payload → `EbaySighting`. Strict part-number match (alphanumeric-normalized MPN must appear in the alphanumeric-normalized title, with the Dell leading-zero variant `0F8NV`/`F8NV` accepted); drops `conditionId` 7000 and auction-only listings; maps eBay condition labels to new/refurb/used; scores confidence 0.55–0.95. |
+| `sighting_writer.py` | `EbaySighting` → Sighting rows via the shared skeleton, passing its own `dedup_key_fn` so dedup keys on `(vendor, ebay_item_id)`. |
+| `scheduler.py` | Flat `EBAY_MIN_DELAY_SECONDS` pacing + a daily Browse API call budget that resets at midnight UTC. Deliberately NOT the shared `SearchScheduler` (business hours and random coffee breaks exist to make a BROWSER look human; an API poller needs a rate-limit allowance instead). |
+| `circuit_breaker.py` | Trips immediately on a 401/403 that survived the token re-mint (wrong credentials — hammering eBay will not fix that), after 3 consecutive transport/5xx failures, or on the base class's 10-empty-result streak. |
+
+Budget state (`calls_today` / `budget_day`) lives on the `ebay_worker_status`
+singleton, so a restart mid-day does not hand the worker a fresh allowance.
 
 ## Enrichment Worker Modules (`app/services/enrichment_worker/`)
 

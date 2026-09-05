@@ -299,6 +299,9 @@ sightings.py (router) → search_requirement(req, db)
     +---> enqueue_for_ics_search(requirement_id, db)   # browser worker queue
     +---> enqueue_for_nc_search(requirement_id, db)    # browser worker queue
     +---> enqueue_for_tbf_search(requirement_id, db)   # browser worker queue (The Broker Forum)
+    +---> enqueue_for_ebay_search(requirement_id, db)  # API-poller worker queue (eBay Browse API)
+          (all four resolved from search_service._worker_enqueues() — add a
+           worker THERE, never at the individual enqueue sites)
     |
     +---> _save_sightings + scoring + material card upsert
     |
@@ -828,25 +831,44 @@ robustness items that do not change the retry/breaker/health semantics above:
   are still built fresh per call; `_reset_connector_config_cache()` forces
   immediate freshness after a Settings → Sources credential/status mutation.
 
-### Browser-worker carve-out
+### Worker-backed sources (browser workers + the eBay API poller)
 
-`icsource`, `netcomponents`, and `thebrokersite` are queue-driven via
-`avail-ics-worker` / `avail-nc-worker` / `avail-tbf-worker` rather than
-request/response connectors. They have no
-entry in `_get_connector_for_source`, so the 15-min ping loop would flip
-them to DISABLED on every run. `app.constants.BROWSER_WORKER_SOURCES`
-holds this set, and `run_health_checks` excludes those names from the
-ping loop. Their `api_sources` row is seeded to `LIVE` + `is_active=True`
-once at startup by `seed_browser_worker_sources` (see `app/startup.py`)
-and the seed survives because the ping loop never touches them. Their
-actual health is tracked via `IcsWorkerStatus` / `NcWorkerStatus` /
-`TbfWorkerStatus` heartbeats; all three singletons are seeded at startup so
+Four `api_sources` rows are **queue-driven** rather than request/response
+connectors: `icsource`, `netcomponents`, `thebrokersite` (browser workers) and
+`ebay` (an API poller). All four are listed in
+`connector_service.WORKER_BACKED_SOURCES` and all four surface heartbeat health
+on the Connectors tab. They split on ONE axis — whether the health_monitor ping
+loop can still probe them:
+
+| | ICS / NC / TBF | eBay |
+|---|---|---|
+| Transport | Patchright + Chrome + Xvfb | HTTPS (Browse API) |
+| Credentials | host-only `.env.<worker>` login | `EBAY_CLIENT_ID`/`_SECRET`, DB-first via Settings → Connectors |
+| In `_get_connector_for_source` | no | **yes** (`EbayConnector`) |
+| In `BROWSER_WORKER_SOURCES` | yes → excluded from the ping loop, seeded LIVE | **no** → health_monitor keeps pinging the real credentials |
+| Settings "Test" button | hidden (no probe exists) | shown (the probe exists) |
+| Gate before searching | AI commodity gate | none — every queued MPN is searched, spend is bounded by a daily call budget |
+
+The three BROWSER workers have no entry in `_get_connector_for_source`, so the
+15-min ping loop would flip them to DISABLED on every run.
+`app.constants.BROWSER_WORKER_SOURCES` holds exactly that set, and
+`run_health_checks` excludes those names from the ping loop. Their `api_sources`
+row is seeded to `LIVE` + `is_active=True` once at startup by
+`seed_browser_worker_sources` (see `app/startup.py`) and the seed survives
+because the ping loop never touches them. eBay is deliberately NOT in that set:
+it owns real OAuth credentials, so a genuine auth/quota failure SHOULD flip its
+`api_sources` status the way it does for any other API.
+
+Health is tracked via `IcsWorkerStatus` / `NcWorkerStatus` / `TbfWorkerStatus` /
+`EbayWorkerStatus` heartbeats; all four singletons are seeded at startup
+(`seed_browser_workers` → `seed_*_worker_status_singleton`) so
 `update_worker_status()` writes are not silently dropped. Each worker
-(ics, nc, tbf, and enrichment) refreshes `last_heartbeat` on **every** loop
+(ics, nc, tbf, ebay, and enrichment) refreshes `last_heartbeat` on **every** loop
 tick via `_record_heartbeat()` at the top of the loop — so the heartbeat
 reflects process liveness independent of work, and stays fresh on idle /
-cap-sleep / breaker-open / off-hours paths (a liveness monitor reading
-`last_heartbeat` won't false-alarm "DOWN" while a worker is merely paused).
+cap-sleep / budget-spent / breaker-open / off-hours paths (a liveness monitor
+reading `last_heartbeat` won't false-alarm "DOWN" while a worker is merely
+paused).
 The enrichment worker's LONG (~1h) daily-cap and circuit-breaker sleeps would
 otherwise let the heartbeat lapse mid-sleep and false-alarm the watchdog, so
 those two sleeps run through `_sleep_with_heartbeat()` — it splits the hour into
@@ -859,7 +881,7 @@ shutdown flag so SIGTERM exits within one chunk).
 **Proactive liveness watchdog.** Beyond the on-demand Connectors-page read, a
 scheduler job (`app/jobs/worker_liveness_jobs.py`, registered by
 `register_worker_liveness_jobs`, runs every `settings.worker_liveness_check_minutes`)
-actively consumes `last_heartbeat` for all four singletons (ics, nc, tbf,
+actively consumes `last_heartbeat` for all five singletons (ics, nc, tbf, ebay,
 enrichment). When a worker that claims `is_running` has a heartbeat that is
 NULL/never-seen or older than `settings.worker_heartbeat_stale_minutes`, or its
 circuit breaker is open, it emits a debounced alert (Loguru + Sentry via
@@ -875,7 +897,7 @@ the scheduler. Tests: `tests/test_worker_liveness.py`.
 NOT render a worker-backed source as "broken"/"no API"/"needs setup" just
 because it has no direct API key. `connector_service.is_worker_backed()` (the
 explicit `WORKER_BACKED_SOURCES` map: `thebrokersite`→tbf, `netcomponents`→nc,
-`icsource`→ics) routes these sources through `connector_service.worker_health()`
+`icsource`→ics, `ebay`→ebay) routes these sources through `connector_service.worker_health()`
 instead of the key/credential ladder. `worker_health(row)` reads the heartbeat
 singleton and returns a verdict (`healthy`, `heartbeat_age_secs`,
 `last_search_at`, `problem`); a worker is **unhealthy** when the row is missing,
@@ -885,8 +907,12 @@ or the circuit breaker is open. `connector_state()` then yields two
 worker-specific states for active worker sources — `worker_active` (badge
 "Worker active" + heartbeat age + last search) and `worker_down` (badge "Worker
 down" + the specific problem) — or `off` when the operator has switched the
-source off. Worker-backed sources are never offered the synchronous API "Test"
-button (their health is the heartbeat, not a request/response probe). The
+source off. Whether a worker-backed source is offered the synchronous
+"Test" button is derived from `connector_registry.source_has_test_path()`, not from
+worker-backed-ness itself: the three browser workers have no connector to build, so
+their cards show no button (their health is the heartbeat, not a request/response
+probe), while eBay's OAuth credentials DO build an `EbayConnector`, so its Test
+button and health_monitor ping keep working. The
 header/group live-vs-need-setup counters treat `worker_active` as live and
 `worker_down` as needing attention. Logic in `app/services/connector_service.py`;
 heartbeat read + enrich in `htmx_views._enrich_source` /
@@ -1190,7 +1216,7 @@ offers-tab review approve) after the offer persists (same transaction) —
 matching) and clone paths never release. Expired/released records render as
 labeled advisory states, never silent suppression.
 
-**Re-stamping at every sighting-persistence path.** Each of the eight code paths
+**Re-stamping at every sighting-persistence path.** Each of the nine code paths
 that persist fresh Sighting rows calls `apply_to_fresh_sightings(db,
 requirement, rows)` — which embeds the O1/O2/O3 matrix, so every path gets
 policy behavior for free — in its OWN session, right where the rows are created:
@@ -1204,6 +1230,12 @@ policy behavior for free — in its OWN session, right where the rows are create
    worker's module supplies only its marketplace-specific Sighting field mapping. Small
    shared parse helpers, e.g. `parse_quantity`, live in `search_worker_base/parsing.py`.)
 3. `app/services/nc_worker/sighting_writer.py` — same, NetComponents worker.
+   `app/services/ebay_worker/sighting_writer.py` — same, eBay API-poller worker
+   (source_type `ebay`; it passes the shared skeleton's OPTIONAL `dedup_key_fn` hook so
+   dedup keys on `(vendor, ebay_item_id)` instead of the default `(vendor, mpn, qty)` —
+   one seller routinely lists the same part several times at the same quantity, which the
+   default triple would collapse into one row; a stored row with no item id falls back to
+   the default key).
    `app/services/tbf_worker/sighting_writer.py` — same, The Broker Forum worker (ACTIVE: logs in with member creds and captures the real seller `vendor_name` + `vendor_phone` from the authenticated listing — logged-out, TBF anonymizes the seller to "TBS Member"). The session/circuit-breaker key on a POSITIVE, fail-safe logged-in marker (the "Sign out" control present, `session_manager.LOGGED_IN_MARKER`); never on "TBS Member" text, which is the logged-OUT anonymized company label.
 4. `app/routers/sources.py` — email-attachment import (ALSO the HUMAN_DIRECT/O3
    release path: a buyer-routed attachment with qty > 0 releases instead of
@@ -6927,7 +6959,7 @@ registry.)
 | Category | Count | Key Modules |
 |----------|-------|-------------|
 | AI & NLP | 9 | ai_service, ai_email_parser, ai_offer_service, tagging_ai |
-| Search & Prospecting | 30+ | search_worker_base/, ics_worker/, nc_worker/, tbf_worker/, sourcing_leads |
+| Search & Prospecting | 30+ | search_worker_base/, ics_worker/, nc_worker/, tbf_worker/, ebay_worker/, sourcing_leads |
 | Email & Communication | 10 | email_threads, contact_intelligence, signature_parser |
 | Scoring & Matching | 10+ | unified_score, avail_score, multiplier_score, proactive_matching |
 | CRM & Data | 20+ | company_merge, vendor_merge, auto_dedup, enrichment |
@@ -6954,9 +6986,9 @@ deploy.sh
     |       +---> Scan templates for Tailwind color classes
     |       +---> Grep CSS bundle for each class
     |       +---> Warn on any MISSING classes (safelist gap)
-    +---> Step 6b: Host worker venv refresh + restart (nc/ics/tbf)
+    +---> Step 6b: Host worker venv refresh + restart (nc/ics/tbf/ebay)
     |       +---> pip install -r requirements.txt into /root/availai/.venv
-    |       +---> systemctl restart avail-nc-worker avail-ics-worker avail-tbf-worker
+    |       +---> systemctl restart avail-nc-worker avail-ics-worker avail-tbf-worker avail-ebay-worker
     |       +---> WARN (re-surfaced after logs) if venv/restart fails
     +---> Step 7: Tail logs for errors
 ```
@@ -6983,17 +7015,21 @@ partial indexes on the exact `IS NULL` predicates the deferred backfills scan, s
 repeat-boot scans stay O(remaining rows) instead of O(table).
 
 **Host worker dependencies (pinned-lockfile venv).** The `avail-nc-worker`
-/ `avail-ics-worker` / `avail-tbf-worker` systemd units run on the HOST (outside docker, from
-`/root/availai`, `User=root`) and execute
-`/root/availai/.venv/bin/python -m app.services.{nc,ics,tbf}_worker.worker`.
+/ `avail-ics-worker` / `avail-tbf-worker` / `avail-ebay-worker` systemd units run on the
+HOST (outside docker, from `/root/availai`, `User=root`) and execute
+`/root/availai/.venv/bin/python -m app.services.{nc,ics,tbf,ebay}_worker.worker`.
 That venv is built from the SAME pinned `requirements.txt` as the docker
 app/enrichment images (not ad-hoc `pip install patchright beautifulsoup4`),
 so the host workers carry identical pinned deps — notably `patchright`,
-which they use to drive **system Google Chrome** via `channel="chrome"`
-(the bundled Chromium is unused). `deploy.sh` Step 6b refreshes the venv
-from the lockfile and restarts all three units on every deploy;
-`scripts/setup_nc_worker.sh` / `scripts/setup_tbf_worker.sh` bootstrap the venv on a fresh host. The
-unit files live in `deploy/avail-{nc,ics,tbf}-worker.service`.
+which the three BROWSER workers use to drive **system Google Chrome** via
+`channel="chrome"` (the bundled Chromium is unused). `avail-ebay-worker` needs
+none of that: it is an HTTPS poller, so its unit carries no
+`Requires=avail-xvfb.service` and no `DISPLAY`, and its resource caps are half
+the browser workers' (`MemoryMax=1G`, `CPUQuota=25%`). `deploy.sh` Step 6b
+refreshes the venv from the lockfile and restarts all four units on every deploy;
+`scripts/setup_nc_worker.sh` / `scripts/setup_tbf_worker.sh` /
+`scripts/setup_ebay_worker.sh` bootstrap the venv on a fresh host. The unit files
+live in `deploy/avail-{nc,ics,tbf,ebay}-worker.service`.
 
 ---
 
