@@ -45,6 +45,11 @@ from .dedup_decision import DedupDecision, DedupMergeAudit  # noqa: F401
 # Discovery / Prospecting
 from .discovery_batch import DiscoveryBatch  # noqa: F401
 
+# eBay marketplace worker (queue-driven Browse API poller)
+from .ebay_search_log import EbaySearchLog  # noqa: F401
+from .ebay_search_queue import EbaySearchQueue  # noqa: F401
+from .ebay_worker_status import EbayWorkerStatus  # noqa: F401
+
 # Email Intelligence (AI-powered inbox mining)
 from .email_intelligence import EmailIntelligence  # noqa: F401
 
