@@ -1,4 +1,13 @@
-"""EBay Browse API connector — searches electronic components on eBay."""
+"""EBay Browse API connector — searches electronic components on eBay.
+
+Also the home of the shared OAuth client-credentials token helpers
+(``ebay_token_cache_key`` / ``get_ebay_access_token`` /
+``invalidate_ebay_token``). The ebay_worker API poller reuses them so there is
+ONE eBay bearer mint + one process-wide cache entry, rather than a duplicate
+implementation on the worker side. They live here (not on the connector class)
+so a caller that does not want this connector's category-restricted,
+30-result search can still get a token.
+"""
 
 import asyncio
 import base64
@@ -10,14 +19,68 @@ from ..utils import safe_float, safe_int
 from .errors import ConnectorRateLimitError
 from .sources import BaseConnector, _get_cached_token, _invalidate_token, _parse_retry_after
 
+EBAY_TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token"
+EBAY_SEARCH_URL = "https://api.ebay.com/buy/browse/v1/item_summary/search"
+
+
+def ebay_token_cache_key(client_id: str) -> tuple[str, str]:
+    """Process-wide OAuth cache key for an eBay client id.
+
+    Deliberately identical to ``BaseConnector._token_cache_key()`` for
+    EbayConnector so the connector and the worker share ONE cached bearer.
+    """
+    return ("EbayConnector", client_id)
+
+
+async def get_ebay_access_token(client_id: str, client_secret: str) -> str:
+    """Return a cached eBay application bearer, minting one only when needed.
+
+    Client-credentials grant against the api_scope. The bearer is cached
+    process-wide by ``_get_cached_token`` (per-key lock, expiry-aware), so
+    concurrent callers collapse into a single token POST.
+    """
+
+    async def _mint() -> tuple[str, int]:
+        creds = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
+        r = await http.post(
+            EBAY_TOKEN_URL,
+            headers={
+                "Authorization": f"Basic {creds}",
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            data={
+                "grant_type": "client_credentials",
+                "scope": "https://api.ebay.com/oauth/api_scope",
+            },
+            timeout=15,
+        )
+        r.raise_for_status()
+        body = r.json()
+        expires_in = int(body.get("expires_in", 7200))
+        logger.debug("eBay: new token acquired, expires in {}s", expires_in)
+        return body["access_token"], expires_in
+
+    return await _get_cached_token(ebay_token_cache_key(client_id), _mint)
+
+
+def invalidate_ebay_token(client_id: str) -> None:
+    """Drop the cached bearer for ``client_id`` so the next call re-mints (after a
+    401)."""
+    _invalidate_token(ebay_token_cache_key(client_id))
+
 
 class EbayConnector(BaseConnector):
-    """EBay Browse API — OAuth client credentials flow."""
+    """EBay Browse API — OAuth client credentials flow.
+
+    Retained for the Settings -> Connectors Test button, the health_monitor
+    ping, and enrichment's eBay title mining. Requirement fan-out no longer
+    goes through it: eBay search is worker-backed (app/services/ebay_worker).
+    """
 
     source_name: str = "ebay"
 
-    TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token"
-    SEARCH_URL = "https://api.ebay.com/buy/browse/v1/item_summary/search"
+    TOKEN_URL = EBAY_TOKEN_URL
+    SEARCH_URL = EBAY_SEARCH_URL
 
     def __init__(self, client_id: str, client_secret: str):
         super().__init__(timeout=15.0)
@@ -25,27 +88,7 @@ class EbayConnector(BaseConnector):
         self.client_secret = client_secret
 
     async def _get_token(self) -> str:
-        async def _mint() -> tuple[str, int]:
-            creds = base64.b64encode(f"{self.client_id}:{self.client_secret}".encode()).decode()
-            r = await http.post(
-                self.TOKEN_URL,
-                headers={
-                    "Authorization": f"Basic {creds}",
-                    "Content-Type": "application/x-www-form-urlencoded",
-                },
-                data={
-                    "grant_type": "client_credentials",
-                    "scope": "https://api.ebay.com/oauth/api_scope",
-                },
-                timeout=15,
-            )
-            r.raise_for_status()
-            body = r.json()
-            expires_in = int(body.get("expires_in", 7200))
-            logger.debug("eBay: new token acquired, expires in {}s", expires_in)
-            return body["access_token"], expires_in
-
-        return await _get_cached_token(self._token_cache_key(), _mint)
+        return await get_ebay_access_token(self.client_id, self.client_secret)
 
     async def _do_search(self, part_number: str) -> list[dict]:
         if not self.client_id:
@@ -70,7 +113,7 @@ class EbayConnector(BaseConnector):
         r = await http.get(self.SEARCH_URL, headers=headers(token), params=params, timeout=self.timeout)
 
         if r.status_code == 401:
-            _invalidate_token(self._token_cache_key())
+            invalidate_ebay_token(self.client_id)
             token = await self._get_token()
             r = await http.get(self.SEARCH_URL, headers=headers(token), params=params, timeout=self.timeout)
 

@@ -502,8 +502,8 @@ else
     echo "==> no host worker venv (.venv) here — skipping refresh"
 fi
 echo ""
-echo "==> Restarting host worker units (nc/ics/tbf)..."
-for unit in avail-nc-worker avail-ics-worker avail-tbf-worker; do
+echo "==> Restarting host worker units (nc/ics/tbf/ebay)..."
+for unit in avail-nc-worker avail-ics-worker avail-tbf-worker avail-ebay-worker; do
     if ! systemctl cat "${unit}.service" >/dev/null 2>&1; then
         echo "==> ${unit} not installed here — skipping"
         continue
@@ -532,7 +532,7 @@ if [ -n "${HOST_WORKER_WARN}" ]; then
     echo "==> ⚠️  Deploy OK, but these host worker step(s) FAILED and may leave workers on stale code/deps:"
     echo "==>    ${HOST_WORKER_WARN}"
     echo "==>     Fix manually: 'cd /root/availai && .venv/bin/pip install -r requirements.txt' (deps),"
-    echo "==>     then 'sudo systemctl restart avail-nc-worker avail-ics-worker avail-tbf-worker'."
+    echo "==>     then 'sudo systemctl restart avail-nc-worker avail-ics-worker avail-tbf-worker avail-ebay-worker'."
 fi
 
 # Step 8: Surface a stale weekly backup-verification failure, if any. The

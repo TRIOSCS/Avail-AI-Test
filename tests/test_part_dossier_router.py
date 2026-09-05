@@ -213,10 +213,13 @@ class TestMarketSourceHealth:
         from app.search_service import get_market_source_health
 
         # available: a built MouserConnector; down: brokerbin (error_skipped);
-        # unconfigured: ebay (skipped); a non-market/disabled enrichment source is ignored.
+        # unconfigured: digikey (skipped); a non-market/disabled enrichment source is
+        # ignored, and so is the worker-backed ebay row (its health is a heartbeat,
+        # not a synchronous search — see _MARKET_SOURCE_DISPLAY).
         mouser = type("MouserConnector", (), {})()
         stats = {
             "brokerbin": {"source": "brokerbin", "status": "error_skipped", "error": "Auth error — rotate credentials"},
+            "digikey": {"source": "digikey", "status": "skipped", "error": "No API key configured"},
             "ebay": {"source": "ebay", "status": "skipped", "error": "No API key configured"},
             "hunter_enrichment": {"source": "hunter_enrichment", "status": "disabled", "error": None},
         }
@@ -227,7 +230,8 @@ class TestMarketSourceHealth:
         assert [d["name"] for d in h["down"]] == ["brokerbin"]
         assert h["down"][0]["display"] == "BrokerBin"
         assert h["down"][0]["reason"].startswith("Auth error")
-        assert [u["name"] for u in h["unconfigured"]] == ["ebay"]
+        assert [u["name"] for u in h["unconfigured"]] == ["digikey"]
+        assert "ebay" not in {u["name"] for u in h["unconfigured"]}
         assert h["total"] == 2  # available(1) + down(1); unconfigured excluded
 
 
@@ -277,14 +281,14 @@ def test_market_health_all_down_no_available(db_session):
     stats = {
         "brokerbin": {"source": "brokerbin", "status": "error_skipped", "error": "Auth error"},
         "nexar": {"source": "nexar", "status": "error_skipped", "error": "Quota exhausted"},
-        "ebay": {"source": "ebay", "status": "skipped", "error": "No API key configured"},
+        "digikey": {"source": "digikey", "status": "skipped", "error": "No API key configured"},
     }
     with patch("app.search_service._build_connectors", return_value=([], stats, set())):
         h = get_market_source_health(db_session)
 
     assert h["available"] == 0
     assert {d["name"] for d in h["down"]} == {"brokerbin", "nexar"}
-    assert [u["name"] for u in h["unconfigured"]] == ["ebay"]
+    assert [u["name"] for u in h["unconfigured"]] == ["digikey"]
     assert h["total"] == 2  # available(0) + down(2)
 
 

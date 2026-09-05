@@ -503,13 +503,21 @@ def get_workers_status(
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Liveness + queue snapshot for the sourcing-engine workers (ICS, NC, enrichment).
+    """Liveness + queue snapshot for the sourcing-engine workers (ICS, NC, TBF, eBay,
+    enrichment).
 
     Glanceable "are they working?" surface: heartbeat age, stale flag, circuit-breaker
     state, today's counts, and queue depth.
     """
     from ...config import settings
-    from ...models import EnrichmentWorkerStatus, IcsWorkerStatus, NcWorkerStatus, TbfWorkerStatus
+    from ...models import (
+        EbayWorkerStatus,
+        EnrichmentWorkerStatus,
+        IcsWorkerStatus,
+        NcWorkerStatus,
+        TbfWorkerStatus,
+    )
+    from ...services.ebay_worker.queue_manager import get_queue_stats as ebay_queue_stats
     from ...services.ics_worker.queue_manager import get_queue_stats as ics_queue_stats
     from ...services.nc_worker.queue_manager import get_queue_stats as nc_queue_stats
     from ...services.tbf_worker.queue_manager import get_queue_stats as tbf_queue_stats
@@ -548,6 +556,7 @@ def get_workers_status(
             _worker("ics", db.get(IcsWorkerStatus, 1), ics_queue_stats(db)),
             _worker("netcomponents", db.get(NcWorkerStatus, 1), nc_queue_stats(db)),
             _worker("thebrokersite", db.get(TbfWorkerStatus, 1), tbf_queue_stats(db)),
+            _worker("ebay", db.get(EbayWorkerStatus, 1), ebay_queue_stats(db)),
             _worker("enrichment", db.get(EnrichmentWorkerStatus, 1)),
         ],
     }
