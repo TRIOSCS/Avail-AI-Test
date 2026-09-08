@@ -1488,4 +1488,10 @@ class TestStartupSeeding:
         with patch.object(startup_mod, "SessionLocal", return_value=db_session):
             startup_mod.seed_browser_workers()
 
-        assert db_session.query(EbayWorkerStatus).filter_by(id=1).one_or_none() is not None
+        row = db_session.query(EbayWorkerStatus).filter_by(id=1).one_or_none()
+        assert row is not None
+        # A freshly seeded singleton is idle with an untouched daily budget.
+        assert row.is_running is False
+        assert row.calls_today == 0
+        assert row.budget_day is None
+        assert db_session.query(EbayWorkerStatus).count() == 1
