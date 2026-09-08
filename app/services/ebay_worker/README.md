@@ -8,7 +8,10 @@ human-behavior simulation, and no AI commodity gate.
 
 It reuses the same queue/save plumbing as the ICS / NC / TBF workers
 (`app/services/search_worker_base`), so a requirement fans out to eBay exactly
-the way it fans out to the browser marketplaces.
+the way it fans out to the browser marketplaces. One difference follows from
+having no gate: `enqueue_for_ebay_search` creates rows as **queued**, not
+`pending` — the AI gate is the only thing that promotes `pending -> queued`, so
+a `pending` eBay row would never be claimable.
 
 ## Quick Start
 
@@ -55,7 +58,18 @@ hour it is:
 
 The spend counter lives on the `ebay_worker_status` singleton
 (`calls_today` / `budget_day`), so a restart mid-day does not hand the worker a
-fresh allowance.
+fresh allowance. A search does not start unless the whole `EBAY_MAX_PAGES`
+allowance still fits, and failed or timed-out searches are charged for the calls
+they actually spent — so `calls_today` is a real cap, not an estimate.
+
+`EBAY_SEARCH_TIMEOUT_SECONDS` is the **per-request** timeout; the whole-search
+deadline is that value x `EBAY_MAX_PAGES` plus slack, so a slow first page never
+cancels a healthy multi-page search.
+
+A persistent 429 (after the client has honored `Retry-After` and retried once)
+re-queues the item and stands the worker down for 5 minutes — `failed` is
+terminal for a `(requirement, MPN)` pair, so a throttle must never cost a
+requirement its eBay coverage.
 
 ## Strict part-number match
 

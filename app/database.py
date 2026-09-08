@@ -98,12 +98,14 @@ def _make_engine(database_url: str, *, pool_size: int = 5, max_overflow: int = 5
 #                           10 each                                    = 20
 #   - `scheduler` service: 1 process (full app, single uvicorn worker), 10  = 10
 #   - `enrichment-worker`: 1 process, 10                                    = 10
-#   - 3 host workers (avail-nc-worker, avail-ics-worker, avail-tbf-worker),
-#     each one long-running process importing this module, 10 each     = 30
-#   Total: 20 + 10 + 10 + 30 = 70, leaving 30 connections of headroom under
+#   - 4 host workers (avail-nc-worker, avail-ics-worker, avail-tbf-worker,
+#     avail-ebay-worker), each one long-running process importing this module,
+#     10 each                                                          = 40
+#   Total: 20 + 10 + 10 + 40 = 80, leaving 20 connections of headroom under
 #   max_connections=100 for psql/admin sessions, one-off scripts, and Alembic
 #   migrations. Re-run this arithmetic before raising DB_POOL_SIZE/
-#   DB_MAX_OVERFLOW or the uvicorn --workers count.
+#   DB_MAX_OVERFLOW or the uvicorn --workers count, or before adding a fifth
+#   host worker.
 engine = _make_engine(
     settings.database_url,
     pool_size=settings.db_pool_size,

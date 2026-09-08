@@ -172,10 +172,16 @@ def compute_confidence(*, quantity_estimated: bool, feedback_pct: float | None, 
 
 
 def _estimated_quantity(item: dict) -> int | None:
-    """First ``estimatedAvailabilities[].estimatedAvailableQuantity``, or None."""
+    """First POSITIVE ``estimatedAvailabilities[].estimatedAvailableQuantity``, or None.
+
+    A reported quantity of 0 is treated as "eBay told us nothing usable", not as a
+    quantity: writing qty_available=0 would put a sold-out listing in the sightings
+    table as supply AND earn it the "+0.15 quantity present" confidence bonus, ranking
+    it above an identical listing whose stock eBay simply did not report.
+    """
     for avail in item.get("estimatedAvailabilities") or []:
         qty = safe_int(avail.get("estimatedAvailableQuantity"))
-        if qty is not None:
+        if qty is not None and qty > 0:
             return qty
     return None
 

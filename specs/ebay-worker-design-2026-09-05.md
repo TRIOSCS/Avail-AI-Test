@@ -56,7 +56,7 @@ search_service._worker_enqueues()
    +--> enqueue_for_ebay_search   (API poller)      <-- new
         |
         v
-   ebay_search_queue (pending -> queued -> searching -> completed / failed)
+   ebay_search_queue (queued -> searching -> completed / failed)
         |
         v
    avail-ebay-worker  (host systemd unit, python -m app.services.ebay_worker.worker)
@@ -114,6 +114,16 @@ would spend an LLM call to decide whether to spend a cheaper HTTP call, and
 would silently skip parts a human explicitly asked about. So: **every queued
 MPN is searched**, and the budget is the only limiter.
 
+One consequence has to be stated in code, not just here: the shared
+`QueueManager.enqueue_search` creates rows as `pending`, and the ONLY thing in
+the codebase that promotes `pending -> queued` is the AI gate the browser
+workers run. With no gate, a `pending` eBay row would never be claimable — the
+queue would grow forever while the worker logged "queue empty". So
+`QueueManager` takes an `initial_status` (default `PENDING`, so ICS/NC/TBF are
+untouched) and the eBay queue manager passes `QUEUED`. An eBay row is
+claimable the moment it is enqueued, which is also what the migration's
+partial index `ix_ebay_queue_poll (WHERE status='queued')` assumes.
+
 ### 3. Pacing = min delay + daily call budget, resetting at midnight UTC
 
 The shared `search_worker_base.scheduler.SearchScheduler` is not reused. Its
@@ -128,6 +138,22 @@ What actually bounds an API poller is its rate-limit allowance, so
 1. Wait `EBAY_MIN_DELAY_SECONDS` between calls (default 3).
 2. Stop once `EBAY_DAILY_CALL_BUDGET` calls have been spent (default 4000), and
    resume at midnight **UTC**.
+
+Two details make the budget an actual cap rather than an estimate:
+
+- **A search is not allowed to start unless its whole page budget fits.** One
+  search spends up to `EBAY_MAX_PAGES` calls, so the gate is
+  `scheduler.can_afford_search()` (remaining >= MAX_PAGES), not "any calls
+  left" — otherwise the last search of the day always overshoots.
+- **Failed searches are charged for what they actually spent.** `search_mpn`
+  accumulates into a caller-owned `CallCounter`, so a timeout (coroutine
+  cancelled) and a 500 on page 2 both book the calls already made. Booking a
+  flat 1, or nothing, let real spend drift silently past the budget.
+
+The singleton also has to exist for any of this to work: `update_worker_status`
+and the budget writers are no-ops without the id=1 row, which would leave the
+poller with an unlimited allowance and no log line. The worker seeds the row at
+startup and re-seeds (with a warning) if it ever disappears.
 
 UTC, not Eastern, because eBay's own call allowances are UTC-day based —
 matching the boundary that actually resets is the point.
@@ -236,13 +262,51 @@ credentials are wrong — retrying will not fix that), three consecutive
 transport/5xx failures trip, and the base class's ten-empty-result streak still
 guards against a silently broken query.
 
+Three rules keep that breaker honest for an API poller:
+
+- **The empty-result streak counts the RAW payload, not the filtered rows.**
+  Dropping every hit is routine here — the strict MPN filter exists precisely
+  to throw away eBay's fuzzy matches — so counting post-filter emptiness would
+  trip the breaker (10 in a row) during perfectly healthy operation. A 200 with
+  any `itemSummaries` counts as results.
+- **Unexpected exceptions feed the breaker too.** A failure that is neither
+  `httpx.HTTPError` nor `ValueError` (a token body with no `access_token`, a
+  parser `AttributeError`) used to fail one queue item every 3 seconds forever
+  with nothing ever tripping. `failed` is terminal for a
+  `(requirement, normalized_mpn)` pair, so that quietly burned the queue.
+- **A rate limit is not a failure of the item.** `search_client` mirrors
+  `EbayConnector` on 429: honor `Retry-After`, retry once, then raise the typed
+  `ConnectorRateLimitError`. The worker re-queues the item (never `failed`) and
+  stands down for `RATE_LIMIT_BACKOFF_SECONDS` (300) instead of coming back in
+  3 seconds. A 404 is deliberately NOT turned into an empty result set: this
+  endpoint answers 200-with-nothing when eBay has nothing, so a 404 means the
+  endpoint/marketplace is wrong, and faking "0 results" would COMPLETE the row
+  and suppress re-search of that MPN for the whole dedup window.
+
+Timeouts are two separate budgets, not one. `EBAY_SEARCH_TIMEOUT_SECONDS` is
+the **per-request** httpx timeout; the outer `asyncio.wait_for` guard uses
+`scheduler.search_deadline()` = that value x `EBAY_MAX_PAGES` + slack. Using one
+number for both cancelled healthy multi-page searches — and threw away the pages
+already fetched — whenever page 1 ran slow.
+
+Every search attempt writes an `ebay_search_log` row, failures included (with
+`error` set), so "why did eBay stop producing sightings" is answerable from the
+database rather than from journald retention.
+
 ### 12. eBay is worker-backed, but not a *browser* worker
 
 Two different lists, and eBay is in exactly one of them:
 
 - `connector_service.WORKER_BACKED_SOURCES` — **yes.** The Connectors card
   should show worker heartbeat health (`worker_active` / `worker_down`), not a
-  credential ladder.
+  credential ladder. Because eBay renders as a `key` card (it owns real
+  credentials) rather than a `browser_login` one, the worker-health line had to
+  move out of the `browser_login` branch of `_connector_macros.html` and become
+  a shared block, and `last_error` now renders for any worker-backed card —
+  otherwise an eBay auth failure from `health_monitor` had nowhere to appear.
+  The worker also writes `circuit_breaker_reason` when it has no credentials, so
+  an unconfigured poller reads red-with-a-reason instead of a green pill above
+  a worker that is only idling.
 - `constants.BROWSER_WORKER_SOURCES` — **no.** Members of that set are excluded
   from the health_monitor ping loop and pinned to LIVE, because there is no
   connector to probe them with. eBay HAS a connector and real credentials, so a

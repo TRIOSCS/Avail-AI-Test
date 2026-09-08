@@ -24,6 +24,14 @@ from datetime import UTC, date, datetime, timedelta
 
 SECONDS_PER_DAY = 24 * 60 * 60
 
+# Slack added to the whole-search deadline on top of the per-page timeouts, so a
+# search that is merely slow is never cancelled by its own outer guard.
+SEARCH_DEADLINE_SLACK_SECONDS = 5
+
+# How long to stand down after eBay answered 429 twice in a row. Long enough to
+# clear a throttle window, short enough that the queue keeps moving the same day.
+RATE_LIMIT_BACKOFF_SECONDS = 300
+
 
 def utc_today(now: datetime | None = None) -> date:
     """Today's date in UTC — the budget day boundary."""
@@ -63,6 +71,21 @@ class EbayScheduler:
         """Seconds to wait when the queue is empty."""
         return float(self.config.EBAY_POLL_IDLE_SECONDS)
 
+    def search_deadline(self) -> float:
+        """Hard cap on ONE search — all of its pages — for the outer wait_for.
+
+        EBAY_SEARCH_TIMEOUT_SECONDS is the per-REQUEST timeout handed to httpx. Using
+        that same number as the whole-search deadline would cancel a healthy 2-page
+        search whenever page 1 ran slow, throwing away the results already fetched, so
+        the deadline is the per-request budget times the page count plus a little slack.
+        """
+        pages = max(1, int(self.config.EBAY_MAX_PAGES))
+        return float(int(self.config.EBAY_SEARCH_TIMEOUT_SECONDS) * pages + SEARCH_DEADLINE_SLACK_SECONDS)
+
+    def rate_limit_backoff(self) -> float:
+        """Seconds to stand down after a persistent 429."""
+        return float(RATE_LIMIT_BACKOFF_SECONDS)
+
     def budget_remaining(self, calls_today: int) -> int:
         """Calls left in today's budget (never negative)."""
         # int(): `config` is deliberately untyped (the worker configs share no base
@@ -72,6 +95,14 @@ class EbayScheduler:
     def budget_exhausted(self, calls_today: int) -> bool:
         """True when today's Browse API call budget is spent."""
         return self.budget_remaining(calls_today) <= 0
+
+    def can_afford_search(self, calls_today: int) -> bool:
+        """True when the whole next search fits inside today's remaining budget.
+
+        One search spends up to EBAY_MAX_PAGES calls, so gating on "any budget left" let
+        the last search of the day overshoot by up to MAX_PAGES-1 calls.
+        """
+        return self.budget_remaining(calls_today) >= max(1, int(self.config.EBAY_MAX_PAGES))
 
     def sleep_until_budget_resets(self, now: datetime | None = None) -> float:
         """Seconds to sleep when the budget is spent — until midnight UTC."""

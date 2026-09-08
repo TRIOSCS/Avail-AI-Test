@@ -83,8 +83,14 @@ class TestImportability:
 
     def test_no_browser_modules(self):
         """The eBay worker is an API poller — it must not grow browser modules."""
-        pkg_dir = Path("app/services/ebay_worker")
+        import app.services.ebay_worker as pkg
+
+        # Resolved from the imported package, never from the cwd: a cwd-relative
+        # glob returns an empty set when pytest runs from anywhere else, and the
+        # guard would pass while inspecting nothing.
+        pkg_dir = Path(pkg.__file__).parent
         names = {p.name for p in pkg_dir.glob("*.py")}
+        assert "worker.py" in names, f"package not found at {pkg_dir}"
         assert not names & {"session_manager.py", "search_engine.py", "human_behavior.py", "ai_gate.py"}
 
     def test_circuit_breaker_starts_closed(self):
@@ -112,6 +118,7 @@ class TestEbayConfig:
         assert cfg.EBAY_INCLUDE_AUCTIONS is False
         assert cfg.EBAY_POLL_IDLE_SECONDS == 30
         assert cfg.EBAY_DEDUP_WINDOW_DAYS == 7
+        assert cfg.EBAY_BREAKER_COOLDOWN_MINUTES == 30
 
     def test_no_browser_knobs(self):
         """No browser profile / business-hours / random-break knobs on an API poller."""
@@ -129,6 +136,11 @@ class TestEbayConfig:
             "EBAY_MIN_DELAY_SECONDS": "9",
             "EBAY_INCLUDE_AUCTIONS": "true",
             "EBAY_POLL_IDLE_SECONDS": "5",
+            # Every knob documented in .env.ebay-worker.example is pinned BY NAME
+            # here, so a typo in an os.environ.get key fails loudly instead of
+            # leaving the operator with a dead setting.
+            "EBAY_SEARCH_TIMEOUT_SECONDS": "12",
+            "EBAY_BREAKER_COOLDOWN_MINUTES": "5",
         }
         with patch.dict(os.environ, env):
             cfg = EbayConfig()
@@ -140,6 +152,8 @@ class TestEbayConfig:
         assert cfg.EBAY_MIN_DELAY_SECONDS == 9
         assert cfg.EBAY_INCLUDE_AUCTIONS is True
         assert cfg.EBAY_POLL_IDLE_SECONDS == 5
+        assert cfg.EBAY_SEARCH_TIMEOUT_SECONDS == 12
+        assert cfg.EBAY_BREAKER_COOLDOWN_MINUTES == 5
 
     def test_page_limit_capped_at_api_maximum(self):
         """EBay's Browse API rejects limit > 200 — clamp rather than 400."""
@@ -266,10 +280,10 @@ class TestConfidence:
 
 class TestResultParser:
     def test_filters_the_payload_down_to_matching_listings(self):
-        """9 raw items -> 6 kept: the HP title, the for-parts row and the auction-only
+        """10 raw items -> 7 kept: the HP title, the for-parts row and the auction-only
         row are all dropped."""
         rows = parse_item_summaries(_payload(), FIXTURE_MPN)
-        assert len(rows) == 6
+        assert len(rows) == 7
         kept = {r.item_id for r in rows}
         assert "v1|110000000006|0" not in kept, "title without the MPN must be dropped"
         assert "v1|110000000004|0" not in kept, "conditionId 7000 (for parts) must be dropped"
@@ -283,7 +297,43 @@ class TestResultParser:
     def test_include_auctions_flag_keeps_the_auction(self):
         rows = parse_item_summaries(_payload(), FIXTURE_MPN, include_auctions=True)
         assert "v1|110000000005|0" in {r.item_id for r in rows}
-        assert len(rows) == 7
+        assert len(rows) == 8
+
+    def test_auction_plus_buy_it_now_listing_is_kept(self):
+        """BuyingOptions ["AUCTION", "BEST_OFFER"] is a real, quotable listing.
+
+        The filter drops AUCTION-ONLY rows (all(...)), never a row that merely
+        offers an auction alongside a fixed price — that is exactly the shape the
+        buyingOptions:{FIXED_PRICE|BEST_OFFER} request filter returns.
+        """
+        rows = {r.item_id: r for r in parse_item_summaries(_payload(), FIXTURE_MPN)}
+        mixed = rows["v1|110000000009|0"]
+        assert mixed.buying_options == ["AUCTION", "BEST_OFFER"]
+        assert mixed.vendor_name == "mixed_options_seller"
+        # ...while the auction-ONLY row stays dropped in the same pass.
+        assert "v1|110000000005|0" not in rows
+
+    def test_zero_reported_quantity_is_not_treated_as_supply(self):
+        """EstimatedAvailableQuantity 0 = sold out, not "0 in stock".
+
+        It must not land as qty_available=0 and must not earn the quantity confidence
+        bonus, or a sold-out listing outranks an unknown-stock one.
+        """
+        payload = {
+            "itemSummaries": [
+                {
+                    "itemId": "v1|zero|0",
+                    "title": "Dell 0F8NV PERC H730 Controller",
+                    "price": {"value": "10.00", "currency": "USD"},
+                    "seller": {"username": "sold_out_seller"},
+                    "estimatedAvailabilities": [{"estimatedAvailableQuantity": 0}],
+                }
+            ]
+        }
+        (row,) = parse_item_summaries(payload, FIXTURE_MPN)
+        assert row.quantity == 1
+        assert row.quantity_estimated is False
+        assert row.confidence == 0.65  # 0.55 base + 0.10 whole token, no quantity bonus
 
     def test_for_parts_stays_dropped_even_with_auctions_included(self):
         rows = parse_item_summaries(_payload(), FIXTURE_MPN, include_auctions=True)
@@ -390,6 +440,32 @@ class TestQueueManager:
         assert item is not None
         assert item.mpn == "LM317T"
         assert item.normalized_mpn == "LM317T"
+        # QUEUED, not PENDING: PENDING exists for the browser workers' AI gate,
+        # which promotes PENDING -> QUEUED. The eBay worker has no gate, so a
+        # PENDING row would never be claimable.
+        assert item.status == "queued"
+
+    def test_enqueued_row_is_immediately_claimable(self, db_session, test_requisition):
+        """End-to-end enqueue -> claim.
+
+        Nothing in the codebase moves an eBay row from PENDING to QUEUED, so a PENDING
+        enqueue would idle the worker forever.
+        """
+        req = test_requisition.requirements[0]
+        enqueued = enqueue_for_ebay_search(req.id, db_session)
+
+        claimed = claim_next_queued_item(db_session)
+        assert claimed is not None
+        assert claimed.id == enqueued.id
+        assert claimed.status == "searching"
+
+    def test_browser_worker_enqueue_still_lands_pending(self, db_session, test_requisition):
+        """The initial_status hook is opt-in — TBF/ICS/NC must be untouched."""
+        from app.services.tbf_worker.queue_manager import enqueue_for_tbf_search
+
+        req = test_requisition.requirements[0]
+        item = enqueue_for_tbf_search(req.id, db_session)
+        assert item is not None
         assert item.status == "pending"
 
     def test_enqueue_already_queued_returns_existing(self, db_session, test_requisition):
@@ -509,11 +585,11 @@ class TestSightingWriter:
     def test_writes_ebay_sightings_from_the_fixture(self, db_session, test_requisition):
         item = _queue_item(db_session, test_requisition)
         rows = parse_item_summaries(_payload(), FIXTURE_MPN)
-        # 6 parsed rows, but two share one eBay item id -> 5 stored.
+        # 7 parsed rows, but two share one eBay item id -> 6 stored.
         created = save_ebay_sightings(db_session, item, rows)
-        assert created == 5
+        assert created == 6
         stored = db_session.query(Sighting).filter(Sighting.source_type == "ebay").all()
-        assert len(stored) == 5
+        assert len(stored) == 6
         assert {s.source_type for s in stored} == {"ebay"}
         assert all(s.is_authorized is False for s in stored)
         assert all(s.mpn_matched == FIXTURE_MPN for s in stored)
@@ -563,10 +639,10 @@ class TestSightingWriter:
     def test_dedups_against_already_stored_rows(self, db_session, test_requisition):
         item = _queue_item(db_session, test_requisition)
         rows = parse_item_summaries(_payload(), FIXTURE_MPN)
-        assert save_ebay_sightings(db_session, item, rows) == 5
+        assert save_ebay_sightings(db_session, item, rows) == 6
         # Re-running the same search creates nothing new.
         assert save_ebay_sightings(db_session, item, rows) == 0
-        assert db_session.query(Sighting).filter(Sighting.source_type == "ebay").count() == 5
+        assert db_session.query(Sighting).filter(Sighting.source_type == "ebay").count() == 6
 
     def test_skips_rows_without_vendor(self, db_session, test_requisition):
         item = _queue_item(db_session, test_requisition)
@@ -743,11 +819,21 @@ class TestBudgetBookkeeping:
         row = db_session.query(EbayWorkerStatus).filter_by(id=1).one()
         assert row.calls_today == 5
 
-    def test_budget_helpers_no_row_are_safe(self, db_session):
+    def test_a_missing_singleton_is_reseeded_not_silently_ignored(self, db_session):
+        """The daily call budget lives ENTIRELY on this row.
+
+        Returning 0-spent forever would give the worker an uncapped Browse API allowance
+        with no log line.
+        """
         from app.services.ebay_worker.worker import read_budget, record_calls
 
-        assert read_budget(db_session, date(2026, 9, 5)) == 0
-        assert record_calls(db_session, date(2026, 9, 5), 3) == 0
+        assert db_session.query(EbayWorkerStatus).count() == 0
+        today = date(2026, 9, 5)
+        assert read_budget(db_session, today) == 0
+        assert db_session.query(EbayWorkerStatus).filter_by(id=1).one_or_none() is not None
+        # ...and the spend now actually persists, instead of evaporating.
+        assert record_calls(db_session, today, 3) == 3
+        assert read_budget(db_session, today) == 3
 
     def test_load_credentials_reads_db_first(self, db_session):
         from app.services.ebay_worker.worker import load_credentials
@@ -798,13 +884,22 @@ class TestWorkerLoopBudgetGate:
         assert sleeps[0] > 60
 
     @pytest.mark.asyncio
-    async def test_missing_credentials_idle_instead_of_calling(self, db_session):
+    async def test_missing_credentials_idle_instead_of_calling(self, db_session, test_requisition):
+        """With no credentials the worker must idle 15 min WITHOUT claiming anything —
+        and say so on the status singleton, or the Connectors card reads green while
+        nothing is searched."""
         import app.services.ebay_worker.worker as worker_mod
 
         db_session.add(EbayWorkerStatus(id=1, is_running=False, calls_today=0))
         db_session.commit()
+        # A real claimable row: without it this test would pass on the empty-queue
+        # idle path even if the credential guard were deleted.
+        queued_id = enqueue_for_ebay_search(test_requisition.requirements[0].id, db_session).id
 
-        async def _fake_sleep(_seconds):
+        sleeps: list[float] = []
+
+        async def _fake_sleep(seconds):
+            sleeps.append(seconds)
             raise _StopLoop
 
         with (
@@ -817,6 +912,42 @@ class TestWorkerLoopBudgetGate:
             await worker_mod.main()
 
         mock_search.assert_not_awaited()
+        assert sleeps == [15 * 60], "must be the credential idle, not the 30s empty-queue idle"
+        # Re-read: the worker closes the (patched) session, so `queued` is detached.
+        still_queued = db_session.query(EbaySearchQueue).filter_by(id=queued_id).one()
+        assert still_queued.status == "queued", "an unconfigured worker must not claim work"
+        status = db_session.query(EbayWorkerStatus).filter_by(id=1).one()
+        assert status.circuit_breaker_open is True
+        assert status.circuit_breaker_reason == worker_mod.CREDENTIALS_MISSING_REASON
+
+    @pytest.mark.asyncio
+    async def test_budget_gate_reserves_a_whole_search(self, db_session):
+        """One search spends up to EBAY_MAX_PAGES calls, so it must not START with fewer
+        than that left — otherwise the last search of the day overshoots."""
+        import app.services.ebay_worker.worker as worker_mod
+
+        today = datetime.now(UTC).date()
+        # 1 call left, EBAY_MAX_PAGES defaults to 2.
+        db_session.add(EbayWorkerStatus(id=1, is_running=False, calls_today=3999, budget_day=today))
+        db_session.commit()
+
+        sleeps: list[float] = []
+
+        async def _fake_sleep(seconds):
+            sleeps.append(seconds)
+            raise _StopLoop
+
+        with (
+            patch("app.database.SessionLocal", return_value=db_session),
+            patch.object(worker_mod, "_async_sleep", _fake_sleep),
+            patch("app.services.ebay_worker.queue_manager.claim_next_queued_item") as mock_claim,
+            patch("app.services.ebay_worker.worker.load_credentials", return_value=("cid", "sec")),
+            pytest.raises(_StopLoop),
+        ):
+            await worker_mod.main()
+
+        mock_claim.assert_not_called()
+        assert sleeps[0] > 60  # slept toward midnight UTC
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -924,3 +1055,437 @@ class TestWiring:
 
         teams.assert_awaited_once()
         assert "eBay" in teams.await_args.args[0]
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# SEARCH CLIENT — paging, retries and call accounting (no network)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def _response(status: int, body: dict | None = None, headers: dict | None = None):
+    """Build an httpx.Response bound to a request (raise_for_status needs one)."""
+    import httpx
+
+    from app.services.ebay_worker.search_client import EBAY_SEARCH_URL
+
+    return httpx.Response(
+        status,
+        json=body if body is not None else {},
+        headers=headers or {},
+        request=httpx.Request("GET", EBAY_SEARCH_URL),
+    )
+
+
+def _page(count: int, offset: int = 0) -> dict:
+    return {
+        "total": 999,
+        "itemSummaries": [{"itemId": f"v1|{offset + i}|0", "title": "x"} for i in range(count)],
+    }
+
+
+class _ClientCfg:
+    """Minimal config stand-in for the client (2 pages of 3)."""
+
+    EBAY_PAGE_LIMIT = 3
+    EBAY_MAX_PAGES = 2
+    EBAY_MARKETPLACE_ID = "EBAY_US"
+    EBAY_INCLUDE_AUCTIONS = False
+    EBAY_CATEGORY_IDS = ""
+    EBAY_SEARCH_TIMEOUT_SECONDS = 30
+    category_id_list: list[str] = []
+
+
+class TestSearchClient:
+    """The only I/O in the package — and the sole source of the daily call count."""
+
+    @pytest.mark.asyncio
+    async def test_two_full_pages_merge_with_offsets_and_count_two_calls(self):
+        from app.services.ebay_worker import search_client as sc
+
+        gets = AsyncMock(side_effect=[_response(200, _page(3, 0)), _response(200, _page(3, 3))])
+        with (
+            patch.object(sc, "get_ebay_access_token", new=AsyncMock(return_value="tok")),
+            patch.object(sc.http, "get", new=gets),
+        ):
+            payload, calls = await sc.search_mpn("0F8NV", _ClientCfg(), "cid", "sec")
+
+        assert calls == 2
+        assert len(payload["itemSummaries"]) == 6
+        offsets = [c.kwargs["params"]["offset"] for c in gets.await_args_list]
+        assert offsets == ["0", "3"]
+        assert gets.await_args_list[0].kwargs["headers"]["X-EBAY-C-MARKETPLACE-ID"] == "EBAY_US"
+
+    @pytest.mark.asyncio
+    async def test_short_page_stops_paging_early(self):
+        from app.services.ebay_worker import search_client as sc
+
+        gets = AsyncMock(return_value=_response(200, _page(1, 0)))
+        with (
+            patch.object(sc, "get_ebay_access_token", new=AsyncMock(return_value="tok")),
+            patch.object(sc.http, "get", new=gets),
+        ):
+            payload, calls = await sc.search_mpn("0F8NV", _ClientCfg(), "cid", "sec")
+
+        assert calls == 1
+        assert len(payload["itemSummaries"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_401_invalidates_the_token_and_re_mints_once(self):
+        from app.services.ebay_worker import search_client as sc
+
+        gets = AsyncMock(side_effect=[_response(401), _response(200, _page(1, 0))])
+        mint = AsyncMock(side_effect=["stale", "fresh"])
+        with (
+            patch.object(sc, "get_ebay_access_token", new=mint),
+            patch.object(sc, "invalidate_ebay_token") as mock_invalidate,
+            patch.object(sc.http, "get", new=gets),
+        ):
+            _payload_out, calls = await sc.search_mpn("0F8NV", _ClientCfg(), "cid", "sec")
+
+        mock_invalidate.assert_called_once_with("cid")
+        assert mint.await_count == 2
+        assert gets.await_args_list[1].kwargs["headers"]["Authorization"] == "Bearer fresh"
+        # Budget semantics: BOTH HTTP requests are charged — the retry spent quota too.
+        assert calls == 2
+
+    @pytest.mark.asyncio
+    async def test_429_honors_retry_after_then_retries_once(self):
+        from app.services.ebay_worker import search_client as sc
+
+        gets = AsyncMock(side_effect=[_response(429, headers={"Retry-After": "1"}), _response(200, _page(1, 0))])
+        with (
+            patch.object(sc, "get_ebay_access_token", new=AsyncMock(return_value="tok")),
+            patch.object(sc, "_parse_retry_after", return_value=0.0),
+            patch.object(sc.http, "get", new=gets),
+        ):
+            payload, calls = await sc.search_mpn("0F8NV", _ClientCfg(), "cid", "sec")
+
+        assert len(payload["itemSummaries"]) == 1
+        assert calls == 2
+
+    @pytest.mark.asyncio
+    async def test_persistent_429_raises_the_typed_rate_limit_error(self):
+        from app.connectors.errors import ConnectorRateLimitError
+        from app.services.ebay_worker import search_client as sc
+
+        gets = AsyncMock(return_value=_response(429, headers={"Retry-After": "1"}))
+        counter = sc.CallCounter()
+        with (
+            patch.object(sc, "get_ebay_access_token", new=AsyncMock(return_value="tok")),
+            patch.object(sc, "_parse_retry_after", return_value=0.0),
+            patch.object(sc.http, "get", new=gets),
+            pytest.raises(ConnectorRateLimitError),
+        ):
+            await sc.search_mpn("0F8NV", _ClientCfg(), "cid", "sec", counter)
+
+        # The calls spent before the raise are still observable for the budget.
+        assert counter.calls == 2
+
+    @pytest.mark.asyncio
+    async def test_404_raises_instead_of_faking_an_empty_result(self):
+        """A 404 means the endpoint/marketplace is wrong.
+
+        Reporting it as "0 results" would COMPLETE the queue row and suppress re-search
+        for the dedup window.
+        """
+        import httpx
+
+        from app.services.ebay_worker import search_client as sc
+
+        with (
+            patch.object(sc, "get_ebay_access_token", new=AsyncMock(return_value="tok")),
+            patch.object(sc.http, "get", new=AsyncMock(return_value=_response(404))),
+            pytest.raises(httpx.HTTPStatusError),
+        ):
+            await sc.search_mpn("0F8NV", _ClientCfg(), "cid", "sec")
+
+    @pytest.mark.asyncio
+    async def test_calls_spent_before_a_mid_search_failure_are_observable(self):
+        """Page 1 OK, page 2 500 -> two calls really spent, and the counter says so."""
+        import httpx
+
+        from app.services.ebay_worker import search_client as sc
+
+        gets = AsyncMock(side_effect=[_response(200, _page(3, 0)), _response(500)])
+        counter = sc.CallCounter()
+        with (
+            patch.object(sc, "get_ebay_access_token", new=AsyncMock(return_value="tok")),
+            patch.object(sc.http, "get", new=gets),
+            pytest.raises(httpx.HTTPStatusError),
+        ):
+            await sc.search_mpn("0F8NV", _ClientCfg(), "cid", "sec", counter)
+
+        assert counter.calls == 2
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# WORKER MAIN LOOP — one full iteration, and every failure branch
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class _LoopHarness:
+    """Drive exactly one main-loop iteration against the test session.
+
+    ``_async_sleep`` raises _StopLoop, so the loop runs a single pass: claim ->
+    search -> parse -> save -> log -> mark_completed, then stops at the pacing sleep.
+    """
+
+    def __init__(self, db_session, search_side_effect, *, calls_today=0):
+        self.db = db_session
+        self.search_side_effect = search_side_effect
+        self.calls_today = calls_today
+        self.sleeps: list[float] = []
+        self.breaker = None
+
+    async def run(self):
+        import app.services.ebay_worker.circuit_breaker as breaker_mod
+        import app.services.ebay_worker.worker as worker_mod
+
+        today = datetime.now(UTC).date()
+        self.db.add(EbayWorkerStatus(id=1, is_running=False, calls_today=self.calls_today, budget_day=today))
+        self.db.commit()
+
+        async def _fake_sleep(seconds):
+            self.sleeps.append(seconds)
+            raise _StopLoop
+
+        real_breaker_cls = breaker_mod.CircuitBreaker
+
+        def _capture_breaker(*args, **kwargs):
+            self.breaker = real_breaker_cls(*args, **kwargs)
+            return self.breaker
+
+        with (
+            patch("app.database.SessionLocal", return_value=self.db),
+            patch.object(worker_mod, "_async_sleep", _fake_sleep),
+            patch.object(breaker_mod, "CircuitBreaker", _capture_breaker),
+            patch("app.services.ebay_worker.worker.load_credentials", return_value=("cid", "sec")),
+            patch(
+                "app.services.ebay_worker.search_client.search_mpn",
+                new=AsyncMock(side_effect=self.search_side_effect),
+            ),
+            pytest.raises(_StopLoop),
+        ):
+            await worker_mod.main()
+
+
+def _enqueue_claimable(db_session, test_requisition, mpn=FIXTURE_MPN):
+    """A real queued row, created the way the fan-out creates it."""
+    req = test_requisition.requirements[0]
+    req.primary_mpn = mpn
+    db_session.commit()
+    return enqueue_for_ebay_search(req.id, db_session).id
+
+
+class TestWorkerLoopIteration:
+    @pytest.mark.asyncio
+    async def test_happy_path_writes_sightings_a_log_row_and_books_the_calls(self, db_session, test_requisition):
+        from app.models import EbaySearchLog
+
+        queue_id = _enqueue_claimable(db_session, test_requisition)
+        harness = _LoopHarness(db_session, [(_payload(), 2)])
+        await harness.run()
+
+        stored = db_session.query(Sighting).filter(Sighting.source_type == "ebay").all()
+        assert len(stored) == 6
+        row = db_session.query(EbaySearchQueue).filter_by(id=queue_id).one()
+        assert row.status == "completed"
+        assert row.results_count == 7
+        log = db_session.query(EbaySearchLog).one()
+        assert log.queue_id == queue_id
+        assert log.results_found == 7
+        assert log.sightings_created == 6
+        assert log.error is None
+        assert log.page_html_hash
+        status = db_session.query(EbayWorkerStatus).filter_by(id=1).one()
+        assert status.calls_today == 2
+        assert status.searches_today == 1
+        assert status.sightings_today == 6
+        assert harness.sleeps == [3.0]  # the flat inter-call delay
+
+    @pytest.mark.asyncio
+    async def test_results_that_all_fail_the_mpn_filter_do_not_count_as_empty(self, db_session, test_requisition):
+        """The empty-results streak is a shadow-block detector.
+
+        eBay answering 200 with real listings that simply don't match is NORMAL —
+        counting those trips the breaker (10 in a row) during healthy operation.
+        """
+        _enqueue_claimable(db_session, test_requisition)
+        unmatched = {"itemSummaries": [{"itemId": "v1|x|0", "title": "HP something else", "seller": {"username": "s"}}]}
+        harness = _LoopHarness(db_session, [(unmatched, 1)])
+        await harness.run()
+
+        assert harness.breaker.empty_results_streak == 0
+        assert db_session.query(Sighting).filter(Sighting.source_type == "ebay").count() == 0
+
+    @pytest.mark.asyncio
+    async def test_a_truly_empty_payload_still_counts_toward_the_streak(self, db_session, test_requisition):
+        _enqueue_claimable(db_session, test_requisition)
+        harness = _LoopHarness(db_session, [({"itemSummaries": [], "total": 0}, 1)])
+        await harness.run()
+
+        assert harness.breaker.empty_results_streak == 1
+
+    @pytest.mark.asyncio
+    async def test_timeout_books_the_calls_already_spent_and_logs_the_failure(self, db_session, test_requisition):
+        from app.models import EbaySearchLog
+
+        queue_id = _enqueue_claimable(db_session, test_requisition)
+
+        async def _slow(mpn, config, client_id, client_secret, counter=None):
+            if counter is not None:
+                counter.calls += 2  # both pages went out before the deadline hit
+            raise TimeoutError
+
+        harness = _LoopHarness(db_session, _slow)
+        await harness.run()
+
+        row = db_session.query(EbaySearchQueue).filter_by(id=queue_id).one()
+        assert row.status == "failed"
+        status = db_session.query(EbayWorkerStatus).filter_by(id=1).one()
+        assert status.calls_today == 2, "calls spent on a timed-out search must still be charged"
+        log = db_session.query(EbaySearchLog).one()
+        assert log.error == "Search timeout"
+        assert log.results_found == 0
+
+    @pytest.mark.asyncio
+    async def test_http_error_on_page_two_books_both_calls(self, db_session, test_requisition):
+        import httpx
+
+        from app.models import EbaySearchLog
+
+        queue_id = _enqueue_claimable(db_session, test_requisition)
+
+        async def _boom(mpn, config, client_id, client_secret, counter=None):
+            if counter is not None:
+                counter.calls += 2  # page 1 OK, page 2 500
+            raise httpx.HTTPStatusError("500", request=MagicMock(), response=MagicMock(status_code=500))
+
+        harness = _LoopHarness(db_session, _boom)
+        await harness.run()
+
+        row = db_session.query(EbaySearchQueue).filter_by(id=queue_id).one()
+        assert row.status == "failed"
+        status = db_session.query(EbayWorkerStatus).filter_by(id=1).one()
+        assert status.calls_today == 2, "a hardcoded 1 under-reports real spend"
+        assert db_session.query(EbaySearchLog).one().error
+
+    @pytest.mark.asyncio
+    async def test_persistent_rate_limit_requeues_and_backs_off(self, db_session, test_requisition):
+        """FAILED is terminal for a (requirement, mpn) pair — a throttle must never cost
+        a requirement its eBay coverage."""
+        from app.connectors.errors import ConnectorRateLimitError
+        from app.services.ebay_worker.scheduler import RATE_LIMIT_BACKOFF_SECONDS
+
+        queue_id = _enqueue_claimable(db_session, test_requisition)
+
+        async def _throttled(mpn, config, client_id, client_secret, counter=None):
+            if counter is not None:
+                counter.calls += 2
+            raise ConnectorRateLimitError("eBay rate limited (persistent 429)")
+
+        harness = _LoopHarness(db_session, _throttled)
+        await harness.run()
+
+        row = db_session.query(EbaySearchQueue).filter_by(id=queue_id).one()
+        assert row.status == "queued", "re-queued for a later attempt, not failed"
+        assert harness.sleeps == [float(RATE_LIMIT_BACKOFF_SECONDS)]
+        assert db_session.query(EbayWorkerStatus).filter_by(id=1).one().calls_today == 2
+
+    @pytest.mark.asyncio
+    async def test_unexpected_error_feeds_the_circuit_breaker(self, db_session, test_requisition):
+        """A KeyError from the token mint is neither httpx.HTTPError nor ValueError.
+
+        Without the breaker it would fail one queue item every 3s, forever.
+        """
+        queue_id = _enqueue_claimable(db_session, test_requisition)
+
+        async def _bug(mpn, config, client_id, client_secret, counter=None):
+            raise KeyError("access_token")
+
+        harness = _LoopHarness(db_session, _bug)
+        await harness.run()
+
+        assert harness.breaker.consecutive_failures == 1
+        assert db_session.query(EbaySearchQueue).filter_by(id=queue_id).one().status == "failed"
+
+
+class TestSchedulerDeadlines:
+    def test_search_deadline_covers_every_page(self):
+        """The per-REQUEST httpx timeout must not double as the whole-search cap, or a
+        slow first page cancels a healthy 2-page search and discards its results."""
+        from app.services.ebay_worker.scheduler import SEARCH_DEADLINE_SLACK_SECONDS, EbayScheduler
+
+        with patch.dict(os.environ, {"EBAY_SEARCH_TIMEOUT_SECONDS": "30", "EBAY_MAX_PAGES": "2"}):
+            cfg = EbayConfig()
+        sched = EbayScheduler(cfg)
+        assert sched.search_deadline() == 30 * 2 + SEARCH_DEADLINE_SLACK_SECONDS
+        assert sched.search_deadline() > cfg.EBAY_SEARCH_TIMEOUT_SECONDS
+
+    def test_can_afford_search_reserves_the_whole_page_budget(self):
+        from app.services.ebay_worker.scheduler import EbayScheduler
+
+        with patch.dict(os.environ, {"EBAY_DAILY_CALL_BUDGET": "10", "EBAY_MAX_PAGES": "2"}):
+            sched = EbayScheduler(EbayConfig())
+        assert sched.can_afford_search(8) is True
+        assert sched.can_afford_search(9) is False  # 1 call left, a search needs 2
+        assert sched.budget_exhausted(9) is False  # ...which the old gate allowed
+
+
+class TestConnectorsTabCard:
+    """EBay is the only worker-backed source that also owns real API credentials, so its
+    card keeps the Test button the other three deliberately do not have."""
+
+    def _source(self, db_session, name, env_vars):
+        """Build the ApiSource row the seeder creates (see
+        app/data/api_sources.json)."""
+        from app.models import ApiSource
+
+        src = ApiSource(
+            name=name,
+            display_name=name,
+            category="api",
+            source_type="marketplace",
+            env_vars=env_vars,
+            is_active=True,
+            status="active",
+        )
+        db_session.add(src)
+        db_session.commit()
+        return src
+
+    def _ebay_source(self, db_session):
+        return self._source(db_session, "ebay", ["EBAY_CLIENT_ID", "EBAY_CLIENT_SECRET"])
+
+    def test_test_button_stays_when_credentials_exist(self, db_session):
+        from app.routers.htmx.settings import _enrich_source
+
+        with patch.dict(os.environ, {"EBAY_CLIENT_ID": "cid", "EBAY_CLIENT_SECRET": "sec"}):
+            enriched = _enrich_source(self._ebay_source(db_session), db_session)
+        assert enriched["testable"] is True
+
+    def test_test_button_hidden_without_credentials(self, db_session):
+        from app.routers.htmx.settings import _enrich_source
+
+        with patch.dict(os.environ, {"EBAY_CLIENT_ID": "", "EBAY_CLIENT_SECRET": ""}):
+            enriched = _enrich_source(self._ebay_source(db_session), db_session)
+        assert enriched["testable"] is False
+
+    def test_browser_workers_still_have_no_test_button(self, db_session):
+        """The carve-out: ICS/NC/TBF have no connector at all, so nothing to probe."""
+        from app.routers.htmx.settings import _enrich_source
+
+        nc = self._source(db_session, "netcomponents", [])
+        assert _enrich_source(nc, db_session)["testable"] is False
+
+
+class TestStartupSeeding:
+    def test_seed_browser_workers_creates_the_ebay_singleton(self, db_session):
+        """Pins the WIRING, not just the helper: dropping the eBay line from the seed
+        batch would leave a fresh DB with no row for the worker to heartbeat into."""
+        import app.startup as startup_mod
+
+        with patch.object(startup_mod, "SessionLocal", return_value=db_session):
+            startup_mod.seed_browser_workers()
+
+        assert db_session.query(EbayWorkerStatus).filter_by(id=1).one_or_none() is not None

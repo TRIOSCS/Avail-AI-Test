@@ -11,6 +11,7 @@ Depends on: search_worker_base.queue_manager, EbaySearchQueue model, config
 
 from sqlalchemy.orm import Session
 
+from app.constants import SearchQueueStatus
 from app.models import EbaySearchQueue
 
 from ..search_worker_base.queue_manager import QueueManager
@@ -23,6 +24,12 @@ _qm = QueueManager(
     source_type="ebay",
     dedup_window_days=_config.EBAY_DEDUP_WINDOW_DAYS,
     log_prefix="EBAY",
+    # Rows are enqueued QUEUED, not PENDING. PENDING exists for the browser
+    # workers' AI commodity gate, which promotes PENDING -> QUEUED; the eBay
+    # worker deliberately has no gate (every queued MPN is searched, spend is
+    # bounded by the daily call budget), so a PENDING row here would never be
+    # claimable and the queue would grow forever.
+    initial_status=SearchQueueStatus.QUEUED,
 )
 
 
@@ -33,6 +40,9 @@ def enqueue_for_ebay_search(
     resolved_via_spec_code: str | None = None,
 ) -> EbaySearchQueue | None:
     """Queue a requirement for an eBay Browse API search.
+
+    The row is created directly in ``queued`` (no AI gate stands between
+    enqueue and the worker's claim — see the QueueManager construction above).
 
     Optional ``override_mpn`` enables enqueueing a resolved-AVL MPN distinct
     from ``req.primary_mpn``. ``resolved_via_spec_code`` is recorded on the

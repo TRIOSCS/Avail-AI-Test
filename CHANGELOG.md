@@ -47,7 +47,32 @@ All notable changes to the project are logged here.
   heartbeat health. It is deliberately NOT added to `BROWSER_WORKER_SOURCES`: eBay
   owns real API credentials, so health_monitor keeps pinging them. Testability for
   worker-backed sources now derives from `connector_registry.source_has_test_path()`,
-  which keeps ICS / NC / TBF button-less while eBay keeps its Test button.
+  which keeps ICS / NC / TBF button-less while eBay keeps its Test button. The
+  worker-health line moved out of the `browser_login` branch of
+  `_connector_macros.html` into a shared block (eBay renders as a `key` card), and
+  `last_error` now renders for worker-backed cards too — otherwise an eBay auth
+  failure had nowhere to appear. The worker writes `circuit_breaker_reason` when it
+  has no credentials, so an unconfigured poller reads red-with-a-reason rather than
+  green-while-idle.
+- **`search_worker_base.queue_manager.QueueManager`** gains an optional
+  `initial_status` (default `PENDING` — ICS / NC / TBF unchanged). eBay passes
+  `QUEUED`: the only `pending → queued` promotion in the codebase is the AI gate,
+  which the eBay worker does not run, so a `pending` eBay row would never be
+  claimable.
+- **eBay call budget is now a real cap** — a search may not start unless the whole
+  `EBAY_MAX_PAGES` allowance fits, and failed/timed-out searches are charged for the
+  calls they actually spent (via a caller-owned `CallCounter`) instead of a flat 1.
+  The status singleton is seeded (and re-seeded with a warning) by the worker, since
+  every budget write is a no-op without it.
+- **eBay failure handling** — a persistent 429 honors `Retry-After`, then re-queues
+  the item and backs off 5 minutes instead of marking it `failed` (terminal); a 404
+  raises rather than posing as an empty result set; unexpected exceptions feed the
+  circuit breaker; the empty-result streak counts the RAW Browse payload, not
+  post-filter emptiness; the per-request timeout and the whole-search deadline are
+  separate budgets; and every attempt — failures included — writes an
+  `ebay_search_log` row with `error` set.
+- **eBay quantity of 0** is treated as "no quantity reported" rather than written as
+  `qty_available=0` with the quantity confidence bonus.
 - **Liveness** — `worker_liveness_jobs` and `GET /api/admin/workers/status` watch the
   eBay heartbeat alongside the other workers; `startup.seed_browser_workers` seeds the
   `EbayWorkerStatus` singleton.

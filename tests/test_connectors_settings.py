@@ -917,3 +917,56 @@ def test_connector_field_reads_loaded_row_no_extra_api_source_queries(db_session
         f"Expected 0 api_sources SELECTs building {len(env_vars)} fields from the loaded row, "
         f"got {len(selects)} (N+1 regression)"
     )
+
+
+def test_ebay_card_shows_worker_health_and_last_error(admin_client, db_session):
+    """EBay is worker-backed but renders as a `key` card (it owns real API credentials),
+    and that branch used to render no worker verdict at all — so an unconfigured or
+    stalled poller read as a green card with no explanation, and its health_monitor
+    error never appeared."""
+    from datetime import datetime
+
+    from app.models import EbayWorkerStatus
+
+    src = ApiSource(
+        name="ebay",
+        display_name="eBay",
+        category="api",
+        source_type="marketplace",
+        status="active",
+        is_active=True,
+        env_vars=["EBAY_CLIENT_ID", "EBAY_CLIENT_SECRET"],
+        credentials={},
+        last_error="eBay auth failed: invalid client id",
+    )
+    db_session.add(src)
+    db_session.add(
+        EbayWorkerStatus(
+            id=1,
+            is_running=True,
+            last_heartbeat=datetime.now(UTC),
+            circuit_breaker_open=True,
+            circuit_breaker_reason="EBAY_CLIENT_ID/EBAY_CLIENT_SECRET not configured",
+        )
+    )
+    db_session.commit()
+
+    html = admin_client.get(f"/v2/partials/settings/connector-card/{src.id}", follow_redirects=False).text
+    assert "Worker down" in html, "worker verdict must render on the eBay (key) card too"
+    assert "EBAY_CLIENT_ID/EBAY_CLIENT_SECRET not configured" in html
+    assert "eBay auth failed: invalid client id" in html, "health_monitor errors must stay visible"
+
+
+def test_browser_worker_card_still_shows_its_worker_verdict(admin_client, db_session):
+    """Regression guard for moving worker_detail out of the browser_login branch."""
+    from datetime import datetime
+
+    from app.models import IcsWorkerStatus
+
+    db_session.add(IcsWorkerStatus(id=1, is_running=True, last_heartbeat=datetime.now(UTC)))
+    db_session.commit()
+    _set_active(db_session, "icsource")
+
+    src = db_session.query(ApiSource).filter_by(name="icsource").first()
+    html = admin_client.get(f"/v2/partials/settings/connector-card/{src.id}", follow_redirects=False).text
+    assert "Worker active" in html

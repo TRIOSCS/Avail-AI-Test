@@ -1,6 +1,6 @@
 {
   "href": "https://api.ebay.com/buy/browse/v1/item_summary/search?q=0F8NV&limit=50&offset=0",
-  "total": 9,
+  "total": 10,
   "limit": 50,
   "offset": 0,
   "itemSummaries": [
@@ -9,116 +9,298 @@
       "title": "Dell PERC H730 1GB RAID Controller 0F8NV Genuine",
       "condition": "New",
       "conditionId": "1000",
-      "price": {"value": "129.99", "currency": "USD"},
-      "buyingOptions": ["FIXED_PRICE"],
+      "price": {
+        "value": "129.99",
+        "currency": "USD"
+      },
+      "buyingOptions": [
+        "FIXED_PRICE"
+      ],
       "itemWebUrl": "https://www.ebay.com/itm/110000000001",
-      "image": {"imageUrl": "https://i.ebayimg.com/images/g/aaa/s-l500.jpg"},
-      "seller": {"username": "trio_surplus", "feedbackPercentage": "99.5", "feedbackScore": 4120},
-      "estimatedAvailabilities": [{"estimatedAvailableQuantity": 12}],
-      "itemLocation": {"country": "US"}
+      "image": {
+        "imageUrl": "https://i.ebayimg.com/images/g/aaa/s-l500.jpg"
+      },
+      "seller": {
+        "username": "trio_surplus",
+        "feedbackPercentage": "99.5",
+        "feedbackScore": 4120
+      },
+      "estimatedAvailabilities": [
+        {
+          "estimatedAvailableQuantity": 12
+        }
+      ],
+      "itemLocation": {
+        "country": "US"
+      }
     },
     {
       "itemId": "v1|110000000002|0",
       "title": "Dell 0F8NV PERC H730 Mini Mono Controller",
       "condition": "Seller refurbished",
       "conditionId": "2500",
-      "price": {"value": "89.00", "currency": "USD"},
-      "buyingOptions": ["FIXED_PRICE", "BEST_OFFER"],
+      "price": {
+        "value": "89.00",
+        "currency": "USD"
+      },
+      "buyingOptions": [
+        "FIXED_PRICE",
+        "BEST_OFFER"
+      ],
       "itemWebUrl": "https://www.ebay.com/itm/110000000002",
-      "image": {"imageUrl": "https://i.ebayimg.com/images/g/bbb/s-l500.jpg"},
-      "seller": {"username": "server_parts_hub", "feedbackPercentage": "97.2", "feedbackScore": 880},
-      "itemLocation": {"country": "US"}
+      "image": {
+        "imageUrl": "https://i.ebayimg.com/images/g/bbb/s-l500.jpg"
+      },
+      "seller": {
+        "username": "server_parts_hub",
+        "feedbackPercentage": "97.2",
+        "feedbackScore": 880
+      },
+      "itemLocation": {
+        "country": "US"
+      }
     },
     {
       "itemId": "v1|110000000003|0",
       "title": "Dell PERC H730 Raid Card F8NV Tested Working",
       "condition": "Used",
       "conditionId": "3000",
-      "price": {"value": "75.50", "currency": "USD"},
-      "buyingOptions": ["FIXED_PRICE"],
+      "price": {
+        "value": "75.50",
+        "currency": "USD"
+      },
+      "buyingOptions": [
+        "FIXED_PRICE"
+      ],
       "itemWebUrl": "https://www.ebay.com/itm/110000000003",
-      "image": {"imageUrl": "https://i.ebayimg.com/images/g/ccc/s-l500.jpg"},
-      "seller": {"username": "itad_liquidators", "feedbackPercentage": "98.0", "feedbackScore": 15200},
-      "estimatedAvailabilities": [{"estimatedAvailableQuantity": 3}],
-      "itemLocation": {"country": "CA"}
+      "image": {
+        "imageUrl": "https://i.ebayimg.com/images/g/ccc/s-l500.jpg"
+      },
+      "seller": {
+        "username": "itad_liquidators",
+        "feedbackPercentage": "98.0",
+        "feedbackScore": 15200
+      },
+      "estimatedAvailabilities": [
+        {
+          "estimatedAvailableQuantity": 3
+        }
+      ],
+      "itemLocation": {
+        "country": "CA"
+      }
     },
     {
       "itemId": "v1|110000000004|0",
       "title": "Dell 0F8NV RAID Controller For Parts Only",
       "condition": "For parts or not working",
       "conditionId": "7000",
-      "price": {"value": "9.99", "currency": "USD"},
-      "buyingOptions": ["FIXED_PRICE"],
+      "price": {
+        "value": "9.99",
+        "currency": "USD"
+      },
+      "buyingOptions": [
+        "FIXED_PRICE"
+      ],
       "itemWebUrl": "https://www.ebay.com/itm/110000000004",
-      "image": {"imageUrl": "https://i.ebayimg.com/images/g/ddd/s-l500.jpg"},
-      "seller": {"username": "salvage_bin", "feedbackPercentage": "94.1", "feedbackScore": 33},
-      "estimatedAvailabilities": [{"estimatedAvailableQuantity": 1}],
-      "itemLocation": {"country": "US"}
+      "image": {
+        "imageUrl": "https://i.ebayimg.com/images/g/ddd/s-l500.jpg"
+      },
+      "seller": {
+        "username": "salvage_bin",
+        "feedbackPercentage": "94.1",
+        "feedbackScore": 33
+      },
+      "estimatedAvailabilities": [
+        {
+          "estimatedAvailableQuantity": 1
+        }
+      ],
+      "itemLocation": {
+        "country": "US"
+      }
     },
     {
       "itemId": "v1|110000000005|0",
       "title": "Dell 0F8NV PERC H730 No Reserve",
       "condition": "Used",
       "conditionId": "3000",
-      "price": {"value": "0.99", "currency": "USD"},
-      "buyingOptions": ["AUCTION"],
+      "price": {
+        "value": "0.99",
+        "currency": "USD"
+      },
+      "buyingOptions": [
+        "AUCTION"
+      ],
       "itemWebUrl": "https://www.ebay.com/itm/110000000005",
-      "image": {"imageUrl": "https://i.ebayimg.com/images/g/eee/s-l500.jpg"},
-      "seller": {"username": "auction_house_9", "feedbackPercentage": "99.9", "feedbackScore": 7700},
-      "estimatedAvailabilities": [{"estimatedAvailableQuantity": 1}],
-      "itemLocation": {"country": "US"}
+      "image": {
+        "imageUrl": "https://i.ebayimg.com/images/g/eee/s-l500.jpg"
+      },
+      "seller": {
+        "username": "auction_house_9",
+        "feedbackPercentage": "99.9",
+        "feedbackScore": 7700
+      },
+      "estimatedAvailabilities": [
+        {
+          "estimatedAvailableQuantity": 1
+        }
+      ],
+      "itemLocation": {
+        "country": "US"
+      }
     },
     {
       "itemId": "v1|110000000006|0",
       "title": "HP Smart Array P440 Controller 726821-B21 New Sealed",
       "condition": "New",
       "conditionId": "1000",
-      "price": {"value": "149.00", "currency": "USD"},
-      "buyingOptions": ["FIXED_PRICE"],
+      "price": {
+        "value": "149.00",
+        "currency": "USD"
+      },
+      "buyingOptions": [
+        "FIXED_PRICE"
+      ],
       "itemWebUrl": "https://www.ebay.com/itm/110000000006",
-      "image": {"imageUrl": "https://i.ebayimg.com/images/g/fff/s-l500.jpg"},
-      "seller": {"username": "hp_spares_direct", "feedbackPercentage": "99.1", "feedbackScore": 2100},
-      "estimatedAvailabilities": [{"estimatedAvailableQuantity": 5}],
-      "itemLocation": {"country": "US"}
+      "image": {
+        "imageUrl": "https://i.ebayimg.com/images/g/fff/s-l500.jpg"
+      },
+      "seller": {
+        "username": "hp_spares_direct",
+        "feedbackPercentage": "99.1",
+        "feedbackScore": 2100
+      },
+      "estimatedAvailabilities": [
+        {
+          "estimatedAvailableQuantity": 5
+        }
+      ],
+      "itemLocation": {
+        "country": "US"
+      }
     },
     {
       "itemId": "v1|110000000007|0",
       "title": "Dell PERC H730P 0F8NV Never Installed",
       "condition": "Open box",
       "conditionId": "1500",
-      "price": {"value": "110.00", "currency": "USD"},
-      "buyingOptions": ["FIXED_PRICE", "BEST_OFFER"],
+      "price": {
+        "value": "110.00",
+        "currency": "USD"
+      },
+      "buyingOptions": [
+        "FIXED_PRICE",
+        "BEST_OFFER"
+      ],
       "itemWebUrl": "https://www.ebay.com/itm/110000000007",
-      "image": {"imageUrl": "https://i.ebayimg.com/images/g/ggg/s-l500.jpg"},
-      "seller": {"username": "boxopen_deals", "feedbackPercentage": "100.0", "feedbackScore": 42},
-      "estimatedAvailabilities": [{"estimatedAvailableQuantity": 2}],
-      "itemLocation": {"country": "GB"}
+      "image": {
+        "imageUrl": "https://i.ebayimg.com/images/g/ggg/s-l500.jpg"
+      },
+      "seller": {
+        "username": "boxopen_deals",
+        "feedbackPercentage": "100.0",
+        "feedbackScore": 42
+      },
+      "estimatedAvailabilities": [
+        {
+          "estimatedAvailableQuantity": 2
+        }
+      ],
+      "itemLocation": {
+        "country": "GB"
+      }
     },
     {
       "itemId": "v1|110000000008|0",
       "title": "Genuine Dell 0F8NV H730 Mini Controller Card",
       "condition": "New other (see details)",
       "conditionId": "1500",
-      "price": {"value": "118.25", "currency": "USD"},
-      "buyingOptions": ["FIXED_PRICE"],
+      "price": {
+        "value": "118.25",
+        "currency": "USD"
+      },
+      "buyingOptions": [
+        "FIXED_PRICE"
+      ],
       "itemWebUrl": "https://www.ebay.com/itm/110000000008",
-      "image": {"imageUrl": "https://i.ebayimg.com/images/g/hhh/s-l500.jpg"},
-      "seller": {"username": "trio_surplus", "feedbackPercentage": "99.5", "feedbackScore": 4120},
-      "estimatedAvailabilities": [{"estimatedAvailableQuantity": 4}],
-      "itemLocation": {"country": "US"}
+      "image": {
+        "imageUrl": "https://i.ebayimg.com/images/g/hhh/s-l500.jpg"
+      },
+      "seller": {
+        "username": "trio_surplus",
+        "feedbackPercentage": "99.5",
+        "feedbackScore": 4120
+      },
+      "estimatedAvailabilities": [
+        {
+          "estimatedAvailableQuantity": 4
+        }
+      ],
+      "itemLocation": {
+        "country": "US"
+      }
+    },
+    {
+      "itemId": "v1|110000000009|0",
+      "title": "Dell 0F8NV PERC H730 Mini Controller \u2014 Bid or Buy It Now",
+      "itemWebUrl": "https://www.ebay.com/itm/110000000009",
+      "image": {
+        "imageUrl": "https://i.ebayimg.com/images/g/110000000009/s-l500.jpg"
+      },
+      "price": {
+        "value": "88.00",
+        "currency": "USD"
+      },
+      "condition": "Used",
+      "conditionId": "3000",
+      "buyingOptions": [
+        "AUCTION",
+        "BEST_OFFER"
+      ],
+      "seller": {
+        "username": "mixed_options_seller",
+        "feedbackPercentage": "97.1",
+        "feedbackScore": 640
+      },
+      "itemLocation": {
+        "country": "US"
+      },
+      "estimatedAvailabilities": [
+        {
+          "estimatedAvailableQuantity": 1
+        }
+      ]
     },
     {
       "itemId": "v1|110000000001|0",
       "title": "Dell PERC H730 1GB RAID Controller 0F8NV Genuine",
       "condition": "New",
       "conditionId": "1000",
-      "price": {"value": "129.99", "currency": "USD"},
-      "buyingOptions": ["FIXED_PRICE"],
+      "price": {
+        "value": "129.99",
+        "currency": "USD"
+      },
+      "buyingOptions": [
+        "FIXED_PRICE"
+      ],
       "itemWebUrl": "https://www.ebay.com/itm/110000000001",
-      "image": {"imageUrl": "https://i.ebayimg.com/images/g/aaa/s-l500.jpg"},
-      "seller": {"username": "trio_surplus", "feedbackPercentage": "99.5", "feedbackScore": 4120},
-      "estimatedAvailabilities": [{"estimatedAvailableQuantity": 7}],
-      "itemLocation": {"country": "US"}
+      "image": {
+        "imageUrl": "https://i.ebayimg.com/images/g/aaa/s-l500.jpg"
+      },
+      "seller": {
+        "username": "trio_surplus",
+        "feedbackPercentage": "99.5",
+        "feedbackScore": 4120
+      },
+      "estimatedAvailabilities": [
+        {
+          "estimatedAvailableQuantity": 7
+        }
+      ],
+      "itemLocation": {
+        "country": "US"
+      }
     }
   ]
 }

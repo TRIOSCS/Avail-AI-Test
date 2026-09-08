@@ -302,6 +302,9 @@ sightings.py (router) → search_requirement(req, db)
     +---> enqueue_for_ebay_search(requirement_id, db)  # API-poller worker queue (eBay Browse API)
           (all four resolved from search_service._worker_enqueues() — add a
            worker THERE, never at the individual enqueue sites)
+          (ICS/NC/TBF rows land 'pending' and the AI commodity gate promotes them
+           to 'queued'; the gate-less eBay queue is created 'queued' directly via
+           QueueManager(initial_status=...) — nothing else moves pending→queued)
     |
     +---> _save_sightings + scoring + material card upsert
     |

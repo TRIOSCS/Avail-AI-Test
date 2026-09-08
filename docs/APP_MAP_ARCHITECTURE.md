@@ -59,7 +59,7 @@ deploy can't race DDL — the loser blocks until the winner finishes, then
 no-ops. Per-process DB pool sizing (`DB_POOL_SIZE`/`DB_MAX_OVERFLOW`, default
 5+5) is budgeted against Postgres `max_connections=100` across every process
 that imports `app/database.py`; the full connection-budget table (2 app
-workers + scheduler + enrichment-worker + 4 host workers = 70 of 100, 30
+workers + scheduler + enrichment-worker + 4 host workers = 80 of 100, 20
 headroom) lives in the comment above the module-level `engine` in
 `app/database.py`.
 
