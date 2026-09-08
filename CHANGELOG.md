@@ -2,6 +2,88 @@
 
 All notable changes to the project are logged here.
 
+## 2026-09-05 — eBay becomes the fourth search worker (API poller)
+
+### Added
+- **`app/services/ebay_worker/`** — a queue-driven poller for eBay's Browse API
+  (`GET /buy/browse/v1/item_summary/search`). It is the fourth search worker and the
+  first that is an API poller rather than a browser automation: no Patchright, no
+  Chrome, no Xvfb, no session manager, no human-behavior simulation, and no AI
+  commodity gate. It reuses `search_worker_base` (QueueManager, `save_sightings`,
+  `CircuitBreakerBase`) exactly as `tbf_worker` does.
+- **Migration 219** — `ebay_search_queue` / `ebay_search_log` / `ebay_worker_status`,
+  mirroring the TBF triple. `ebay_worker_status` adds two eBay-only columns,
+  `calls_today` and `budget_day`, so the daily Browse API call budget survives a
+  worker restart.
+- **Pacing = min delay + daily call budget** (`EBAY_MIN_DELAY_SECONDS`,
+  `EBAY_DAILY_CALL_BUDGET`, reset at midnight UTC). No business-hours window and no
+  random breaks — those exist to make a browser look human, which an API poller is
+  not.
+- **Strict part-number match** — an item is kept only when the alphanumeric-normalized
+  MPN appears inside the alphanumeric-normalized title, with the Dell leading-zero
+  variant (`0F8NV` / `F8NV`) also accepted. `conditionId` 7000 ("For parts or not
+  working") and auction-only listings are dropped, and item detail pages are never
+  fetched.
+- **Deploy artifacts** — `deploy/avail-ebay-worker.service` (no Xvfb, no `DISPLAY`,
+  `MemoryMax=1G`, `CPUQuota=25%`), `scripts/setup_ebay_worker.sh`, and
+  `.env.ebay-worker.example`. `deploy.sh` Step 6b now restarts the unit with the
+  other three.
+
+### Changed
+- **`search_service`** — `_worker_enqueues()` gains `enqueue_for_ebay_search`;
+  `_build_connectors` no longer constructs `EbayConnector`, and
+  `_CONNECTOR_SOURCE_MAP` / `_MARKET_SOURCE_DISPLAY` drop `ebay` so a healthy worker
+  is never reported as a down synchronous market source.
+- **`EbayConnector` stays live** for the Settings → Connectors Test button, the
+  health_monitor credential ping, and `enrichment.harvest_ebay_titles`. Its OAuth
+  minting moved to module-level helpers in `app/connectors/ebay.py`
+  (`get_ebay_access_token` / `ebay_token_cache_key` / `invalidate_ebay_token`) so the
+  worker and the connector share ONE process-wide cached bearer.
+- **`search_worker_base.sighting_writer.save_sightings`** gains an OPTIONAL
+  `dedup_key_fn` hook. The default is the existing `(vendor, mpn, qty)` triple, so
+  ICS / NC / TBF behavior is unchanged; eBay keys on `(vendor, ebay_item_id)` because
+  one seller routinely lists the same part several times at the same quantity.
+- **Connectors tab** — `WORKER_BACKED_SOURCES` gains `ebay` so the card shows worker
+  heartbeat health. It is deliberately NOT added to `BROWSER_WORKER_SOURCES`: eBay
+  owns real API credentials, so health_monitor keeps pinging them. Testability for
+  worker-backed sources now derives from `connector_registry.source_has_test_path()`,
+  which keeps ICS / NC / TBF button-less while eBay keeps its Test button. The
+  worker-health line moved out of the `browser_login` branch of
+  `_connector_macros.html` into a shared block (eBay renders as a `key` card), and
+  `last_error` now renders for worker-backed cards too — otherwise an eBay auth
+  failure had nowhere to appear. The worker writes `circuit_breaker_reason` when it
+  has no credentials, so an unconfigured poller reads red-with-a-reason rather than
+  green-while-idle.
+- **`search_worker_base.queue_manager.QueueManager`** gains an optional
+  `initial_status` (default `PENDING` — ICS / NC / TBF unchanged). eBay passes
+  `QUEUED`: the only `pending → queued` promotion in the codebase is the AI gate,
+  which the eBay worker does not run, so a `pending` eBay row would never be
+  claimable.
+- **eBay call budget is now a real cap** — a search may not start unless the whole
+  `EBAY_MAX_PAGES` allowance fits, and failed/timed-out searches are charged for the
+  calls they actually spent (via a caller-owned `CallCounter`) instead of a flat 1.
+  The status singleton is seeded (and re-seeded with a warning) by the worker, since
+  every budget write is a no-op without it.
+- **eBay failure handling** — a persistent 429 honors `Retry-After`, then re-queues
+  the item and backs off 5 minutes instead of marking it `failed` (terminal); a 404
+  raises rather than posing as an empty result set; unexpected exceptions feed the
+  circuit breaker; the empty-result streak counts the RAW Browse payload, not
+  post-filter emptiness; the per-request timeout and the whole-search deadline are
+  separate budgets; and every attempt — failures included — writes an
+  `ebay_search_log` row with `error` set.
+- **eBay quantity of 0** is treated as "no quantity reported" rather than written as
+  `qty_available=0` with the quantity confidence bonus.
+- **Liveness** — `worker_liveness_jobs` and `GET /api/admin/workers/status` watch the
+  eBay heartbeat alongside the other workers; `startup.seed_browser_workers` seeds the
+  `EbayWorkerStatus` singleton.
+
+### Follow-up (not in this change)
+- `source_trust.py` still classes `ebay` under `MARKETPLACE_SOURCES` with its old
+  scoring. Re-tuning eBay's trust weight now that listings pass a strict
+  part-number filter is deliberately deferred to its own change.
+
+---
+
 ## 2026-04-17 — Search “Details” did not open lead drawer
 
 ### Bug Fixes

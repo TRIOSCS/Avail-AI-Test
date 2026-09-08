@@ -5,6 +5,7 @@
 .env.*
 !.env.example
 !.env.tbf-worker.example
+!.env.ebay-worker.example
 __pycache__/
 *.pyc
 *.pyo

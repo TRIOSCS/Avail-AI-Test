@@ -23,7 +23,6 @@ from sqlalchemy.orm import Session
 from .cache.redis_probe import RedisProbe
 from .connectors.ai_live_web import AIWebSearchConnector
 from .connectors.digikey import DigiKeyConnector
-from .connectors.ebay import EbayConnector
 from .connectors.element14 import Element14Connector
 from .connectors.mouser import MouserConnector
 from .connectors.oemsecrets import OEMSecretsConnector
@@ -49,6 +48,7 @@ from .scoring import (
 )
 from .services.activity_service import log_activity
 from .services.credential_service import get_credential, get_credentials_batch
+from .services.ebay_worker.queue_manager import enqueue_for_ebay_search
 from .services.fru_matrix_service import get_search_aliases
 from .services.ics_worker.queue_manager import enqueue_for_ics_search
 from .services.nc_worker.queue_manager import enqueue_for_nc_search
@@ -80,7 +80,6 @@ from .vendor_utils import normalize_vendor_name
 _CONNECTOR_SOURCE_MAP = {
     "NexarConnector": "nexar",
     "BrokerBinConnector": "brokerbin",
-    "EbayConnector": "ebay",
     "DigiKeyConnector": "digikey",
     "MouserConnector": "mouser",
     "OEMSecretsConnector": "oemsecrets",
@@ -91,7 +90,7 @@ _CONNECTOR_SOURCE_MAP = {
 
 
 def _worker_enqueues() -> tuple[tuple, ...]:
-    """(enqueue_fn, log_label) pairs for the browser-automation worker queues.
+    """(enqueue_fn, log_label) pairs for the async search-worker queues.
 
     Iterated wherever a requirement (or AVL alias MPN) fans out to all async
     workers — add a new worker here, not at each enqueue site. Resolved at call
@@ -102,6 +101,7 @@ def _worker_enqueues() -> tuple[tuple, ...]:
         (enqueue_for_ics_search, "ICS"),
         (enqueue_for_nc_search, "NC"),
         (enqueue_for_tbf_search, "TBF"),
+        (enqueue_for_ebay_search, "EBAY"),
     )
 
 
@@ -1517,8 +1517,6 @@ def _load_connector_config(db: Session) -> dict:
             ("nexar", "OCTOPART_API_KEY"),
             ("brokerbin", "BROKERBIN_API_KEY"),
             ("brokerbin", "BROKERBIN_API_SECRET"),
-            ("ebay", "EBAY_CLIENT_ID"),
-            ("ebay", "EBAY_CLIENT_SECRET"),
             ("digikey", "DIGIKEY_CLIENT_ID"),
             ("digikey", "DIGIKEY_CLIENT_SECRET"),
             ("mouser", "MOUSER_API_KEY"),
@@ -1538,6 +1536,9 @@ def _load_connector_config(db: Session) -> dict:
 def _build_connectors(db: Session) -> tuple[list, dict[str, dict], set[str]]:
     """Build enabled connectors with credentials, returning (connectors,
     source_stats_map, disabled_sources).
+
+    Synchronous market sources only — the queue-driven workers (ICS, NC, TBF, eBay) are
+    NOT built here; they are fanned out via _worker_enqueues.
 
     Sources with status='disabled' or status='error' (set by health_monitor) are
     excluded; their entries are seeded into source_stats_map with 'disabled' or
@@ -1586,9 +1587,12 @@ def _build_connectors(db: Session) -> tuple[list, dict[str, dict], set[str]]:
     # request time.
     _add_or_skip("brokerbin", bb_key, lambda: BrokerBinConnector(bb_key, bb_sec))
 
-    ebay_id = _c("ebay", "EBAY_CLIENT_ID")
-    ebay_sec = _c("ebay", "EBAY_CLIENT_SECRET")
-    _add_or_skip("ebay", ebay_id and ebay_sec, lambda: EbayConnector(ebay_id, ebay_sec))
+    # NOTE: eBay is deliberately absent. It is worker-backed now — requirements
+    # reach it through enqueue_for_ebay_search (see _worker_enqueues) and the
+    # avail-ebay-worker poller, not through this synchronous fan-out. The
+    # EbayConnector class is still live for the Settings -> Connectors Test
+    # button, the health_monitor ping, and enrichment's eBay title mining;
+    # connector_registry.get_connector_for_source("ebay") builds it.
 
     dk_id = _c("digikey", "DIGIKEY_CLIENT_ID")
     dk_sec = _c("digikey", "DIGIKEY_CLIENT_SECRET")
@@ -1610,11 +1614,13 @@ def _build_connectors(db: Session) -> tuple[list, dict[str, dict], set[str]]:
 
 
 # Canonical display names for the live-market connectors (used by the dossier
-# degraded-state banner). Keys must match _CONNECTOR_SOURCE_MAP values.
+# degraded-state banner). Keys must match _CONNECTOR_SOURCE_MAP values —
+# worker-backed sources (icsource / netcomponents / thebrokersite / ebay) are
+# NOT listed: their health is a worker heartbeat, not a synchronous search, and
+# the banner would otherwise report a healthy worker as a "down" market source.
 _MARKET_SOURCE_DISPLAY = {
     "nexar": "Nexar",
     "brokerbin": "BrokerBin",
-    "ebay": "eBay",
     "digikey": "DigiKey",
     "mouser": "Mouser",
     "oemsecrets": "OEMSecrets",
