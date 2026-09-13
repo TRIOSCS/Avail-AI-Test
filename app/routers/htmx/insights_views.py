@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from ...constants import RequisitionStatus
 from ...database import get_db
-from ...dependencies import require_user
+from ...dependencies import require_requisition_access, require_user
 from ...models import Company, Requisition, User, VendorCard
 from ...rate_limit import check_rate_limit
 from ...template_env import template_response
@@ -221,6 +221,7 @@ async def requisition_insights_panel(
     """Return cached AI insights panel for a requisition."""
     from ...services.knowledge_service import get_cached_insights
 
+    require_requisition_access(db, req_id, user)
     insights = get_cached_insights(db, req_id)
     return _render_insights(request, user, insights, "requisitions", req_id)
 
@@ -235,6 +236,7 @@ async def requisition_insights_refresh(
     """Generate fresh AI insights for a requisition and return panel."""
     from ...services.knowledge_service import generate_insights, get_cached_insights
 
+    require_requisition_access(db, req_id, user)
     entries = []
     try:
         entries = await generate_insights(db, req_id, interactive=True)

@@ -450,9 +450,15 @@ async def prepay_request_decide(
     if origin == "approvals_workspace" and ar.subject_id is not None:
         # Workspace pane decide: re-render the prepayment's pane in place + repaint
         # the left list (awListRefresh), mirroring the SO/PO pane branches.
+        # svc_decide() above already required this user hold a PENDING recipient slot
+        # on the request (PermissionError otherwise) — that IS the eligibility check
+        # for this exact prepayment, so bypass_ownership keeps the re-render in
+        # agreement with the write instead of re-applying the stricter buy-plan
+        # ownership gate and 404ing a restricted-role approver who just decided it
+        # legitimately (item 8).
         from .approvals_hub import render_prepayment_pane
 
-        resp = render_prepayment_pane(request, user, db, int(ar.subject_id))
+        resp = render_prepayment_pane(request, user, db, int(ar.subject_id), bypass_ownership=True)
         resp.headers["HX-Trigger"] = "awListRefresh"
         return resp
     # Legacy-console origin ("approvals_hub") and originless posts both land on the

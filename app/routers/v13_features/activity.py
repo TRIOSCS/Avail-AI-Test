@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from ...config import settings
 from ...database import get_db
 from ...dependencies import can_manage_account, require_admin, require_user
-from ...models import Company, User, VendorCard
+from ...models import Company, User
 from ...rate_limit import limiter
 from ...schemas.v13_features import (
     ActivityAttributeRequest,
@@ -30,6 +30,7 @@ from ...schemas.v13_features import (
     VendorCallLog,
     VendorNoteLog,
 )
+from .._lookup_helpers import get_vendor_card_or_404
 
 router = APIRouter(tags=["v13"])
 
@@ -458,9 +459,7 @@ async def log_vendor_phone_call(
     db: Session = Depends(get_db),
 ):
     """Log a manual phone call against a vendor card."""
-    card = db.get(VendorCard, vendor_id)
-    if not card:
-        raise HTTPException(404, "Vendor not found")
+    get_vendor_card_or_404(db, vendor_id)
 
     from app.services.activity_service import log_vendor_call
 
@@ -488,9 +487,7 @@ async def log_vendor_note_endpoint(
     db: Session = Depends(get_db),
 ):
     """Log a manual note against a vendor card."""
-    card = db.get(VendorCard, vendor_id)
-    if not card:
-        raise HTTPException(404, "Vendor not found")
+    get_vendor_card_or_404(db, vendor_id)
 
     from app.services.activity_service import log_vendor_note
 
@@ -549,9 +546,7 @@ async def attribute_activity_endpoint(
         if not target:
             raise HTTPException(404, "Company not found")
     elif payload.entity_type == "vendor":
-        target = db.get(VendorCard, payload.entity_id)
-        if not target:
-            raise HTTPException(404, "Vendor not found")
+        target = get_vendor_card_or_404(db, payload.entity_id)
 
     from app.services.activity_service import attribute_activity
 
@@ -595,9 +590,7 @@ async def vendor_activity_status(
     """Get activity health status for a vendor (green/yellow/red indicator)."""
     from app.services.activity_service import days_since_last_vendor_activity
 
-    card = db.get(VendorCard, vendor_id)
-    if not card:
-        raise HTTPException(404, "Vendor not found")
+    get_vendor_card_or_404(db, vendor_id)
 
     days = days_since_last_vendor_activity(vendor_id, db)
 

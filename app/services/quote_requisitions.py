@@ -24,7 +24,13 @@ Depends on: app.models (Quote, QuoteRequisition, Requisition).
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+from loguru import logger
 from sqlalchemy.orm import Query, Session
+
+if TYPE_CHECKING:
+    from app.models import Quote, User
 
 
 class CustomerMismatchError(ValueError):
@@ -242,3 +248,107 @@ def apply_quote_result(db: Session, quote, *, result: str, reason: str | None = 
             from app.services.activity_service import _update_last_activity
 
             _update_last_activity({"type": "company", "id": company_id}, db)
+
+
+def reopen_quote(db: Session, quote: Quote, actor: User, *, revise: bool) -> None:
+    """Undo a quote's terminal outcome on its requisition when the quote is reopened.
+
+    The single arbitration point for both reopen routes (JSON ``/api/quotes/{id}/reopen``
+    and the HTMX ``/v2/partials/quotes/{id}/reopen``) — they had diverged: the JSON route
+    set ``req.status = OPEN`` directly (bypassing ``transition()``, so no ActivityLog and
+    a stale ``won_revenue``), while the HTMX route never touched the requisition at all,
+    leaving it WON/LOST after the quote went back to draft.
+
+    Transitions the PRIMARY requisition back to OPEN via
+    ``requisition_state.transition`` (a no-op if it's already open; any other illegal
+    origin is logged and ignored rather than raised, since reopening the quote should
+    never itself fail). ``transition()`` already clears a stale ``outcome_reason`` for
+    non-terminal transitions. Also nulls ``quote.won_revenue`` since a reopened quote is
+    no longer a recorded win. Caller commits.
+
+    ``revise`` only affects the log message (a revision keeps the reopened quote's
+    lineage distinct from a plain undo-and-resend) — the requisition/quote mutation is
+    identical either way; the revision itself is built separately by
+    ``build_quote_revision``.
+    """
+    from app.constants import RequisitionStatus
+    from app.models import Requisition
+    from app.services.requisition_state import transition
+
+    quote.won_revenue = None
+
+    req = db.get(Requisition, quote.requisition_id)
+    if not req:
+        return
+    try:
+        transition(req, RequisitionStatus.OPEN, actor, db)
+    except ValueError as e:
+        logger.info("Requisition {} not reopened to open (quote {} reopen): {}", req.id, quote.id, e)
+        return
+    action = "revision" if revise else "reopen"
+    logger.info("Quote {} {} — requisition {} reset to open", quote.id, action, req.id)
+
+
+def build_quote_revision(db: Session, old: Quote, actor: User) -> Quote:
+    """Build the next revision of *old*: marks *old* REVISED and returns a new, flushed
+    (uncommitted) Quote carrying its line items, terms, and requisition membership
+    forward.
+
+    Numbering convention (oq-04, unified 2026-08-17): the superseded quote KEEPS
+    its number; the new revision carries the -R trail (Q-0142 → Q-0142-R1 → -R2).
+
+    Clones the parent's ``QuoteLine`` rows (not just the ``line_items`` JSON) —
+    quote_detail_partial, the send email, the PDF, and Build-Buy-Plan all read
+    QuoteLine — and calls ``link_quote_to_requisitions`` so a combined quote's
+    revision stays visible on every contributing requisition (the ``Quote``
+    ``after_insert`` listener only adds the new quote's own primary self-row).
+    Raises ``HTTPException(409)`` (via ``require_valid_transition``) if REVISED is
+    not a legal transition from ``old.status``. Caller commits.
+    """
+    from app.constants import QuoteStatus
+    from app.models import Quote, QuoteLine
+    from app.services.crm_service import quote_base_number, revision_quote_number
+    from app.services.status_machine import require_valid_transition
+
+    require_valid_transition("quote", old.status, QuoteStatus.REVISED)
+    old.status = QuoteStatus.REVISED
+    new_revision = (old.revision or 1) + 1
+    new_quote = Quote(
+        requisition_id=old.requisition_id,
+        customer_site_id=old.customer_site_id,
+        quote_number=revision_quote_number(quote_base_number(old.quote_number), new_revision),
+        revision=new_revision,
+        line_items=old.line_items or [],
+        subtotal=old.subtotal,
+        total_cost=old.total_cost,
+        total_margin_pct=old.total_margin_pct,
+        payment_terms=old.payment_terms,
+        shipping_terms=old.shipping_terms,
+        validity_days=old.validity_days,
+        notes=old.notes,
+        status=QuoteStatus.DRAFT,
+        created_by_id=actor.id,
+        source=old.source,
+    )
+    db.add(new_quote)
+    db.flush()  # need new_quote.id for the cloned lines + link table
+
+    link_quote_to_requisitions(db, new_quote.id, requisition_ids_for_quote(db, old.id))
+
+    for src in db.query(QuoteLine).filter(QuoteLine.quote_id == old.id).all():
+        db.add(
+            QuoteLine(
+                quote_id=new_quote.id,
+                material_card_id=src.material_card_id,
+                offer_id=src.offer_id,
+                mpn=src.mpn,
+                description=src.description,
+                manufacturer=src.manufacturer,
+                qty=src.qty,
+                cost_price=src.cost_price,
+                sell_price=src.sell_price,
+                margin_pct=src.margin_pct,
+                currency=src.currency,
+            )
+        )
+    return new_quote

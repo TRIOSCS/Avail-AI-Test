@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from ...constants import AccessKey
 from ...database import get_db
-from ...dependencies import require_access, require_admin, require_prospect_site_access, require_user
+from ...dependencies import require_access, require_admin, require_buyer, require_prospect_site_access, require_user
 from ...models import Offer, User, VendorCard
 from ...models.enrichment import ProspectContact
 from ...models.vendors import VendorContact
@@ -499,12 +499,8 @@ async def delete_vendor_partial(
     embedded delete keeps every list control targeting the embed container (Wave 3 item
     8a) instead of retargeting the main shell.
     """
-    from ...models import VendorCard
-
     hx_target, push_url_base = _sanitize_hx_params(hx_target, push_url_base, "/v2/vendors")
-    card = db.get(VendorCard, vendor_id)
-    if not card:
-        raise HTTPException(404, "Vendor not found")
+    card = get_vendor_card_or_404(db, vendor_id)
     active_offers = db.query(Offer).filter(Offer.vendor_card_id == card.id).count()
     if active_offers > 0:
         raise HTTPException(
@@ -755,14 +751,15 @@ def _render_contact_rows(request: Request, vendor, contacts):
 async def vendor_contact_add(
     request: Request,
     vendor_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_buyer),
     db: Session = Depends(get_db),
 ):
     """Add a vendor contact (HTMX).
 
-    require_user gate — mirrors vendor edit.
+    require_buyer gate — parity with the JSON API (vendor_contacts.py).
     """
     from ...models.vendors import VendorContact as VC
+    from ...utils.phone_utils import format_phone_e164
 
     vendor = get_vendor_card_or_404(db, vendor_id)
     form = await request.form()
@@ -771,7 +768,8 @@ async def vendor_contact_add(
         raise HTTPException(400, "email is required")
     full_name = (form.get("full_name") or "").strip()
     title = (form.get("title") or "").strip()
-    phone = (form.get("phone") or "").strip()
+    raw_phone = (form.get("phone") or "").strip()
+    phone = (format_phone_e164(raw_phone) or raw_phone) if raw_phone else ""
 
     # Model-derived length guards (Wave 3 item 6) — 400 instead of a Postgres 500.
     for _field, _value, _label in (
@@ -814,14 +812,15 @@ async def vendor_contact_edit(
     request: Request,
     vendor_id: int,
     contact_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_buyer),
     db: Session = Depends(get_db),
 ):
     """Edit a vendor contact (HTMX).
 
-    require_user gate.
+    require_buyer gate — parity with the JSON API (vendor_contacts.py).
     """
     from ...models.vendors import VendorContact as VC
+    from ...utils.phone_utils import format_phone_e164
 
     vendor = get_vendor_card_or_404(db, vendor_id)
     vc = db.query(VC).filter(VC.id == contact_id, VC.vendor_card_id == vendor_id).first()
@@ -832,7 +831,8 @@ async def vendor_contact_edit(
     full_name = (form.get("full_name") or "").strip()
     title = (form.get("title") or "").strip()
     email = (form.get("email") or "").strip()
-    phone = (form.get("phone") or "").strip()
+    raw_phone = (form.get("phone") or "").strip()
+    phone = (format_phone_e164(raw_phone) or raw_phone) if raw_phone else ""
 
     # Model-derived length guards (Wave 3 item 6) — 400 instead of a Postgres 500.
     for _field, _value, _label in (

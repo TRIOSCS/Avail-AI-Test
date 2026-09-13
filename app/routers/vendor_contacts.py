@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from ..cache.decorators import cached_endpoint
 from ..constants import ActivityType, Channel, ContactStatus, Direction, EventType
 from ..database import get_db
-from ..dependencies import require_buyer, require_user
+from ..dependencies import require_admin, require_buyer, require_user
 from ..models import Contact, User, VendorCard, VendorContact, VendorResponse
 from ..schemas.responses import VendorEmailMetricsResponse
 from ..schemas.vendors import VendorContactCreate, VendorContactLookup, VendorContactUpdate, VendorEmailAdd
@@ -301,14 +301,10 @@ async def add_vendor_contact(
     if not card:
         raise HTTPException(404, "Vendor card not found")
 
-    # Check for duplicate
+    # Check for duplicate — 409 for parity with htmx/vendors.py's vendor_contact_add.
     existing = db.query(VendorContact).filter_by(vendor_card_id=card_id, email=email).first()
     if existing:
-        return {
-            "id": existing.id,
-            "message": "Contact already exists",
-            "duplicate": True,
-        }
+        raise HTTPException(409, "A contact with that email already exists")
 
     phone = format_phone_e164(payload.phone) or payload.phone if payload.phone else None
     vc = VendorContact(
@@ -388,7 +384,7 @@ async def update_vendor_contact(
 async def delete_vendor_contact(
     card_id: int,
     contact_id: int,
-    user: User = Depends(require_buyer),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Delete a structured vendor contact."""

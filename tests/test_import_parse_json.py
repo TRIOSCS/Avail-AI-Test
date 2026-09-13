@@ -67,14 +67,14 @@ def test_import_parse_json_inferred_fields(client, db_session, monkeypatch):
 
 
 def test_import_parse_json_empty_text(client, db_session):
-    """Empty text returns error in JSON format without calling AI."""
+    """Empty text returns a 400 error in JSON format without calling AI (item 11 — this
+    used to be a 200 with an {"error": ...} envelope)."""
     resp = client.post(
         "/v2/partials/requisitions/import-parse?format=json",
         data={"raw_text": "", "name": "Test"},
     )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["requirements"] == [] or "error" in data
+    assert resp.status_code == 400
+    assert resp.json()["error"] == "No data provided"
 
 
 def test_import_parse_html_format_unchanged(client, db_session, monkeypatch):

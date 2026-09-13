@@ -56,14 +56,14 @@ def test_add_vendor_contact(client, db_session, test_vendor_card):
 
 
 def test_add_vendor_contact_duplicate(client, db_session, test_vendor_card, test_vendor_contact):
-    """POST same email twice returns duplicate=True."""
+    """POST same email twice returns 409 — parity with htmx/vendors.py's
+    vendor_contact_add (item 15)."""
     resp = client.post(
         f"/api/vendors/{test_vendor_card.id}/contacts",
         json={"email": "john@arrow.com", "full_name": "John Sales"},
     )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["duplicate"] is True
+    assert resp.status_code == 409
+    assert "error" in resp.json()
 
 
 def test_add_vendor_contact_not_found(client):
@@ -754,3 +754,48 @@ def test_log_call_missing_contact_404(client, db_session, test_vendor_card):
     """Log Call on an unknown contact returns 404."""
     resp = client.post(f"/api/vendors/{test_vendor_card.id}/contacts/999999/log-call")
     assert resp.status_code == 404
+
+
+# ── Auth gate parity with the HTMX surface (item 5) ───────────────────────
+
+
+def test_delete_vendor_contact_requires_admin():
+    """DELETE /api/vendors/{id}/contacts/{cid} gates on require_admin — parity with the
+    HTMX surface (routers/htmx/vendors.py vendor_contact_delete), not the weaker
+    require_buyer it used to carry."""
+    from app.dependencies import require_admin
+    from app.main import app
+    from tests._route_helpers import iter_routes
+
+    routes = [
+        r
+        for r in iter_routes(app.routes)
+        if getattr(r, "path", "") == "/api/vendors/{card_id}/contacts/{contact_id}" and "DELETE" in r.methods
+    ]
+    assert routes, "delete_vendor_contact route not registered"
+    for route in routes:
+        dep_calls = {d.call for d in route.dependant.dependencies}
+        assert require_admin in dep_calls
+
+
+def test_add_and_update_vendor_contact_require_buyer():
+    """POST/PUT /api/vendors/{id}/contacts gate on require_buyer (unchanged) — locks in
+    the parity contract with the HTMX add/edit routes (item 5)."""
+    from app.dependencies import require_buyer
+    from app.main import app
+    from tests._route_helpers import iter_routes
+
+    add_routes = [
+        r
+        for r in iter_routes(app.routes)
+        if getattr(r, "path", "") == "/api/vendors/{card_id}/contacts" and "POST" in r.methods
+    ]
+    update_routes = [
+        r
+        for r in iter_routes(app.routes)
+        if getattr(r, "path", "") == "/api/vendors/{card_id}/contacts/{contact_id}" and "PUT" in r.methods
+    ]
+    assert add_routes and update_routes
+    for route in add_routes + update_routes:
+        dep_calls = {d.call for d in route.dependant.dependencies}
+        assert require_buyer in dep_calls

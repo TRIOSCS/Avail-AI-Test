@@ -9,7 +9,7 @@ from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
-from ...constants import RESTRICTED_ROLES, QuoteStatus, RequisitionStatus
+from ...constants import RESTRICTED_ROLES, QuoteStatus
 from ...database import get_db
 from ...dependencies import require_user
 from ...models import CustomerSite, Offer, Quote, Requisition, User
@@ -46,32 +46,6 @@ def _compute_quote_totals(line_items: list[dict]) -> tuple[float, float, float]:
     total_cost = sum((item.get("qty") or 0) * (item.get("cost_price") or 0) for item in line_items)
     margin_pct = round((total_sell - total_cost) / total_sell * 100, 2) if total_sell > 0 else 0
     return total_sell, total_cost, margin_pct
-
-
-def _build_revision(old: Quote, user: User) -> Quote:
-    """Mark ``old`` as revised and return a fresh Quote carrying its line items and
-    terms forward at the next revision number.
-
-    Numbering convention (oq-04, unified 2026-08-17): the superseded quote KEEPS its
-    number; the new revision carries the -R trail (Q-0142 → Q-0142-R1 → -R2).
-    """
-    from ...services.crm_service import quote_base_number, revision_quote_number
-
-    require_valid_transition("quote", old.status, QuoteStatus.REVISED)
-    old.status = QuoteStatus.REVISED
-    new_revision = (old.revision or 1) + 1
-    return Quote(
-        requisition_id=old.requisition_id,
-        customer_site_id=old.customer_site_id,
-        quote_number=revision_quote_number(quote_base_number(old.quote_number), new_revision),
-        revision=new_revision,
-        line_items=old.line_items,
-        payment_terms=old.payment_terms,
-        shipping_terms=old.shipping_terms,
-        validity_days=old.validity_days,
-        notes=old.notes,
-        created_by_id=user.id,
-    )
 
 
 # ── Quotes ───────────────────────────────────────────────────────────────
@@ -246,6 +220,10 @@ async def create_quote(
     total_sell, total_cost, margin_pct = _compute_quote_totals(line_items)
     from sqlalchemy.exc import IntegrityError
 
+    from ...models import QuoteLine
+    from ...services.requisition_service import safe_commit
+    from ...services.requisition_state import advance_on_quote
+
     old_status = req.status
     for attempt in range(3):
         quote = Quote(
@@ -261,39 +239,44 @@ async def create_quote(
             created_by_id=user.id,
         )
         db.add(quote)
-        if req.status in ("open", "offers"):
-            from ...services.requisition_state import transition as req_transition
 
-            try:
-                req_transition(req, "quoted", user, db)
-            except ValueError:
-                pass  # already in quoted or later state
+        advance_on_quote(req, user, db)
+
+        # Write structured QuoteLine rows (parallel to line_items JSON for backward
+        # compat) in the SAME commit as the Quote — previously these were committed
+        # separately (after the Quote's own commit), so a retry's db.rollback()
+        # (triggered by a quote_number collision) discarded the Quote but the
+        # closed-over `line_items` still carried its resolved material_card_ids, and
+        # the old code inserted QuoteLine rows against whatever `quote.id` survived
+        # the rollback, FK-failing after the fact. Assigning via the ``quote``
+        # relationship (not ``quote_id=quote.id``) means no id is needed yet — the
+        # FK is resolved when both rows flush together.
+        for li in line_items:
+            db.add(
+                QuoteLine(
+                    quote=quote,
+                    material_card_id=li.get("material_card_id"),
+                    offer_id=li.get("offer_id"),
+                    mpn=li.get("mpn", ""),
+                    manufacturer=li.get("manufacturer"),
+                    qty=li.get("qty"),
+                    cost_price=li.get("cost_price"),
+                    sell_price=li.get("sell_price"),
+                    margin_pct=li.get("margin_pct"),
+                    currency=li.get("currency", "USD"),
+                )
+            )
+        if attempt == 2:
+            # Final attempt: no more retries — map a genuine conflict to a clean 409
+            # instead of letting IntegrityError surface as an unhandled 500.
+            safe_commit(db, entity="quote")
+            break
         try:
             db.commit()
             break
         except IntegrityError:
             db.rollback()
             req.status = old_status
-            if attempt == 2:
-                raise
-    # Write structured QuoteLine rows (parallel to JSON for backward compat)
-    from ...models import QuoteLine
-
-    for li in line_items:
-        ql = QuoteLine(
-            quote_id=quote.id,
-            material_card_id=li.get("material_card_id"),
-            offer_id=li.get("offer_id"),
-            mpn=li.get("mpn", ""),
-            manufacturer=li.get("manufacturer"),
-            qty=li.get("qty"),
-            cost_price=li.get("cost_price"),
-            sell_price=li.get("sell_price"),
-            margin_pct=li.get("margin_pct"),
-            currency=li.get("currency", "USD"),
-        )
-        db.add(ql)
-    db.commit()
 
     # Auto-advance per-part sourcing status to "quoted"
     try:
@@ -485,12 +468,12 @@ async def reopen_quote(
     quote = get_quote_for_user(db, user, quote_id)
     if not quote:
         raise HTTPException(404, "Quote not found")
-    req = db.get(Requisition, quote.requisition_id)
-    if req:
-        req.status = RequisitionStatus.OPEN
+    from ...services.quote_requisitions import build_quote_revision
+    from ...services.quote_requisitions import reopen_quote as _reopen_quote
+
+    _reopen_quote(db, quote, user, revise=payload.revise)
     if payload.revise:
-        new_quote = _build_revision(quote, user)
-        db.add(new_quote)
+        new_quote = build_quote_revision(db, quote, user)
         db.commit()
         return quote_to_dict(new_quote, db)
     else:

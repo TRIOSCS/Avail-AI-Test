@@ -24,7 +24,8 @@ from app.models.buy_plan import BuyPlan
 from app.models.quality_plan import QpFruLookup, QualityPlan
 from app.models.quotes import Quote
 from app.models.sourcing import Requisition
-from app.routers.quality_plans import _coerce, _parse_date, _section_approved
+from app.routers.htmx._shared import _parse_date_safe
+from app.routers.quality_plans import _coerce, _section_approved
 
 # ── Pure-function unit tests ──────────────────────────────────────────────────
 
@@ -60,25 +61,27 @@ class TestCoerce:
 
 
 class TestParseDate:
-    """_parse_date: parse YYYY-MM-DD HTML date inputs."""
+    """quality_plans.py's date parsing now delegates to the shared ``_parse_date_safe``
+    (item 17) — same YYYY-MM-DD HTML date input contract, one fewer duplicated
+    implementation."""
 
     def test_none_returns_none(self):
-        assert _parse_date(None) is None
+        assert _parse_date_safe(None, date) is None
 
     def test_empty_string_returns_none(self):
-        assert _parse_date("") is None
+        assert _parse_date_safe("", date) is None
 
     def test_whitespace_returns_none(self):
-        assert _parse_date("   ") is None
+        assert _parse_date_safe("   ", date) is None
 
     def test_valid_date(self):
-        assert _parse_date("2025-03-15") == date(2025, 3, 15)
+        assert _parse_date_safe("2025-03-15", date) == date(2025, 3, 15)
 
     def test_invalid_date_returns_none(self):
-        assert _parse_date("not-a-date") is None
+        assert _parse_date_safe("not-a-date", date) is None
 
     def test_partial_date_returns_none(self):
-        assert _parse_date("2025-13-99") is None
+        assert _parse_date_safe("2025-13-99", date) is None
 
 
 class TestSectionApproved:

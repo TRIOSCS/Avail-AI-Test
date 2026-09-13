@@ -249,7 +249,10 @@ async def rfq_send(
                         sent.append(entry)
             except Exception as exc:
                 logger.error("Batch RFQ send failed: {}", exc)
-                # Fall back to DB-only mode
+                # Fall back to DB-only mode — these RFQs were NOT emailed (send_batch_rfq
+                # raised before anything went out), so they belong in not_sent, not sent
+                # (item 13: appending to `sent` inflated total_sent with unsent RFQs, the
+                # same success-theater bug the no-token branch below already avoids).
                 for name, email in zip(vendor_names, vendor_emails):
                     if not email:
                         continue
@@ -266,7 +269,7 @@ async def rfq_send(
                         status_updated_at=datetime.now(UTC),
                     )
                     db.add(contact)
-                    sent.append({"vendor": name, "email": email, "status": "draft"})
+                    not_sent.append({"vendor": name, "email": email, "status": "not_sent"})
                 db.commit()
     else:
         # QC 2026-08-10 P2 (success-theater): a MISSING Graph token means these RFQs

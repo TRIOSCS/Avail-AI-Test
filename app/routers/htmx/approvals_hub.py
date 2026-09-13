@@ -907,7 +907,9 @@ async def approvals_po_sent_check(
 # ── Prepayment detail pane ──────────────────────────────────────────────
 
 
-def render_prepayment_pane(request: Request, user: User, db: Session, prepayment_id: int) -> HTMLResponse:
+def render_prepayment_pane(
+    request: Request, user: User, db: Session, prepayment_id: int, *, bypass_ownership: bool = False
+) -> HTMLResponse:
     """Build + render the prepayment detail pane (shared by the pane GET route, the
     method-adjust POST, and the prepay-decide handler's origin=approvals_workspace
     branch).
@@ -917,6 +919,14 @@ def render_prepayment_pane(request: Request, user: User, db: Session, prepayment
     ONE pre-approval edit); the approve button reads "OK to pay — {method}"; a paid
     prepayment shows its wire reference. Plan access rides get_buyplan_for_user (same
     gate as render_plan_pane / render_po_pane): a restricted non-owner 404s.
+
+    ``bypass_ownership=True`` skips that ownership gate — callers pass it ONLY after
+    already confirming the caller's access through a DIFFERENT, broader eligibility
+    predicate for this exact prepayment/request (``User.can_approve_prepayments`` in
+    ``approvals_prepayment_method``, or a decided ``ApprovalStepRecipient`` slot in
+    ``prepay_request_decide``). Without this, a restricted-role approver who is
+    eligible to act on the prepayment but does not own its buy plan would 404 on the
+    very re-render of the action they were just allowed to take (item 8).
     """
     from ...constants import PREPAYMENT_METHODS, ApprovalSubjectType
     from ...dependencies import get_buyplan_for_user, is_manager_or_admin
@@ -936,7 +946,8 @@ def render_prepayment_pane(request: Request, user: User, db: Session, prepayment
     )
     if pp is None:
         raise HTTPException(404, "Prepayment not found")
-    get_buyplan_for_user(db, user, pp.buy_plan_id)  # restricted non-owner → 404
+    if not bypass_ownership:
+        get_buyplan_for_user(db, user, pp.buy_plan_id)  # restricted non-owner → 404
 
     open_request = db.execute(
         select(ApprovalRequest)
@@ -1049,7 +1060,11 @@ async def approvals_prepayment_method(
         log_field_edits(db, user=user, buy_plan_id=pp.buy_plan_id, prepayment_id=pp.id, edits=edits)
         db.commit()
 
-    resp = render_prepayment_pane(request, user, db, prepayment_id)
+    # can_approve_prepayments (checked above) already established this restricted-role
+    # approver's right to act on this prepayment — bypass_ownership keeps the render
+    # in agreement with the write instead of re-applying the stricter buy-plan
+    # ownership gate and 404ing the very action that just succeeded (item 8).
+    resp = render_prepayment_pane(request, user, db, prepayment_id, bypass_ownership=True)
     resp.headers["HX-Trigger"] = "awListRefresh"
     return resp
 

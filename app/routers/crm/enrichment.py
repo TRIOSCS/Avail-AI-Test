@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from ...database import get_db
 from ...dependencies import can_manage_account, require_admin, require_buyer, require_user
-from ...models import Company, CustomerSite, SiteContact, User, VendorCard, VendorContact
+from ...models import Company, CustomerSite, SiteContact, User, VendorContact
 from ...rate_limit import limiter
 from ...schemas.crm import AddContactsToVendor, AddContactToSite, CustomerImportRow, EnrichDomainRequest
 from ...services.credential_service import get_credential_cached
@@ -18,6 +18,7 @@ from ...services.credential_service import get_credential_cached
 from ...services.customer_enrichment_service import run_company_enrichment as _run_company_enrichment
 from ...template_env import template_response
 from ...utils.normalization import strip_website_to_domain as _normalize_domain
+from .._lookup_helpers import get_vendor_card_or_404
 
 router = APIRouter()
 
@@ -197,9 +198,7 @@ async def enrich_vendor_card(
     _require_enrichment_provider()
     from ...enrichment_service import apply_enrichment_to_vendor, enrich_entity
 
-    card = db.get(VendorCard, card_id)
-    if not card:
-        raise HTTPException(404, "Vendor card not found")
+    card = get_vendor_card_or_404(db, card_id)
     domain = card.domain or card.website or ""
     if domain:
         domain = _normalize_domain(domain)
@@ -252,9 +251,7 @@ async def add_suggested_to_vendor(
     db: Session = Depends(get_db),
 ):
     """Add selected suggested contacts to a vendor card."""
-    card = db.get(VendorCard, payload.vendor_card_id)
-    if not card:
-        raise HTTPException(404, "Vendor card not found")
+    card = get_vendor_card_or_404(db, payload.vendor_card_id)
     added = 0
     for c in payload.contacts:
         existing = db.query(VendorContact).filter_by(vendor_card_id=payload.vendor_card_id, email=c.email).first()

@@ -250,6 +250,24 @@ class TestReopenQuote:
         db_session.refresh(quote)
         assert quote.status == QuoteStatus.DRAFT
 
+    def test_reopen_won_quote_resets_requisition_to_open(
+        self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User
+    ):
+        """Reopening a WON quote resets its requisition from won back to open (item 3 —
+        this route previously left the requisition WON/LOST after the quote itself went
+        back to draft)."""
+        quote = _make_quote(db_session, test_requisition, test_user, status=QuoteStatus.WON, won_revenue=500.0)
+        test_requisition.status = "won"
+        db_session.commit()
+
+        resp = client.post(f"/v2/partials/quotes/{quote.id}/reopen")
+        assert resp.status_code == 200
+        db_session.refresh(quote)
+        db_session.refresh(test_requisition)
+        assert quote.status == QuoteStatus.DRAFT
+        assert quote.won_revenue is None
+        assert test_requisition.status == "open"
+
     def test_reopen_draft_quote_rejected(
         self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User
     ):

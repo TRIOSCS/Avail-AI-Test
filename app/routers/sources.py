@@ -393,17 +393,11 @@ async def update_source_credentials(
 
     src = db.query(ApiSource).filter_by(name=source_name).first()
     if not src:
-        raise HTTPException(
-            status_code=404,
-            detail={"error": f"Source '{source_name}' not found", "status_code": 404},
-        )
+        raise HTTPException(status_code=404, detail=f"Source '{source_name}' not found")
     raw = await request.json()
     credentials = raw.get("credentials") if isinstance(raw, dict) else None
     if not credentials:
-        raise HTTPException(
-            status_code=400,
-            detail={"error": "credentials field required", "status_code": 400},
-        )
+        raise HTTPException(status_code=400, detail="credentials field required")
     current = dict(src.credentials or {})
     for key, value in credentials.items():
         if value and str(value).strip():

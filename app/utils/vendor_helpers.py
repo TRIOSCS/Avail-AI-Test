@@ -27,7 +27,7 @@ from ..services.specialty_detector import commodity_slug_to_display
 from ..services.vendor_analysis_service import _analyze_vendor_materials
 from ..shared_constants import JUNK_DOMAINS as _JUNK_DOMAINS
 from ..shared_constants import JUNK_EMAIL_PREFIXES as _JUNK_EMAILS
-from ..vendor_utils import fuzzy_score_vendor, normalize_vendor_name
+from ..vendor_utils import fuzzy_dedup_scan, normalize_vendor_name
 from .normalization import parse_website_domain
 
 # ── Constants ────────────────────────────────────────────────────────────
@@ -135,21 +135,22 @@ def get_or_create_card(vendor_name: str, db: Session, domain: str | None = None)
 
     try:
         existing = db.query(VendorCard.id, VendorCard.normalized_name, VendorCard.display_name).limit(500).all()
-        best_score, best_card_id = 0, None
-        for row in existing:
-            score = fuzzy_score_vendor(norm, row.normalized_name)
-            if score > best_score:
-                best_score = score
-                best_card_id = row.id
-        if best_score >= 82 and best_card_id:
-            card = db.get(VendorCard, best_card_id)
+        # Delegates the scan to the shared rapidfuzz helper (item 18) instead of a
+        # hand-rolled loop — anchor mode returns every row scoring >= threshold, so we
+        # still pick the single best (highest-scoring) match, same as the old loop.
+        scanned = fuzzy_dedup_scan(existing, lambda row: row.normalized_name, threshold=82, anchor_key=norm)
+        best_row, best_score = (None, 0)
+        if scanned:
+            best_row, _, best_score = max(scanned, key=lambda t: t[2])
+        if best_row is not None:
+            card = db.get(VendorCard, best_row.id)
             if card:
                 _record_alternate_name(card, vendor_name, db, context="fuzzy-matched")
                 logger.info(
                     "Fuzzy-matched vendor '{}' to '{}' (score={})",
                     vendor_name,
                     card.display_name,
-                    best_score,
+                    round(best_score),
                 )
                 return card
     except ImportError:

@@ -20,6 +20,7 @@ from app.models import (
     Offer,
     OfferAttachment,
     Quote,
+    QuoteLine,
     Requisition,
     SiteContact,
     User,
@@ -207,6 +208,58 @@ def test_quote_creation_retries_on_integrity_error(
     assert resp.status_code == 200
     data = resp.json()
     assert "quote_number" in data
+
+
+def test_quote_creation_retry_does_not_orphan_quote_lines(
+    client, db_session, test_requisition, test_customer_site, test_offer
+):
+    """A quote_number collision retry must not leave orphaned QuoteLine rows.
+
+    Regression for item 9: QuoteLine rows are now inserted in the SAME
+    transaction/commit as the Quote, so a rollback on a colliding quote_number
+    discards both together instead of FK-failing the QuoteLine insert against a
+    Quote id that never survived the rollback.
+    """
+    test_requisition.customer_site_id = test_customer_site.id
+    db_session.commit()
+
+    existing = Quote(
+        requisition_id=test_requisition.id,
+        customer_site_id=test_customer_site.id,
+        quote_number="Q-2026-COLLIDE",
+        status="draft",
+        line_items=[],
+        subtotal=0,
+        total_cost=0,
+        total_margin_pct=0,
+        created_by_id=test_requisition.created_by,
+    )
+    db_session.add(existing)
+    db_session.commit()
+
+    call_count = 0
+
+    def mock_next_quote_number(db):
+        nonlocal call_count
+        call_count += 1
+        return "Q-2026-COLLIDE" if call_count == 1 else "Q-2026-RETRY"
+
+    with patch("app.routers.crm.quotes.next_quote_number", side_effect=mock_next_quote_number):
+        resp = client.post(
+            f"/api/requisitions/{test_requisition.id}/quote",
+            json={"offer_ids": [test_offer.id]},
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["quote_number"] == "Q-2026-RETRY"
+    assert call_count == 2
+
+    lines = db_session.query(QuoteLine).filter(QuoteLine.quote_id == data["id"]).all()
+    assert len(lines) == 1
+
+    all_quote_ids = {q.id for q in db_session.query(Quote).all()}
+    orphans = [ql for ql in db_session.query(QuoteLine).all() if ql.quote_id not in all_quote_ids]
+    assert orphans == []
 
 
 # ── Margin calculation (update_quote logic) ──────────────────────────────
@@ -1668,6 +1721,59 @@ class TestQuotesAdditional:
         data = resp.json()
         assert data["revision"] == 2
 
+    def test_reopen_quote_resets_won_requisition_to_open(self, client, db_session, test_quote, test_requisition):
+        """Reopening a WON quote (without revise) puts its requisition back to OPEN,
+        clears outcome_reason, and nulls won_revenue (item 3)."""
+        test_quote.result = "won"
+        test_quote.won_revenue = 1234.56
+        test_quote.result_at = datetime.now(UTC)
+        test_requisition.status = "won"
+        test_requisition.outcome_reason = "Customer accepted"
+        db_session.commit()
+
+        resp = client.post(
+            f"/api/quotes/{test_quote.id}/reopen",
+            json={"revise": False},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "sent"
+
+        db_session.refresh(test_requisition)
+        db_session.refresh(test_quote)
+        assert test_requisition.status == "open"
+        assert test_requisition.outcome_reason is None
+        assert test_quote.won_revenue is None
+
+    def test_reopen_quote_with_revise_clones_lines_and_reopens_requisition(
+        self, client, db_session, test_quote, test_requisition
+    ):
+        """Reopen with revise=true (item 4) clones the parent's QuoteLine rows onto the
+        revision, and (item 3) still resets the requisition to open."""
+        from app.models import QuoteLine
+
+        db_session.add(QuoteLine(quote_id=test_quote.id, mpn="LM317T", qty=100, cost_price=1, sell_price=2))
+        db_session.add(QuoteLine(quote_id=test_quote.id, mpn="LM7805", qty=50, cost_price=1, sell_price=2))
+        test_quote.result = "won"
+        test_quote.won_revenue = 999.0
+        test_quote.result_at = datetime.now(UTC)
+        test_requisition.status = "won"
+        db_session.commit()
+
+        resp = client.post(
+            f"/api/quotes/{test_quote.id}/reopen",
+            json={"revise": True},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["revision"] == 2
+
+        old_lines = db_session.query(QuoteLine).filter(QuoteLine.quote_id == test_quote.id).all()
+        new_lines = db_session.query(QuoteLine).filter(QuoteLine.quote_id == data["id"]).all()
+        assert len(old_lines) == len(new_lines) == 2
+
+        db_session.refresh(test_requisition)
+        assert test_requisition.status == "open"
+
     def test_reopen_quote_not_found(self, client):
         resp = client.post("/api/quotes/99999/reopen", json={"revise": False})
         assert resp.status_code == 404
@@ -2187,12 +2293,53 @@ class TestReqStatusTransitions:
         assert data["status_changed"] is True
         assert data["req_status"] == "offers"
 
+    def test_create_offer_from_rfqs_sent_advances_to_offers(self, client, db_session, test_requisition, monkeypatch):
+        """Creating an offer transitions req from 'rfqs_sent' to 'offers' too — the
+        normal stage when the first offer arrives after RFQs went out."""
+        monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() if hasattr(coro, "close") else None)
+        test_requisition.status = "rfqs_sent"
+        db_session.commit()
+
+        req = test_requisition
+        requirement = req.requirements[0]
+        resp = client.post(
+            f"/api/requisitions/{req.id}/offers",
+            json={
+                "requirement_id": requirement.id,
+                "vendor_name": "TestVendor",
+                "mpn": "LM317T",
+                "qty_available": 100,
+                "unit_price": 1.00,
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status_changed"] is True
+        assert data["req_status"] == "offers"
+
     def test_create_quote_changes_req_status(
         self, client, db_session, test_requisition, test_customer_site, test_offer
     ):
         """Creating a quote transitions req to 'quoted'."""
         test_requisition.customer_site_id = test_customer_site.id
         test_requisition.status = "offers"
+        db_session.commit()
+
+        resp = client.post(
+            f"/api/requisitions/{test_requisition.id}/quote",
+            json={"offer_ids": [test_offer.id]},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status_changed"] is True
+        assert data["req_status"] == "quoted"
+
+    def test_create_quote_from_rfqs_sent_advances_to_quoted(
+        self, client, db_session, test_requisition, test_customer_site, test_offer
+    ):
+        """Creating a quote transitions req from 'rfqs_sent' to 'quoted' too."""
+        test_requisition.customer_site_id = test_customer_site.id
+        test_requisition.status = "rfqs_sent"
         db_session.commit()
 
         resp = client.post(

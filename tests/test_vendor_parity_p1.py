@@ -113,7 +113,7 @@ class TestMigration145Schema:
             test_vendor_card.custom_fields = {"key": "v" * 501}
 
 
-# ── Vendor Contact Add (require_user) ────────────────────────────────────────
+# ── Vendor Contact Add (require_buyer) ───────────────────────────────────────
 
 
 class TestVendorContactAdd:
@@ -159,6 +159,19 @@ class TestVendorContactAdd:
         # The tbody must always be present (even after contacts are added).
         assert 'id="contacts-table-body"' in tab_resp.text
 
+    def test_add_contact_formats_phone_e164(
+        self, client: TestClient, db_session: Session, test_vendor_card: VendorCard
+    ):
+        """Adding a contact with a phone stores E.164, matching the JSON API's
+        add_vendor_contact (routers/vendor_contacts.py)."""
+        resp = client.post(
+            f"/v2/partials/vendors/{test_vendor_card.id}/contacts",
+            data={"email": "phoned@vendor.com", "phone": "415-555-1234"},
+        )
+        assert resp.status_code == 200
+        vc = db_session.query(VendorContact).filter_by(email="phoned@vendor.com").one()
+        assert vc.phone == "+14155551234"
+
     def test_add_contact_missing_email_400(self, client: TestClient, test_vendor_card: VendorCard):
         resp = client.post(
             f"/v2/partials/vendors/{test_vendor_card.id}/contacts",
@@ -191,8 +204,43 @@ class TestVendorContactAdd:
         # unauthenticated → redirect to login or 401
         assert resp.status_code in (401, 302, 307)
 
+    def test_add_contact_non_buyer_denied(self, db_session: Session, test_user: User, test_vendor_card: VendorCard):
+        """DENY: require_buyer (item 5 — was require_user) blocks a non-buyer-tier
+        caller, matching the JSON API's add_vendor_contact gate."""
+        from fastapi import HTTPException
 
-# ── Vendor Contact Edit (require_user) ───────────────────────────────────────
+        from app.database import get_db
+        from app.dependencies import require_admin, require_buyer, require_user
+        from app.main import app
+
+        def _db():
+            yield db_session
+
+        def _user():
+            return test_user
+
+        def _deny_buyer():
+            raise HTTPException(403, "Buyer role required for this action")
+
+        overrides = [get_db, require_user, require_admin, require_buyer]
+        app.dependency_overrides[get_db] = _db
+        app.dependency_overrides[require_user] = _user
+        app.dependency_overrides[require_admin] = _user
+        app.dependency_overrides[require_buyer] = _deny_buyer
+        try:
+            with TestClient(app) as non_buyer_client:
+                resp = non_buyer_client.post(
+                    f"/v2/partials/vendors/{test_vendor_card.id}/contacts",
+                    data={"email": "x@y.com"},
+                )
+        finally:
+            for dep in overrides:
+                app.dependency_overrides.pop(dep, None)
+
+        assert resp.status_code == 403
+
+
+# ── Vendor Contact Edit (require_buyer) ──────────────────────────────────────
 
 
 class TestVendorContactEdit:
@@ -205,6 +253,19 @@ class TestVendorContactEdit:
         )
         assert resp.status_code == 200
         assert "Updated Name" in resp.text
+
+    def test_edit_contact_formats_phone_e164(
+        self, client: TestClient, db_session: Session, test_vendor_card: VendorCard, test_vendor_contact: VendorContact
+    ):
+        """Editing a contact's phone stores E.164, matching the JSON API
+        (routers/vendor_contacts.py) instead of the raw string (item 14)."""
+        resp = client.put(
+            f"/v2/partials/vendors/{test_vendor_card.id}/contacts/{test_vendor_contact.id}",
+            data={"phone": "415-555-1234"},
+        )
+        assert resp.status_code == 200
+        db_session.refresh(test_vendor_contact)
+        assert test_vendor_contact.phone == "+14155551234"
 
     def test_edit_contact_not_found(self, client: TestClient, test_vendor_card: VendorCard):
         resp = client.put(
@@ -239,6 +300,47 @@ class TestVendorContactEdit:
             follow_redirects=False,
         )
         assert resp.status_code in (401, 302, 307)
+
+    def test_edit_contact_non_buyer_denied(
+        self,
+        db_session: Session,
+        test_user: User,
+        test_vendor_card: VendorCard,
+        test_vendor_contact: VendorContact,
+    ):
+        """DENY: require_buyer (item 5 — was require_user) blocks a non-buyer-tier
+        caller, matching the JSON API's update_vendor_contact gate."""
+        from fastapi import HTTPException
+
+        from app.database import get_db
+        from app.dependencies import require_admin, require_buyer, require_user
+        from app.main import app
+
+        def _db():
+            yield db_session
+
+        def _user():
+            return test_user
+
+        def _deny_buyer():
+            raise HTTPException(403, "Buyer role required for this action")
+
+        overrides = [get_db, require_user, require_admin, require_buyer]
+        app.dependency_overrides[get_db] = _db
+        app.dependency_overrides[require_user] = _user
+        app.dependency_overrides[require_admin] = _user
+        app.dependency_overrides[require_buyer] = _deny_buyer
+        try:
+            with TestClient(app) as non_buyer_client:
+                resp = non_buyer_client.put(
+                    f"/v2/partials/vendors/{test_vendor_card.id}/contacts/{test_vendor_contact.id}",
+                    data={"full_name": "Hax"},
+                )
+        finally:
+            for dep in overrides:
+                app.dependency_overrides.pop(dep, None)
+
+        assert resp.status_code == 403
 
 
 # ── Vendor Contact Delete (require_admin) ────────────────────────────────────

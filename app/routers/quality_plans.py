@@ -49,7 +49,7 @@ from ..services.quality_plan_service import (
 )
 from ..template_env import template_response
 from ..utils.normalization import normalize_mpn_key
-from .htmx._shared import full_page_shell
+from .htmx._shared import _parse_date_safe, full_page_shell
 
 router = APIRouter(tags=["quality_plans"])
 
@@ -116,16 +116,6 @@ def _coerce(kind: str, raw: str | None) -> str | int | bool | None:
         except ValueError:
             return None
     return text
-
-
-def _parse_date(raw: str | None) -> date | None:
-    """Parse an HTML date input (YYYY-MM-DD) to a date, or None when blank/invalid."""
-    if not raw or not raw.strip():
-        return None
-    try:
-        return date.fromisoformat(raw.strip())
-    except ValueError:
-        return None
 
 
 def _get_gate(db: Session, qp_id: int, gate_type: str) -> ApprovalRequest | None:
@@ -535,7 +525,7 @@ def qp_add_serial(
     entry = QpSerialEntry(
         qp_id=qp.id,
         submitted_by_id=user.id if user else None,
-        buyer_date=_parse_date(buyer_date),
+        buyer_date=_parse_date_safe((buyer_date or "").strip(), date),
         has_sn_prev_received=_coerce("bool", has_sn_prev_received),
         purchase_order=_coerce("str", purchase_order),
         part_number=_coerce("str", part_number),
@@ -543,9 +533,9 @@ def qp_add_serial(
         seagate_sn=_coerce("str", seagate_sn),
         tso=_coerce("str", tso),
         customer_po=_coerce("str", customer_po),
-        submitted_to_customer_date=_parse_date(submitted_to_customer_date),
+        submitted_to_customer_date=_parse_date_safe((submitted_to_customer_date or "").strip(), date),
         customer_approved=_coerce("bool", customer_approved),
-        customer_approved_date=_parse_date(customer_approved_date),
+        customer_approved_date=_parse_date_safe((customer_approved_date or "").strip(), date),
         ops_received=_coerce("bool", ops_received),
     )
     db.add(entry)

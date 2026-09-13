@@ -33,6 +33,7 @@ from app.models import (
     MaterialCardAttachment,
     SiteContact,
     SiteContactAttachment,
+    User,
 )
 
 # ---------------------------------------------------------------------------
@@ -405,6 +406,42 @@ class TestMaterialCardAttachments:
     def test_delete_nonexistent_attachment_404(self, client):
         resp = client.delete("/api/material-card-attachments/999999")
         assert resp.status_code == 404
+
+    def test_delete_by_non_uploader_denied(self, client, db_session):
+        """MaterialCard is a shared catalog, but deleting someone ELSE's attachment
+        requires manager/admin — a plain buyer who didn't upload it gets 403 (item
+        6)."""
+        other = User(
+            email="other-uploader@trioscs.com",
+            name="Other Uploader",
+            role="buyer",
+            azure_id="test-azure-id-other-uploader",
+            created_at=datetime.now(UTC),
+        )
+        db_session.add(other)
+        db_session.commit()
+        card = _make_material_card(db_session)
+        att = _make_material_attachment(db_session, card.id, other.id)
+
+        resp = client.delete(f"/api/material-card-attachments/{att.id}")
+        assert resp.status_code == 403
+        assert db_session.get(MaterialCardAttachment, att.id) is not None
+
+    def test_delete_by_manager_allowed(self, manager_client, db_session, test_user):
+        """A manager may delete another user's material-card attachment (item 6)."""
+        card = _make_material_card(db_session)
+        att = _make_material_attachment(db_session, card.id, test_user.id)
+
+        with patch(
+            "app.services.attachment_service.remove_attachment",
+            new_callable=AsyncMock,
+            return_value={"ok": True},
+        ) as remove_mock:
+            resp = manager_client.delete(f"/api/material-card-attachments/{att.id}")
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": True}
+        remove_mock.assert_awaited_once()
+        assert remove_mock.await_args.args[1].id == att.id
 
     def test_any_logged_in_user_can_list_material_attachments(self, client, db_session):
         """Material cards are shared catalog — any authenticated user can access."""

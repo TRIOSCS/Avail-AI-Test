@@ -104,3 +104,34 @@ def transition(
 def set_hotlist(req, actor, db: Session) -> None:
     """Put a requisition on the Hotlist monitor (Proactive surfaces matches)."""
     transition(req, RequisitionStatus.HOTLIST, actor, db)
+
+
+def advance_on_offer(req, actor, db: Session) -> None:
+    """Auto-advance a requisition to OFFERS when an offer is created against it.
+
+    No-op unless the requisition is currently OPEN or RFQS_SENT — those are the
+    only origins from which OFFERS is a valid transition (see
+    ``ALLOWED_TRANSITIONS``); a requisition already in OFFERS/QUOTED/WON/LOST/etc.
+    is left untouched.
+    """
+    if req.status not in (RequisitionStatus.OPEN, RequisitionStatus.RFQS_SENT):
+        return
+    try:
+        transition(req, RequisitionStatus.OFFERS, actor, db)
+    except ValueError:
+        pass  # already in offers or a later state
+
+
+def advance_on_quote(req, actor, db: Session) -> None:
+    """Auto-advance a requisition to QUOTED when a quote is built against it.
+
+    No-op unless the requisition is currently OPEN, OFFERS, or RFQS_SENT — the
+    origins from which QUOTED is a valid transition (see ``ALLOWED_TRANSITIONS``);
+    a requisition already QUOTED/WON/LOST/etc. is left untouched.
+    """
+    if req.status not in (RequisitionStatus.OPEN, RequisitionStatus.OFFERS, RequisitionStatus.RFQS_SENT):
+        return
+    try:
+        transition(req, RequisitionStatus.QUOTED, actor, db)
+    except ValueError:
+        pass  # already quoted or a later state

@@ -620,9 +620,7 @@ async def requisition_import_parse(
 
     if not text:
         if json_mode:
-            from fastapi.responses import JSONResponse
-
-            return JSONResponse({"error": "No data provided", "requirements": []})
+            raise HTTPException(400, "No data provided")
         return HTMLResponse(
             '<div class="p-4 text-center text-sm text-rose-600 bg-rose-50 rounded-lg border border-rose-200">'
             "No data provided. Paste text or upload a file."

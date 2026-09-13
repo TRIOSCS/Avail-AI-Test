@@ -35,12 +35,10 @@ from ...models import (
     QuoteLine,
     User,
 )
-from ...services.crm_service import quote_base_number, revision_quote_number
 from ...services.pricing_history import preload_last_quoted_prices
 from ...services.quote_builder_service import recalc_quote_totals, seed_sell_price
 from ...services.quote_preflight import quote_preflight
 from ...services.quote_requisitions import (
-    link_quote_to_requisitions,
     requisition_ids_for_quote,
     requisitions_for_quote,
 )
@@ -140,6 +138,8 @@ async def reopen_quote(
     db: Session = Depends(get_db),
 ):
     """Reopen a sent/closed quote back to draft."""
+    from ...services.quote_requisitions import reopen_quote as _reopen_quote
+
     quote = get_quote_for_user(db, user, quote_id)
     if quote.status not in (QuoteStatus.SENT, QuoteStatus.WON, QuoteStatus.LOST):
         raise HTTPException(400, "Only sent/won/lost quotes can be reopened")
@@ -147,6 +147,9 @@ async def reopen_quote(
     require_valid_transition("quote", quote.status, QuoteStatus.DRAFT)
     quote.status = QuoteStatus.DRAFT
     quote.updated_at = datetime.now(UTC)
+    # Bring the requisition back to open too — this route previously left it
+    # WON/LOST after the quote itself went back to draft (item 3).
+    _reopen_quote(db, quote, user, revise=False)
     db.commit()
     logger.info("Quote {} reopened by {}", quote_id, user.email)
 
@@ -454,10 +457,7 @@ async def add_offer_to_quote(
     if not offer:
         raise HTTPException(404, "Offer not found")
     if offer.requisition_id is not None and offer.requisition_id not in requisition_ids_for_quote(db, quote.id):
-        raise HTTPException(
-            status_code=403,
-            detail={"error": "offer does not belong to this quote's requisition"},
-        )
+        raise HTTPException(status_code=403, detail="offer does not belong to this quote's requisition")
     cost = float(offer.unit_price) if offer.unit_price else 0
     sell, margin_pct = seed_sell_price(db, offer.mpn, cost)
     line = QuoteLine(
@@ -600,60 +600,13 @@ async def revise_quote_htmx(
     db: Session = Depends(get_db),
 ):
     """Create a new revision of the quote — returns the new quote detail."""
+    from ...services.quote_requisitions import build_quote_revision
+
     quote = get_quote_for_user(db, user, quote_id)
-    new_rev = (quote.revision or 1) + 1
-    new_quote = Quote(
-        requisition_id=quote.requisition_id,
-        customer_site_id=quote.customer_site_id,
-        # oq-04 convention: base + -R{revision-1}; strips any existing suffix so
-        # re-revising Q-X-R1 yields Q-X-R2, not Q-X-R1-R2.
-        quote_number=revision_quote_number(quote_base_number(quote.quote_number), new_rev),
-        revision=new_rev,
-        line_items=quote.line_items or [],
-        subtotal=quote.subtotal,
-        total_cost=quote.total_cost,
-        total_margin_pct=quote.total_margin_pct,
-        payment_terms=quote.payment_terms,
-        shipping_terms=quote.shipping_terms,
-        validity_days=quote.validity_days,
-        notes=quote.notes,
-        status=QuoteStatus.DRAFT,
-        created_by_id=user.id,
-        # Carry revenue attribution forward so a revision of a proactive-sourced
-        # quote stays attributed to proactive selling (Wave 6).
-        source=quote.source,
-    )
-    db.add(new_quote)
-    db.flush()  # need new_quote.id for the cloned lines
-
-    # Carry the FULL requisition membership onto the revision so a combined quote's
-    # revision stays visible on every contributing requisition (the after_insert listener
-    # only added new_quote's primary self-row).
-    link_quote_to_requisitions(db, new_quote.id, requisition_ids_for_quote(db, quote.id))
-
-    # Clone the parent's QuoteLine rows — quote_detail_partial, the send email, the
-    # PDF, and Build-Buy-Plan all read QuoteLine (not line_items JSON). Without this
-    # the revision showed an empty line table and couldn't build a buy plan (OQ-04,
-    # the inverse of the create-from-offers OQ-01 gap).
-    for src in db.query(QuoteLine).filter(QuoteLine.quote_id == quote.id).all():
-        db.add(
-            QuoteLine(
-                quote_id=new_quote.id,
-                material_card_id=src.material_card_id,
-                offer_id=src.offer_id,
-                mpn=src.mpn,
-                description=src.description,
-                manufacturer=src.manufacturer,
-                qty=src.qty,
-                cost_price=src.cost_price,
-                sell_price=src.sell_price,
-                margin_pct=src.margin_pct,
-                currency=src.currency,
-            )
-        )
+    new_quote = build_quote_revision(db, quote, user)
     db.commit()
     db.refresh(new_quote)
-    logger.info("Quote {} revised to rev {} as {}", quote.quote_number, new_rev, new_quote.quote_number)
+    logger.info("Quote {} revised to rev {} as {}", quote.quote_number, new_quote.revision, new_quote.quote_number)
     return await quote_detail_partial(request, new_quote.id, user, db)
 
 

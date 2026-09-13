@@ -32,7 +32,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from sqlalchemy.orm import Session, selectinload
 
 from ..database import get_db
-from ..dependencies import can_manage_account, get_req_for_user, require_admin, require_user
+from ..dependencies import can_manage_account, get_req_for_user, is_manager_or_admin, require_admin, require_user
 from ..models import (
     Company,
     CompanyAttachment,
@@ -212,6 +212,12 @@ async def _delete_attachment(kind: str, att_id: int, user: User, db: Session):
         raise HTTPException(404, "Attachment not found")
     if not spec.access(db, user, getattr(att, spec.fk_field)):
         raise HTTPException(404, "Attachment not found")
+    # MaterialCard is a shared catalog (any authenticated user may view/upload) — but
+    # only the uploader or a manager/admin may delete an attachment someone else put
+    # there. Other kinds (company/contact/vendor) are already scoped by spec.access
+    # above (same-company / same-vendor), so this extra check only applies to "material".
+    if kind == "material" and att.uploaded_by_id != user.id and not is_manager_or_admin(user):
+        raise HTTPException(403, "Only the uploader or a manager/admin can delete this attachment")
     return await attachment_service.remove_attachment(db, att, user)
 
 

@@ -692,6 +692,36 @@ def test_siblingB_htmx_do_not_offer_allows_owner(client, db_session, test_user):
     assert rows[0].mpn == "LM317T"  # upper-cased on insert
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# FIX GROUP 7 — requisition insights panel/refresh need require_requisition_access
+# Routes: GET  /v2/partials/requisitions/{req_id}/insights
+#         POST /v2/partials/requisitions/{req_id}/insights/refresh
+# Helper: require_requisition_access
+# ══════════════════════════════════════════════════════════════════════════
+
+
+def test_g7_requisition_insights_panel_blocks_non_owner_sales(client, db_session, test_user, admin_user):
+    req = _requisition(db_session, admin_user.id, name="REQ-INSIGHTS-PANEL")
+    _make_sales(test_user, db_session)
+    resp = client.get(f"/v2/partials/requisitions/{req.id}/insights")
+    assert resp.status_code == 404
+
+
+def test_g7_requisition_insights_refresh_blocks_non_owner_sales(client, db_session, test_user, admin_user):
+    req = _requisition(db_session, admin_user.id, name="REQ-INSIGHTS-REFRESH")
+    _make_sales(test_user, db_session)
+    resp = client.post(f"/v2/partials/requisitions/{req.id}/insights/refresh")
+    assert resp.status_code == 404
+
+
+def test_g7_requisition_insights_panel_allows_owner(client, db_session, test_user):
+    req = _requisition(db_session, test_user.id, name="REQ-INSIGHTS-OWNED")
+    _make_sales(test_user, db_session)  # restricted, but OWNS the requisition
+    resp = client.get(f"/v2/partials/requisitions/{req.id}/insights")
+    assert resp.status_code == 200
+    assert 'id="insights-panel"' in resp.text
+
+
 @pytest.fixture(autouse=True)
 def _ai_features_on(monkeypatch):
     """Group-2 ai routes sit behind the AI gate; enable so ownership guards are

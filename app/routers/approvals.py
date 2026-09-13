@@ -135,7 +135,7 @@ async def post_decision(
     except PermissionError as exc:
         raise HTTPException(403, str(exc)) from exc
     except ValueError as exc:
-        return JSONResponse(status_code=400, content={"error": str(exc)})
+        raise HTTPException(400, str(exc)) from exc
 
     # svc_decide() already stamped the prepayment lifecycle (status + pay_token /
     # void) atomically; fan out the accounting/AP notice here so this JSON path
@@ -175,7 +175,7 @@ def post_reassign(
         svc_reassign(db, id, acting_user, to_user, actor=acting_user)
         db.commit()
     except ValueError as exc:
-        return JSONResponse(status_code=400, content={"error": str(exc)})
+        raise HTTPException(400, str(exc)) from exc
 
     return {"reassigned": True, "to_user_id": to_user_id}
 
@@ -200,7 +200,7 @@ def post_cancel(
     except PermissionError as exc:
         raise HTTPException(403, str(exc)) from exc
     except ValueError as exc:
-        return JSONResponse(status_code=400, content={"error": str(exc)})
+        raise HTTPException(400, str(exc)) from exc
 
     return {"cancelled": True}
 

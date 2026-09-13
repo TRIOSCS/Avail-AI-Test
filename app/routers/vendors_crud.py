@@ -25,6 +25,7 @@ from ..services.vendor_duplicates import check_vendor_duplicate as _check_vendor
 from ..utils.search_builder import SearchBuilder
 from ..utils.vendor_helpers import card_to_dict, find_vendor_card_by_name
 from ..vendor_utils import normalize_vendor_name
+from ._lookup_helpers import get_vendor_card_or_404
 
 router = APIRouter(tags=["vendors"])
 
@@ -166,9 +167,7 @@ async def autocomplete_names(
 @router.get("/api/vendors/{card_id}", response_model=VendorDetailResponse, response_model_exclude_none=True)
 async def get_vendor(card_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
     """Get vendor card detail with reviews, contacts, and engagement metrics."""
-    card = db.get(VendorCard, card_id)
-    if not card:
-        raise HTTPException(404, "Vendor not found")
+    card = get_vendor_card_or_404(db, card_id)
     return card_to_dict(card, db)
 
 
@@ -179,9 +178,7 @@ async def update_vendor(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    card = db.get(VendorCard, card_id)
-    if not card:
-        raise HTTPException(404, "Vendor not found")
+    card = get_vendor_card_or_404(db, card_id)
     if data.emails is not None:
         card.emails = data.emails
     if data.phones is not None:
@@ -204,9 +201,7 @@ async def toggle_blacklist(
     db: Session = Depends(get_db),
 ):
     """Toggle vendor blacklist status."""
-    card = db.get(VendorCard, card_id)
-    if not card:
-        raise HTTPException(404, "Vendor not found")
+    card = get_vendor_card_or_404(db, card_id)
     card.is_blacklisted = data.blacklisted if data.blacklisted is not None else (not card.is_blacklisted)
     db.commit()
     return card_to_dict(card, db)
@@ -214,9 +209,7 @@ async def toggle_blacklist(
 
 @router.delete("/api/vendors/{card_id}")
 async def delete_vendor(card_id: int, user: User = Depends(require_admin), db: Session = Depends(get_db)):
-    card = db.get(VendorCard, card_id)
-    if not card:
-        raise HTTPException(404, "Vendor not found")
+    card = get_vendor_card_or_404(db, card_id)
     active_offers = db.query(Offer).filter(Offer.vendor_card_id == card.id).count()
     if active_offers > 0:
         raise HTTPException(400, f"Cannot delete vendor with {active_offers} active offers. Archive instead.")
@@ -235,9 +228,7 @@ async def add_review(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    card = db.get(VendorCard, card_id)
-    if not card:
-        raise HTTPException(404, "Vendor not found")
+    card = get_vendor_card_or_404(db, card_id)
     review = VendorReview(
         vendor_card_id=card.id,
         user_id=user.id,
