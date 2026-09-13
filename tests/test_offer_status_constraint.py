@@ -58,6 +58,43 @@ def test_constraint_has_no_phantom_values():
     )
 
 
+def test_downgrade_leaves_earlier_migrations_constraints_in_place():
+    """downgrade() must not blanket-drop the six ``_ENSURE`` constraints: each is
+    already owned by an earlier migration (023 -> ck_nc_worker_status_singleton,
+    031 -> ck_ics_worker_status_singleton, 8c22bd2f6837 -> the other four) — 212 only
+    self-heals them when the squash left them missing. Unconditionally dropping them
+    on downgrade would remove pre-212 state on whichever DB (fresh vs. pre-squash
+    production) already had them from that earlier migration. Only the two
+    enum-lagging constraints 212 unconditionally replaces every run
+    (ck_buy_plans_status, ck_offers_status) may be dropped+restored here."""
+    import ast
+
+    tree = ast.parse(_MIG.read_text(encoding="utf-8"))
+    downgrade_fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "downgrade")
+    dropped_names = {
+        node.args[0].value
+        for node in ast.walk(downgrade_fn)
+        if isinstance(node, ast.Call)
+        and getattr(node.func, "attr", None) == "drop_constraint"
+        and node.args
+        and isinstance(node.args[0], ast.Constant)
+    }
+
+    ensure_names = {
+        "ck_nc_worker_status_singleton",
+        "ck_ics_worker_status_singleton",
+        "ck_quotes_status",
+        "ck_offers_parse_confidence_range",
+        "ck_sightings_confidence_range",
+        "ck_requirements_target_qty_nonneg",
+    }
+    assert not (dropped_names & ensure_names), (
+        f"downgrade() drops {sorted(dropped_names & ensure_names)}, which are owned by "
+        "earlier migrations (023/031/8c22bd2f6837), not by 212"
+    )
+    assert dropped_names == {"ck_buy_plans_status", "ck_offers_status"}
+
+
 def test_drifted_chk_offer_status_is_dropped():
     # A 124-specific historical assertion — read THAT migration, not the effective 212.
     mig124 = _MIG.parent / "124_offer_status_constraint.py"

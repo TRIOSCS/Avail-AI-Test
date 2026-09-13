@@ -24,11 +24,22 @@ this migration makes real databases match. Three convergence cases:
 Everything is idempotent (create only when absent, by name) and VALIDATED — the
 production data was verified in-range for every expression on 2026-08-20 (all
 status columns within their enums; both confidence ranges within 0..1; no negative
-target_qty; both singleton tables hold only id=1). Downgrade restores the exact
-pre-212 shape per case. The deliberately-untouched legacy NOT-VALID chk_* family
-(001-era, superseded/conflicting — e.g. chk_offer_price demands unit_price > 0
-while the app supports zero-price free-sample offers) stays as-is, enumerated in
-the drift gate's allowlist pending an owner decision to drop it.
+target_qty; both singleton tables hold only id=1). The deliberately-untouched legacy
+NOT-VALID chk_* family (001-era, superseded/conflicting — e.g. chk_offer_price
+demands unit_price > 0 while the app supports zero-price free-sample offers) stays
+as-is, enumerated in the drift gate's allowlist pending an owner decision to drop it.
+
+Downgrade only reverts case 2 (drops the enum-lagging ck_buy_plans_status /
+ck_offers_status and recreates their pre-212 8c22bd2f6837 shape) — that pair is
+unconditionally replaced by upgrade() every run, so the round-trip is exact. Cases 1
+and 3 are each already OWNED by an earlier migration in their own right (023 ->
+ck_nc_worker_status_singleton, 031 -> ck_ics_worker_status_singleton, 8c22bd2f6837 ->
+the other four convergence constraints); upgrade() here only self-heals whichever of
+them the squash left missing on THIS database (fresh vs. pre-squash-production differ
+on which half that is — see cases above). Downgrade has no way to tell, per
+constraint, whether 212 is the one that created it here or whether it already existed
+via 023/031/8c22bd2f6837, so it leaves all six in place rather than risk dropping
+state that predates this migration.
 
 Chains onto 211_pm_active_unique.
 """
@@ -99,8 +110,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    for table, name, _ in _ENSURE:
-        op.drop_constraint(name, table, type_="check")
+    # Deliberately does NOT drop the six _ENSURE constraints — see the module
+    # docstring. Each is owned by an earlier migration (023, 031, or 8c22bd2f6837);
+    # unconditionally dropping them here would remove pre-212 state on whichever
+    # database (fresh vs. production) already had them from that earlier migration.
     op.drop_constraint("ck_buy_plans_status", "buy_plans_v3", type_="check")
     op.drop_constraint("ck_offers_status", "offers", type_="check")
     # Restore the pre-212 shapes so a fresh-DB downgrade round-trips exactly.

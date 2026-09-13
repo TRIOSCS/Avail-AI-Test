@@ -268,6 +268,35 @@ class TestCSRFExemptions:
         assert mw._url_is_exempt(URL(path="/v2/partials/requisitions/import-parse")) is True
         assert mw._url_is_exempt(URL(path="/v2/partials/requisitions/import-form")) is True
 
+    def test_customer_lookup_exempt_pattern_anchored_with_dollar(self):
+        """The AI company-lookup exemption is a single exact POST route with no
+        sub-path, so its pattern must end in ``$`` like every other exact-route
+        sibling — otherwise a same-prefix path (e.g. a future
+        /v2/partials/customers/lookup-something route) would be over-matched and
+        exempted from CSRF too. Regression for the missing trailing ``$``."""
+        from starlette.datastructures import URL
+        from starlette_csrf import CSRFMiddleware
+
+        from app.main import CSRF_EXEMPT_URLS
+
+        mw = CSRFMiddleware(app=lambda scope, receive, send: None, secret="x", exempt_urls=CSRF_EXEMPT_URLS)
+        assert mw._url_is_exempt(URL(path="/v2/partials/customers/lookup")) is True
+        assert mw._url_is_exempt(URL(path="/v2/partials/customers/lookup-evil")) is False
+
+    def test_exact_route_exemptions_all_end_with_dollar(self):
+        """Every exempt pattern for a route with no variable sub-path/token must be
+        anchored with ``$`` (matched via re.Pattern.match, so only the START is
+        anchored by default). The two tokenized public-confirm routes are the sole,
+        deliberate exceptions — they must match a token appended after the trailing
+        slash."""
+        from app.main import CSRF_EXEMPT_URLS
+
+        prefix_by_design = {"/p/confirm/", "/po/confirm/"}
+        for pattern in CSRF_EXEMPT_URLS:
+            if pattern.pattern.rstrip("$") in prefix_by_design:
+                continue
+            assert pattern.pattern.endswith("$"), f"{pattern.pattern!r} is missing a trailing $ anchor"
+
     def test_import_save_rejected_without_csrf_token(self):
         """End-to-end: with the real exempt set, an authenticated (session-cookie) POST to
         import-save carrying no x-csrftoken is rejected 403, while import-parse (multipart

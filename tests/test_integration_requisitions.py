@@ -7,9 +7,11 @@ Called by: pytest
 Depends on: conftest.py (client, db_session, test_user fixtures)
 """
 
-from datetime import UTC
+from datetime import UTC, datetime
 
 import pytest
+
+from app.models import BuyPlan, BuyPlanLine, Offer, Quote, QuoteLine, Requirement
 
 pytestmark = pytest.mark.slow
 
@@ -147,6 +149,104 @@ def test_delete_requirement(client):
     assert resp.json()["ok"] is True
     remaining = client.get(f"/api/requisitions/{req_id}/requirements").json()
     assert len(remaining) == 0
+
+
+def test_delete_requirement_blocked_when_offer_referenced_by_buy_plan_line(client, db_session, test_user):
+    """A requirement whose offer has already been picked onto a buy plan line must
+    NOT be deletable — deleting it would cascade-delete the Offer and SET NULL the
+    buy plan line's offer_id, silently losing the approved plan's offer provenance."""
+    req_id = _create_req(client, name="REQ-DEL-BLOCKED")
+    items = _add_requirements(
+        client,
+        req_id,
+        [{"primary_mpn": "BP-MPN", "manufacturer": "TI", "target_qty": 10}],
+    )
+    item_id = items["created"][0]["id"]
+    requirement = db_session.get(Requirement, item_id)
+
+    offer = Offer(
+        requisition_id=req_id,
+        requirement_id=item_id,
+        vendor_name="Arrow",
+        mpn="BP-MPN",
+        normalized_mpn="BP-MPN",
+        status="active",
+        unit_price=1.23,
+        qty_available=50,
+        created_at=datetime.now(UTC),
+    )
+    db_session.add(offer)
+    db_session.flush()
+
+    buy_plan = BuyPlan(requisition_id=req_id)
+    db_session.add(buy_plan)
+    db_session.flush()
+    bp_line = BuyPlanLine(
+        buy_plan_id=buy_plan.id,
+        requirement_id=requirement.id,
+        offer_id=offer.id,
+        quantity=10,
+    )
+    db_session.add(bp_line)
+    db_session.commit()
+
+    resp = client.delete(f"/api/requirements/{item_id}")
+    assert resp.status_code == 409
+    assert "buy plan" in resp.json()["error"].lower()
+    # The requirement (and its offer) must survive the blocked delete.
+    assert db_session.get(Requirement, item_id) is not None
+    assert db_session.get(Offer, offer.id) is not None
+
+    # Once the buy plan line no longer references the offer, delete succeeds.
+    db_session.delete(bp_line)
+    db_session.commit()
+    resp2 = client.delete(f"/api/requirements/{item_id}")
+    assert resp2.status_code == 200
+    assert resp2.json()["ok"] is True
+    assert db_session.get(Requirement, item_id) is None
+
+
+def test_delete_requirement_blocked_when_offer_referenced_by_quote_line(client, db_session, test_user):
+    """Same guard, quote side: an offer already saved onto a QuoteLine must block the
+    requirement delete too."""
+    req_id = _create_req(client, name="REQ-DEL-BLOCKED-Q")
+    items = _add_requirements(
+        client,
+        req_id,
+        [{"primary_mpn": "QL-MPN", "manufacturer": "TI", "target_qty": 5}],
+    )
+    item_id = items["created"][0]["id"]
+
+    offer = Offer(
+        requisition_id=req_id,
+        requirement_id=item_id,
+        vendor_name="Avnet",
+        mpn="QL-MPN",
+        normalized_mpn="QL-MPN",
+        status="active",
+        unit_price=2.5,
+        qty_available=25,
+        created_at=datetime.now(UTC),
+    )
+    db_session.add(offer)
+    db_session.flush()
+
+    quote = Quote(
+        requisition_id=req_id,
+        quote_number="Q-DEL-GUARD-1",
+        revision=1,
+        line_items=[],
+        created_by_id=test_user.id,
+    )
+    db_session.add(quote)
+    db_session.flush()
+    q_line = QuoteLine(quote_id=quote.id, offer_id=offer.id, mpn="QL-MPN", qty=5)
+    db_session.add(q_line)
+    db_session.commit()
+
+    resp = client.delete(f"/api/requirements/{item_id}")
+    assert resp.status_code == 409
+    assert "quote" in resp.json()["error"].lower()
 
 
 def test_update_requirement(client):

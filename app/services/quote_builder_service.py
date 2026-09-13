@@ -596,10 +596,11 @@ def _save_quote_from_builder_core(
 
     # Advance EVERY contributing requisition to "quoted" if appropriate (for a single-req
     # save this is just the primary; for a combined quote each selected req is advanced so
-    # none is left OPEN/OFFERS after its lines are on the quote).
+    # none is left OPEN/OFFERS/RFQS_SENT after its lines are on the quote — RFQS_SENT is
+    # the normal stage a requisition sits in while a quote is being built from RFQ replies).
     for rid in req_ids:
         r = db.get(Requisition, rid)
-        if r and r.status in (RequisitionStatus.OPEN, RequisitionStatus.OFFERS):
+        if r and r.status in (RequisitionStatus.OPEN, RequisitionStatus.OFFERS, RequisitionStatus.RFQS_SENT):
             try:
                 req_transition(r, RequisitionStatus.QUOTED, user, db)
             except ValueError:
@@ -670,6 +671,10 @@ def _save_quote_from_builder_core(
                 on_quote_built(requirement_ids, db, actor=user)
                 db.commit()
     except Exception as e:
+        # Roll back the poisoned transaction, or every later use of this session
+        # (including the knowledge-capture commit below) raises PendingRollbackError
+        # for a quote that DID save (mirrors requisition_service clone-to-active).
+        db.rollback()
         logger.warning("Requirement status update (on_quote_built) failed: {}", e)
 
     # Knowledge ledger capture (same as create_quote)
@@ -710,8 +715,11 @@ def recalc_quote_totals(db: Session, quote) -> None:
 
     db.flush()
     lines = db.query(QuoteLine).filter(QuoteLine.quote_id == quote.id).order_by(QuoteLine.id).all()
-    subtotal = sum(float(ln.sell_price or 0) * (ln.qty or 1) for ln in lines)
-    total_cost = sum(float(ln.cost_price or 0) * (ln.qty or 1) for ln in lines)
+    # `or 0` (not `or 1`) matches quote_export_context so the header total always
+    # equals the sum of the visible rows — a zero/None qty row must contribute $0,
+    # not phantom single-unit revenue the customer never sees on the line.
+    subtotal = sum(float(ln.sell_price or 0) * (ln.qty or 0) for ln in lines)
+    total_cost = sum(float(ln.cost_price or 0) * (ln.qty or 0) for ln in lines)
     quote.subtotal = subtotal
     quote.total_cost = total_cost
     quote.total_margin_pct = ((subtotal - total_cost) / subtotal * 100) if subtotal else 0

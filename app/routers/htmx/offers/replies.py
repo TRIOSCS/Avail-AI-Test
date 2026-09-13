@@ -353,6 +353,16 @@ async def send_reply_htmx(
         user.email,
     )
 
+    # Honest-failure card (mirrors follow_ups.py send_follow_up_htmx): a Graph send
+    # that raised must never render the normal reviewed/response card — the user would
+    # believe the vendor was emailed when nothing went out. vr.status is left as-is
+    # (the commit above never ran for this branch).
+    if not is_testing and vr.vendor_email and not email_sent:
+        return HTMLResponse(
+            '<div class="rounded bg-rose-50 border border-rose-200 text-rose-700 text-xs px-2 py-1.5">'
+            f"Couldn't send the reply to {vr.vendor_name or 'this vendor'}. Please try again.</div>"
+        )
+
     req = db.query(Requisition).filter(Requisition.id == req_id).first()
     ctx = _base_ctx(request, user, "requisitions")
     ctx["r"] = vr

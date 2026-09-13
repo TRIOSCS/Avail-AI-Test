@@ -4,7 +4,7 @@ Populated by:
 - Won offers (avail_offer)
 - Won quotes (avail_quote_won)
 - Salesforce imports (salesforce_import)
-- Future: Acctivate PO imports (acctivate_po)
+- Future: ERP PO imports (erp_po_import)
 
 Used by the proactive matching engine to find customer matches
 for newly available inventory.
@@ -37,7 +37,7 @@ class CustomerPartHistory(Base):
     company_id = Column(Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
     material_card_id = Column(Integer, ForeignKey("material_cards.id", ondelete="CASCADE"), nullable=False)
     mpn = Column(String(100), nullable=False)  # Denormalized for display
-    source = Column(String(50), nullable=False)  # salesforce_import, avail_offer, avail_quote_won, acctivate_po
+    source = Column(String(50), nullable=False)  # salesforce_import, avail_offer, avail_quote_won, erp_po_import
 
     last_purchased_at = Column(UTCDateTime)
     purchase_count = Column(Integer, default=1)

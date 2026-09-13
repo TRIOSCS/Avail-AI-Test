@@ -123,6 +123,61 @@ class TestStockListsFieldRemoved:
 
 
 # ═══════════════════════════════════════════════════════════════════════
+#  scan_inbox: skip _mark_processed when the AI classification step raises
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestScanInboxSkipsMarkOnAiFailure:
+    def _one_message_miner(self, db_session, test_user):
+        """An EmailMiner wired to return exactly one message via the delta scan path."""
+        msg = {
+            "id": "msg-ai-fail",
+            "from": {"emailAddress": {"address": "sales@vendorco.com", "name": "Vendor Sales"}},
+            "subject": "RFQ reply",
+            "body": {"content": "We have LM317T in stock, $0.40 each."},
+            "receivedDateTime": "2026-01-01T00:00:00Z",
+            "conversationId": "conv-1",
+        }
+        with patch("app.utils.graph_client.GraphClient"):
+            from app.connectors.email_mining import EmailMiner
+
+            miner = EmailMiner("fake-token", db=db_session, user_id=test_user.id)
+            miner.gc = MagicMock()
+        miner._delta_scan = AsyncMock(return_value=([msg], True))
+        return miner
+
+    def test_ai_failure_skips_mark_processed_for_that_message(self, db_session, test_user):
+        """Regression: process_email_intelligence raising must NOT be followed by
+        _mark_processed(msg_id, "mining") for that message, or the message can never
+        be retried on a later scan."""
+        miner = self._one_message_miner(db_session, test_user)
+        miner._mark_processed = MagicMock()
+
+        with patch(
+            "app.services.email_intelligence_service.process_email_intelligence",
+            new=AsyncMock(side_effect=RuntimeError("Claude API down")),
+        ):
+            asyncio.get_event_loop().run_until_complete(miner.scan_inbox(lookback_days=30, max_messages=10))
+
+        marked_ids = [call.args[0] for call in miner._mark_processed.call_args_list]
+        assert "msg-ai-fail" not in marked_ids
+
+    def test_ai_success_still_marks_processed(self, db_session, test_user):
+        """Control: when the AI step succeeds, the message IS marked processed."""
+        miner = self._one_message_miner(db_session, test_user)
+        miner._mark_processed = MagicMock()
+
+        with patch(
+            "app.services.email_intelligence_service.process_email_intelligence",
+            new=AsyncMock(return_value=None),
+        ):
+            asyncio.get_event_loop().run_until_complete(miner.scan_inbox(lookback_days=30, max_messages=10))
+
+        marked_ids = [call.args[0] for call in miner._mark_processed.call_args_list]
+        assert "msg-ai-fail" in marked_ids
+
+
+# ═══════════════════════════════════════════════════════════════════════
 #  Bug 5: contacts sync delta query
 # ═══════════════════════════════════════════════════════════════════════
 

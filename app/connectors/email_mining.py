@@ -384,6 +384,7 @@ class EmailMiner:
                     )
 
             # AI classification for ambiguous emails (0-1 regex matches)
+            ai_step_failed = False
             if self.db and self.user_id:
                 try:
                     from app.services.email_intelligence_service import (
@@ -403,7 +404,14 @@ class EmailMiner:
                         regex_offer_matches=regex_matches,
                     )
                 except Exception as e:
+                    ai_step_failed = True
                     logger.warning("AI classification skipped for {}: {}", msg["id"], e)
+
+            # Skip H2 mark-as-processed when the AI step raised — matching how a stale
+            # delta token is handled elsewhere in this file — so a transient failure
+            # gets retried on the next scan instead of being silently skipped forever.
+            if ai_step_failed:
+                continue
 
             # H2: Mark as processed
             self._mark_processed(msg["id"], "mining")

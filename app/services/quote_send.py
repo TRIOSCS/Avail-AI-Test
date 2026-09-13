@@ -206,6 +206,7 @@ async def send_quote_email(
 
     from .activity_service import log_email_activity
     from .quote_requisitions import requisition_ids_for_quote
+    from .requisition_state import transition as req_transition
 
     primary_req = db.get(Requisition, quote.requisition_id)
     primary_old_status = primary_req.status if primary_req else None
@@ -218,7 +219,13 @@ async def send_quote_email(
     for rid in requisition_ids_for_quote(db, quote.id) or [quote.requisition_id]:
         r = db.get(Requisition, rid)
         if r and r.status not in (RequisitionStatus.WON, RequisitionStatus.LOST):
-            r.status = RequisitionStatus.QUOTED
+            try:
+                req_transition(r, RequisitionStatus.QUOTED, user, db)
+            except ValueError as e:
+                # Illegal transition per requisition_state.ALLOWED_TRANSITIONS (e.g. a
+                # legacy/edge status) — log and leave the requisition's status as-is
+                # rather than bypassing the state machine with a raw assignment.
+                logger.info("Quote send: requisition {} not advanced to quoted: {}", rid, e)
         # log_email_activity dedupes by external_id, so passing the SAME graph_message_id
         # for every contributing req would silently drop all but the first (a combined
         # quote's send would log activity on the primary req only). Keep the PRIMARY on the

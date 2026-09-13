@@ -18,11 +18,14 @@ import os
 os.environ["TESTING"] = "1"
 
 from datetime import UTC, datetime
+from unittest.mock import patch
 
 import pytest
 from sqlalchemy.orm import Session
 
-from app.models import Offer, Quote, Requirement, Requisition, User
+from app.constants import RequisitionStatus
+from app.models import Offer, Quote, QuoteLine, Requirement, Requisition, User
+from app.schemas.quote_builder import QuoteBuilderSaveRequest
 from app.services.quote_builder_service import (
     DEFAULT_MARKUP_PCT,
     best_cost_for,
@@ -30,6 +33,8 @@ from app.services.quote_builder_service import (
     build_quote_tab_data,
     margin_guardrail,
     quote_export_context,
+    recalc_quote_totals,
+    save_quote_from_builder,
 )
 from tests.conftest import engine
 
@@ -417,3 +422,98 @@ class TestQuoteReportPdf:
         # …but no vendor / offer identity from the seeded leaky line.
         assert "Arrow" not in html
         assert "4242" not in html
+
+
+# ── save_quote_from_builder / recalc_quote_totals ─────────────────────────────
+
+
+def _save_payload(item: Requirement, offer: Offer, sell: float = 0.60, cost: float = 0.40) -> QuoteBuilderSaveRequest:
+    return QuoteBuilderSaveRequest(
+        lines=[
+            {
+                "requirement_id": item.id,
+                "offer_id": offer.id,
+                "mpn": "LM317T",
+                "manufacturer": "TI",
+                "qty": 100,
+                "cost_price": cost,
+                "sell_price": sell,
+                "margin_pct": round((sell - cost) / sell * 100, 2),
+                "condition": "new",
+            }
+        ]
+    )
+
+
+class TestSaveQuoteFromBuilderRollback:
+    def test_on_quote_built_failure_rolls_back_and_session_stays_usable(
+        self, db_session: Session, req_with_offers, test_user: User, test_customer_site
+    ):
+        """A DB-ish failure inside the on_quote_built hook must roll back the poisoned
+        transaction, or the very next db use (including knowledge capture below, or the
+        caller rendering a response) raises PendingRollbackError for a quote that DID
+        save (P2 fix — mirrors requisition_service clone-to-active)."""
+        req, item, offers = req_with_offers
+        req.customer_site_id = test_customer_site.id
+        db_session.commit()
+        payload = _save_payload(item, offers["active_lo"])
+
+        with patch(
+            "app.services.requirement_status.on_quote_built",
+            side_effect=RuntimeError("simulated failure"),
+        ):
+            result = save_quote_from_builder(db_session, req.id, payload, test_user)
+
+        # The quote itself was committed before the hook ran.
+        assert db_session.get(Quote, result["quote_id"]) is not None
+        # The session must still be usable — no PendingRollbackError on the next query.
+        assert db_session.query(Requisition).filter(Requisition.id == req.id).one() is not None
+
+
+class TestSaveQuoteFromBuilderRfqsSent:
+    def test_rfqs_sent_requisition_advances_to_quoted(
+        self, db_session: Session, req_with_offers, test_user: User, test_customer_site
+    ):
+        """RFQS_SENT -> QUOTED is a normal, allowed transition (requisition_state.
+        ALLOWED_TRANSITIONS) and must fire on save, not just from OPEN/OFFERS."""
+        req, item, offers = req_with_offers
+        req.status = RequisitionStatus.RFQS_SENT
+        req.customer_site_id = test_customer_site.id
+        db_session.commit()
+
+        payload = _save_payload(item, offers["active_lo"])
+        save_quote_from_builder(db_session, req.id, payload, test_user)
+
+        db_session.refresh(req)
+        assert req.status == RequisitionStatus.QUOTED
+
+
+class TestRecalcQuoteTotals:
+    def test_zero_qty_line_contributes_nothing_not_phantom_unit(
+        self, db_session: Session, req_with_offers, test_user: User
+    ):
+        """recalc_quote_totals must use `qty or 0` (matching quote_export_context) so
+        the header total equals the sum of the visible rows — a None/zero qty row
+        must not be treated as 1 unit of phantom revenue/cost."""
+        req, _item, _offers = req_with_offers
+        quote = Quote(
+            requisition_id=req.id,
+            quote_number="Q-TOTALS-TEST",
+            revision=1,
+            line_items=[],
+            created_by_id=test_user.id,
+        )
+        db_session.add(quote)
+        db_session.flush()
+        db_session.add_all(
+            [
+                QuoteLine(quote_id=quote.id, mpn="ZEROQ", qty=None, cost_price=5, sell_price=10),
+                QuoteLine(quote_id=quote.id, mpn="TWOQ", qty=2, cost_price=5, sell_price=10),
+            ]
+        )
+        db_session.commit()
+
+        recalc_quote_totals(db_session, quote)
+
+        assert quote.subtotal == pytest.approx(20.0)  # only the qty=2 line: 2 * 10
+        assert quote.total_cost == pytest.approx(10.0)  # 2 * 5

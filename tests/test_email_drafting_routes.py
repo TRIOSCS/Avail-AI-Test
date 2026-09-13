@@ -135,6 +135,35 @@ def test_send_reply_rejects_empty_body(client, db_session, test_requisition):
     assert resp.status_code == 400
 
 
+def test_send_reply_graph_failure_returns_honest_failure_card(client, db_session, test_requisition, monkeypatch):
+    """When the Graph sendMail call raises (swallowed), the route must NOT render the
+    normal reviewed response card — the user would believe the vendor was emailed when
+    nothing went out. vr.status must stay unchanged (P1 fix)."""
+    monkeypatch.setenv("TESTING", "0")
+    vr = _make_response(db_session, test_requisition.id)
+
+    class _BoomGraph:
+        def __init__(self, *a, **k):
+            pass
+
+        async def post_json(self, *a, **k):
+            raise RuntimeError("graph 500")
+
+    with (
+        patch("app.dependencies.require_fresh_token", new=AsyncMock(return_value="tok")),
+        patch("app.utils.graph_client.GraphClient", _BoomGraph),
+    ):
+        resp = client.post(
+            f"/v2/partials/requisitions/{test_requisition.id}/responses/{vr.id}/send-reply",
+            data={"subject": "Re: RFQ - LM358N", "body": "Thanks, we accept."},
+        )
+
+    assert resp.status_code == 200
+    assert "Couldn't send" in resp.text
+    db_session.refresh(vr)
+    assert vr.status == "new"  # unchanged from seed — never flipped to reviewed by a non-send
+
+
 # ── Authorization (IDOR): SALES/TRADER may only act on their own requisitions ─
 def test_vendor_reply_ai_draft_blocks_non_owner_sales(client, db_session, test_requisition, test_user, admin_user):
     test_user.role = UserRole.SALES

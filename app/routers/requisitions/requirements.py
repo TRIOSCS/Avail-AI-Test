@@ -15,17 +15,20 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from loguru import logger
 from sqlalchemy import func as sqlfunc
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from ...constants import ActivityType, OfferStatus, TaskStatus
 from ...database import get_db
 from ...dependencies import get_req_for_user, require_buyer, require_requisition_access, require_user
 from ...models import (
+    BuyPlanLine,
     ChangeLog,
     Contact,
     CustomerSite,
     MaterialCard,
     Offer,
+    QuoteLine,
     Requirement,
     Requisition,
     Sighting,
@@ -590,6 +593,25 @@ async def delete_requirement(item_id: int, user: User = Depends(require_user), d
     req = get_req_for_user(db, user, r.requisition_id)
     if not req:
         raise HTTPException(403, "Not authorized for this requisition")
+
+    # Deleting a Requirement cascades to every Offer on it (ORM delete-orphan + DB FK
+    # ondelete=CASCADE on offers.requirement_id), and BuyPlanLine.offer_id /
+    # QuoteLine.offer_id are SET NULL — so an approved buy plan or quote would silently
+    # lose its offer provenance. Block the delete if any offer on this line is referenced.
+    referenced_offer = db.scalar(
+        select(Offer.id)
+        .where(Offer.requirement_id == r.id)
+        .where(
+            or_(
+                select(BuyPlanLine.id).where(BuyPlanLine.offer_id == Offer.id).exists(),
+                select(QuoteLine.id).where(QuoteLine.offer_id == Offer.id).exists(),
+            )
+        )
+        .limit(1)
+    )
+    if referenced_offer is not None:
+        raise HTTPException(409, "This line has offers used by a buy plan or quote; remove those first.")
+
     db.delete(r)
     db.commit()
     return {"ok": True}

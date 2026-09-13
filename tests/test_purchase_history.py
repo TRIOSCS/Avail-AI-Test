@@ -1,10 +1,21 @@
 """Tests for customer purchase history model and upsert service."""
 
+import inspect
 from decimal import Decimal
 
 from app.models import Company, MaterialCard
+from app.models import purchase_history as purchase_history_module
 from app.models.purchase_history import CustomerPartHistory
 from app.services.purchase_history_service import upsert_purchase
+
+
+def test_source_docs_are_erp_neutral():
+    """CLAUDE.md forbids hardcoding a vendor (ERP) name into fields/models/comments —
+    the module docstring and the ``source`` column comment must plan for a future ERP
+    PO import using the neutral ``erp_po_import`` token, not a vendor-named one."""
+    source = inspect.getsource(purchase_history_module)
+    assert "acctivate" not in source.lower()
+    assert "erp_po_import" in source
 
 
 def _make_company_and_card(db_session, normalized_mpn, display_mpn, company_name="Test Co"):

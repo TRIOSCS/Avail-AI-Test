@@ -6,6 +6,7 @@ from sqlalchemy import Boolean, Column, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
+from ..constants import ProspectAccountStatus
 from ..database import UTCDateTime
 from .base import Base
 
@@ -70,7 +71,7 @@ class ProspectAccount(Base):
     discovery_batch_id = Column(Integer, ForeignKey("discovery_batches.id", ondelete="SET NULL"))
 
     # Status lifecycle
-    status = Column(String(20), default="suggested")
+    status = Column(String(20), default=ProspectAccountStatus.SUGGESTED.value)
     import_priority = Column(String(20))
 
     # Historical context (for SF imports)

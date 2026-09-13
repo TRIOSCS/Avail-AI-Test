@@ -566,7 +566,7 @@ CSRF_EXEMPT_URLS = [
     # (POST that CREATES requisition + requirement rows) is deliberately EXCLUDED so
     # it stays under standard CSRF enforcement like every other state-changing route.
     re.compile(r"/v2/partials/requisitions/import-(form|parse)$"),
-    re.compile(r"/v2/partials/customers/lookup"),  # AI company lookup (read-only)
+    re.compile(r"/v2/partials/customers/lookup$"),  # AI company lookup (read-only)
     re.compile(r"/api/webhooks/graph$"),  # Microsoft Graph mail webhook
     re.compile(r"/api/webhooks/teams$"),  # Microsoft Graph Teams webhook
     re.compile(r"/api/webhooks/acs$"),  # Azure Communication Services webhook

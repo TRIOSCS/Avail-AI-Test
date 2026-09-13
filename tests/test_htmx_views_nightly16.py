@@ -24,6 +24,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from app.constants import UserRole
 from app.models import Requirement, Requisition
 
 # ── Helpers ───────────────────────────────────────────────────────────────
@@ -161,6 +162,89 @@ class TestSearchRun:
     def test_run_mpn_from_query_param(self, client: TestClient):
         resp = client.post("/v2/partials/search/run?mpn=TL071&requirement_id=0", data={})
         assert resp.status_code == 200
+
+    def test_run_from_requirement_blocks_non_owner_sales(
+        self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user, admin_user
+    ):
+        """A SALES user who does not own the requisition must be blocked from
+        resolving/searching another rep's requirement (IDOR fix)."""
+        item = _make_requirement(db_session, test_requisition, mpn="LM317T")
+        test_user.role = UserRole.SALES
+        test_requisition.created_by = admin_user.id  # owned by someone else
+        db_session.commit()
+
+        resp = client.post(
+            f"/v2/partials/search/run?requirement_id={item.id}",
+            data={"mpn": ""},
+        )
+        assert resp.status_code == 404
+
+    def test_run_from_requirement_allows_owning_sales(
+        self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user
+    ):
+        """A SALES user who OWNS the requisition is allowed through."""
+        item = _make_requirement(db_session, test_requisition, mpn="LM317T")
+        test_user.role = UserRole.SALES
+        test_requisition.created_by = test_user.id
+        db_session.commit()
+
+        resp = client.post(
+            f"/v2/partials/search/run?requirement_id={item.id}",
+            data={"mpn": ""},
+        )
+        assert resp.status_code == 200
+
+
+# ── Search Stream ownership (search_id must be bound to the launching user) ────
+
+
+class TestSearchStreamOwnership:
+    @staticmethod
+    def _extract_search_id(html: str) -> str:
+        import re
+
+        match = re.search(r'data-search-id="([^"]+)"', html)
+        assert match, "results_shell.html missing data-search-id"
+        return match.group(1)
+
+    async def test_unknown_search_id_returns_404(self, client: TestClient, test_user):
+        from fastapi import HTTPException
+
+        from app.routers.htmx.search_views import search_stream
+
+        with pytest.raises(HTTPException) as exc_info:
+            await search_stream(request=None, search_id="not-a-real-search-id", user=test_user)
+        assert exc_info.value.status_code == 404
+
+    async def test_other_user_cannot_subscribe_to_search(
+        self, client: TestClient, db_session: Session, test_user, admin_user
+    ):
+        """User B requesting user A's search_id must get 404 — never confirm the id
+        exists by returning 403 (IDOR fix)."""
+        from fastapi import HTTPException
+
+        from app.routers.htmx.search_views import search_stream
+
+        run_resp = client.post("/v2/partials/search/run", data={"mpn": "NE555"})
+        assert run_resp.status_code == 200
+        search_id = self._extract_search_id(run_resp.text)
+
+        with pytest.raises(HTTPException) as exc_info:
+            await search_stream(request=None, search_id=search_id, user=admin_user)
+        assert exc_info.value.status_code == 404
+
+    async def test_launching_user_can_subscribe_to_own_search(
+        self, client: TestClient, db_session: Session, test_user
+    ):
+        from app.routers.htmx.search_views import search_stream
+
+        run_resp = client.post("/v2/partials/search/run", data={"mpn": "NE555"})
+        assert run_resp.status_code == 200
+        search_id = self._extract_search_id(run_resp.text)
+
+        # No exception raised — ownership check passes and the SSE response is built.
+        resp = await search_stream(request=None, search_id=search_id, user=test_user)
+        assert resp is not None
 
 
 # ── Search Filter ─────────────────────────────────────────────────────────

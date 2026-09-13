@@ -11,7 +11,7 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.constants import DiscoveryBatchStatus
+from app.constants import DiscoveryBatchStatus, ProspectAccountStatus
 from app.models import Company, CustomerSite, User
 from app.models.discovery_batch import DiscoveryBatch
 from app.models.prospect_account import ProspectAccount
@@ -76,6 +76,13 @@ class TestProspectAccountModel:
         assert pa.fit_score == 0
         assert pa.readiness_score == 0
         assert pa.status == "suggested"
+
+    def test_status_column_default_derives_from_enum(self):
+        """The status Column default must be ProspectAccountStatus.SUGGESTED, not a
+        raw string literal, so it can never drift from the enum (P2 fix)."""
+        default = ProspectAccount.__table__.columns["status"].default
+        assert default.arg == ProspectAccountStatus.SUGGESTED.value
+        assert default.arg == ProspectAccountStatus.SUGGESTED  # StrEnum compares equal to its value
 
     def test_unique_domain_constraint(self, db_session: Session):
         """Duplicate domain raises IntegrityError."""

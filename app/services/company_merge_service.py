@@ -174,11 +174,13 @@ def merge_companies(keep_id: int, remove_id: int, db: Session) -> dict:
     db.delete(remove)
     db.flush()
 
-    # 10. Invalidate cache
+    # 10. Invalidate cache (list + detail — detail is keyed by company id and would
+    # otherwise keep serving the pre-merge kept/removed rows for up to its 1h TTL)
     try:
         from ..cache.decorators import invalidate_prefix
 
         invalidate_prefix("company_list")
+        invalidate_prefix("company_detail")
     except Exception as e:
         logger.warning("Company merge: cache invalidation failed: {}", e)
 
@@ -283,6 +285,7 @@ def delete_companies(id_a: int, id_b: int, db: Session) -> dict:
         from ..cache.decorators import invalidate_prefix
 
         invalidate_prefix("company_list")
+        invalidate_prefix("company_detail")
     except Exception as e:
         logger.warning("Company delete-both: cache invalidation failed: {}", e)
 

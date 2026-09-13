@@ -217,6 +217,50 @@ async def test_service_writes_outbound_activity_log(db_session, test_requisition
     assert "Q-2026-LOG" in (log.subject or "")
 
 
+async def test_service_advances_requisition_via_transition_helper(
+    db_session, test_requisition, test_customer_site, test_user
+):
+    """P2 fix: the requisition status must move to QUOTED through
+    requisition_state.transition (not a raw assignment), which writes a
+    STATUS_CHANGED ActivityLog entry."""
+    from app.constants import ActivityType
+    from app.services.quote_send import send_quote_email
+
+    quote = _draft_quote(db_session, test_requisition, test_customer_site, test_user, number="Q-2026-TRANS")
+    await send_quote_email(db_session, quote, test_user, token="t", testing=True)
+
+    db_session.refresh(test_requisition)
+    assert test_requisition.status == RequisitionStatus.QUOTED
+    status_logs = (
+        db_session.query(ActivityLog)
+        .filter(
+            ActivityLog.requisition_id == test_requisition.id,
+            ActivityLog.activity_type == ActivityType.STATUS_CHANGED,
+        )
+        .all()
+    )
+    assert len(status_logs) == 1
+    assert "quoted" in status_logs[0].subject
+
+
+async def test_service_ignores_illegal_transition_and_leaves_status(
+    db_session, test_requisition, test_customer_site, test_user
+):
+    """A requisition status with no legal path to QUOTED (e.g. CANCELLED, which may
+    only reopen) must be logged and skipped, not force-set by a raw assignment."""
+    from app.services.quote_send import send_quote_email
+
+    test_requisition.status = RequisitionStatus.CANCELLED
+    db_session.commit()
+    quote = _draft_quote(db_session, test_requisition, test_customer_site, test_user, number="Q-2026-ILLEGAL")
+
+    result = await send_quote_email(db_session, quote, test_user, token="t", testing=True)
+
+    assert result.status == "sent"  # the send itself still succeeds
+    db_session.refresh(test_requisition)
+    assert test_requisition.status == RequisitionStatus.CANCELLED  # left unchanged
+
+
 async def test_service_captures_graph_ids_when_message_found(
     db_session, test_requisition, test_customer_site, test_user
 ):

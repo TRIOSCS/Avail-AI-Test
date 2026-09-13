@@ -4,6 +4,8 @@ Verifies that merge moves sites, combines tags/notes/fields, reassigns FK refere
 and deletes the removed company while preserving all data.
 """
 
+from unittest.mock import patch
+
 import pytest
 
 from app.models import Company, CustomerSite, DedupDecision, DedupMergeAudit, User
@@ -204,6 +206,35 @@ def test_delete_companies_tears_down_excess_mirror(db_session):
     # The mirror rows are DELETED (not NULL-detached) and the virtual req is gone.
     assert db_session.query(Sighting).filter(Sighting.source_type == "customer_excess").count() == 0
     assert db_session.query(Requisition).filter(Requisition.name == virtual_name).count() == 0
+
+
+def test_merge_invalidates_company_detail_cache(db_session):
+    """merge_companies must bust company_detail (not just company_list) so the kept
+    company's detail page doesn't keep serving stale pre-merge data for up to 1h."""
+    keep, remove = _make_pair(db_session, {"name": "H Corp"}, {"name": "H Corporation"})
+    db_session.commit()
+
+    with patch("app.cache.decorators.invalidate_prefix") as mock_invalidate:
+        merge_companies(keep.id, remove.id, db_session)
+        db_session.commit()
+
+    calls = [c.args[0] for c in mock_invalidate.call_args_list]
+    assert "company_list" in calls
+    assert "company_detail" in calls
+
+
+def test_delete_companies_invalidates_company_detail_cache(db_session):
+    """delete_companies must also bust company_detail for both deleted ids' prefix."""
+    keep, remove = _make_pair(db_session, {"name": "I Corp"}, {"name": "I Corporation"})
+    db_session.commit()
+
+    with patch("app.cache.decorators.invalidate_prefix") as mock_invalidate:
+        delete_companies(keep.id, remove.id, db_session)
+        db_session.commit()
+
+    calls = [c.args[0] for c in mock_invalidate.call_args_list]
+    assert "company_list" in calls
+    assert "company_detail" in calls
 
 
 def test_merge_renames_colliding_sites(db_session):

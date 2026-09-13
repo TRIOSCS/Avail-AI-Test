@@ -97,3 +97,19 @@ def test_enum_is_str():
     assert RequisitionStatus.OPEN == "open"
     assert "open" == RequisitionStatus.OPEN
     assert RequisitionStatus.OPEN in {"open", "rfqs_sent"}
+
+
+def test_user_model_role_comment_lists_every_role():
+    """app/models/auth.py User.role carries an inline `# buyer | sales | ...` comment
+    documenting the allowed values — it must list every UserRole member (it silently
+    dropped AGENT/"agent" for months). Reads the source line rather than hardcoding
+    the list so the two can never drift apart again undetected."""
+    import inspect
+
+    from app.models import auth as auth_module
+
+    source = inspect.getsource(auth_module.User)
+    role_line = next(line for line in source.splitlines() if "role = Column" in line)
+    comment = role_line.split("#", 1)[1]
+    for member in UserRole:
+        assert member.value in comment, f"UserRole.{member.name} ({member.value!r}) missing from role comment"

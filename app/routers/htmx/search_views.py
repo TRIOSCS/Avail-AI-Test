@@ -16,6 +16,7 @@ Depends on: app.search_service, app.services.global_search_service,
 import asyncio
 import html as html_mod
 import json
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
@@ -36,6 +37,22 @@ from ...utils.sql_helpers import escape_like
 from ._shared import _base_ctx, set_canonical_url
 
 router = APIRouter(tags=["htmx-views"])
+
+
+def _search_id_for(user_id: int) -> str:
+    """Mint a search_id bound to its launching user: ``<user_id>-<uuid4>``.
+
+    The uuid keeps it unguessable; the user prefix lets ``search_stream`` refuse
+    another user's id without any shared registry. That matters because the app
+    runs two uvicorn workers behind a Redis-backed SSE broker — search_run and the
+    EventSource subscribe can land on different processes, so an in-memory
+    owner map would 404 legitimate streams.
+    """
+    return f"{user_id}-{uuid4()}"
+
+
+def _search_id_owned_by(search_id: str, user_id: int) -> bool:
+    return search_id.startswith(f"{user_id}-")
 
 
 # ── Global search ──────────────────────────────────────────────────────
@@ -307,8 +324,6 @@ async def search_run(
     If requirement_id is provided, searches for that requirement's MPN. Otherwise uses
     the mpn form field.
     """
-    from uuid import uuid4
-
     from ...utils.async_helpers import safe_background_task as _safe_bg
 
     search_mpn = mpn.strip()
@@ -317,6 +332,7 @@ async def search_run(
     if not search_mpn and requirement_id:
         req = db.query(Requirement).filter(Requirement.id == requirement_id).first()
         if req:
+            require_requisition_access(db, req.requisition_id, user)
             search_mpn = req.primary_mpn or ""
 
     # Also check query params for mpn (when called from requirement detail)
@@ -327,7 +343,7 @@ async def search_run(
         return HTMLResponse('<div class="p-4 text-sm text-red-600">Please enter a part number.</div>')
 
     # Generate a unique search ID and launch streaming search in background
-    search_id = str(uuid4())
+    search_id = _search_id_for(user.id)
     enabled_sources = _get_enabled_sources(db)
 
     from ...search_service import stream_search_mpn
@@ -355,8 +371,12 @@ async def search_stream(
     """SSE stream endpoint for search results.
 
     Subscribes to the SSE broker channel for the given search_id and yields events until
-    the 'done' event is received or the client disconnects.
+    the 'done' event is received or the client disconnects. 404s (not 403, to avoid
+    confirming existence) when search_id is unknown or was started by another user.
     """
+    if not _search_id_owned_by(search_id, user.id):
+        raise HTTPException(404, "Search not found")
+
     from sse_starlette.sse import EventSourceResponse
 
     from ...services.sse_broker import broker
