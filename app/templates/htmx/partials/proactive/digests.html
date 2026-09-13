@@ -45,7 +45,7 @@
   <div class="mb-4 bg-white rounded-lg border border-line-base overflow-hidden"
        x-data="{ open: {{ 'true' if d.status == 'draft' else 'false' }} }">
     <div class="flex items-center gap-3 px-4 py-3 bg-gray-50 border-b border-line-base">
-      <button @click="open = !open" class="text-gray-400 hover:text-gray-600 transition-colors focus:outline-none focus:ring-2 rounded" style="--tw-ring-color:var(--accent-ring)">
+      <button @click="open = !open" aria-label="Toggle digest details" class="text-gray-400 hover:text-gray-600 transition-colors focus:outline-none focus:ring-2 rounded" style="--tw-ring-color:var(--accent-ring)">
         <svg class="h-4 w-4 transition-transform" :class="open ? 'rotate-0' : '-rotate-90'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
           <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/>
         </svg>
@@ -79,11 +79,11 @@
         <table class="data-table w-full">
           <thead>
             <tr>
-              <th class="text-left">MPN</th>
-              <th class="text-left">Customer</th>
-              <th class="text-left w-[90px]">Contacted</th>
-              <th class="text-left w-[160px]">Outcome</th>
-              <th class="text-left w-[140px]">SO #</th>
+              <th scope="col" class="text-left">MPN</th>
+              <th scope="col" class="text-left">Customer</th>
+              <th scope="col" class="text-left w-[90px]">Contacted</th>
+              <th scope="col" class="text-left w-[160px]">Outcome</th>
+              <th scope="col" class="text-left w-[140px]">SO #</th>
             </tr>
           </thead>
           <tbody>

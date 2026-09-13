@@ -49,6 +49,7 @@
   <button type="button" @click.stop="open = !open"
           class="px-1.5 text-xs font-medium text-brand-600 hover:text-brand-800 cursor-pointer whitespace-nowrap"
           :aria-expanded="open"
+          aria-label="Show all part numbers"
           x-text="open ? '&#8722;less' : '+{{ overflow }}'"></button>
 </span>
 {% elif all_mpns %}

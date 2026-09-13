@@ -43,7 +43,8 @@
         <label class="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
           <input type="checkbox"
                  @change='selectedVendors = $event.target.checked ? {{ vendors|map(attribute="id")|list|tojson }} : []'
-                 class="rounded border-gray-300 text-brand-500 input-focus">
+                 class="rounded border-gray-300 text-accent-500 input-focus"
+                 style="accent-color:var(--accent)">
           Select All
         </label>
       </div>
@@ -54,7 +55,8 @@
         <div class="px-4 py-3 flex items-center gap-3 hover:bg-brand-50">
           <input aria-label="Select vendor {{ v.display_name }}" type="checkbox" value="{{ v.id }}"
                  x-model.number="selectedVendors"
-                 class="rounded border-gray-300 text-brand-500 input-focus">
+                 class="rounded border-gray-300 text-accent-500 input-focus"
+                 style="accent-color:var(--accent)">
 
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2">

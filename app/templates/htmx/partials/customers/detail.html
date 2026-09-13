@@ -281,7 +281,11 @@
            hx-trigger="load"
            hx-target="this"
            hx-swap="outerHTML"
-           class="empty:hidden"></div>
+           class="empty:hidden">
+        <div class="card animate-pulse">
+          <div class="h-3 w-2/3 bg-gray-100 rounded"></div>
+        </div>
+      </div>
 
       {# Dual clocks: Outbound + Reply — canonical cadence_clocks macro (shared/_macros.html) #}
       {{ cadence_clocks(company, now_utc) }}
@@ -378,7 +382,11 @@
          hx-get="/v2/partials/customers/{{ company.id }}/tab/{{ active_tab }}"
          hx-trigger="load"
          hx-target="this"
-         hx-swap="innerHTML"></div>
+         hx-swap="innerHTML">
+      <div class="card animate-pulse">
+        <div class="h-3 w-2/3 bg-gray-100 rounded"></div>
+      </div>
+    </div>
     {% endif %}
   </div>
 

@@ -21,6 +21,7 @@
     <button type='button'
             class='ml-0.5 text-violet-400 hover:text-violet-600 focus:outline-none'
             title='Remove {{ tag.name }}'
+            aria-label='Remove {{ tag.name }}'
             hx-delete='{{ delete_base }}{{ tag.id }}'
             hx-target='#{{ container_id }}'
             hx-swap='outerHTML'>

@@ -16,6 +16,7 @@
 
   <h2>Quote Details</h2>
   <table class="meta-table">
+    <tbody>
     <tr><td class="meta-label">Customer</td><td>{{ (customer_site.site_name | e) if customer_site else '—' }}</td></tr>
     <tr><td class="meta-label">Company</td><td>{{ (company.name | e) if company else '—' }}</td></tr>
     <tr><td class="meta-label">Status</td><td>{{ quote.status }}</td></tr>
@@ -27,6 +28,7 @@
     {% if quote.shipping_terms %}
     <tr><td class="meta-label">Shipping Terms</td><td>{{ quote.shipping_terms | e }}</td></tr>
     {% endif %}
+    </tbody>
   </table>
 
   {% if line_items %}
@@ -52,6 +54,7 @@
   {% endif %}
 
   <table class="totals">
+    <tbody>
     {% if quote.subtotal %}
     <tr><td class="total-label">Subtotal:</td><td>${{ quote.subtotal|float|money }}</td></tr>
     {% endif %}
@@ -61,6 +64,7 @@
     {% if quote.total_margin_pct %}
     <tr><td class="total-label">Margin:</td><td>{{ '{:.1f}%'.format(quote.total_margin_pct|float) }}</td></tr>
     {% endif %}
+    </tbody>
   </table>
 
   {% if quote.notes %}

@@ -271,7 +271,10 @@
     message_class="mt-2 text-sm text-gray-600",
     wrapper_class="card p-6 sm:p-8 text-center",
     icon_class="mx-auto h-12 w-12 text-gray-400",
-    icon_path="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"
+    icon_path="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4",
+    action_url="/v2/partials/vendors/create-form?hx_target=" ~ (hx_target|default('#main-content')|urlencode) ~ "&push_url_base=" ~ (push_url_base|default('/v2/vendors')|urlencode),
+    action_hx_target=hx_target|default('#main-content'),
+    action_label="Add your first vendor"
   %}
   {% include "htmx/partials/shared/empty_state.html" %}
   {% endwith %}

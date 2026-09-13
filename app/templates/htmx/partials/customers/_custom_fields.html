@@ -33,6 +33,7 @@
       <button type='button'
               class='flex-shrink-0 text-gray-300 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 focus:outline-none'
               title='Remove {{ label }}'
+              aria-label='Remove {{ label }}'
               hx-delete='{{ _del_base }}{{ label | urlencode }}'
               hx-target='#custom-fields-{{ entity }}-{{ obj.id }}'
               hx-swap='outerHTML'>

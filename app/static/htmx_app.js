@@ -122,7 +122,7 @@ window.onunhandledrejection = function(e) {
                     return (a instanceof Error) ? (a.stack || a.message) : String(a);
                 }).join(' ').slice(0, 1000),
             });
-        } catch (_) { /* never let logging break logging */ }
+        } catch { /* never let logging break logging */ }
         orig(...args);
     };
 });
@@ -149,7 +149,7 @@ document.body.addEventListener('htmx:afterSettle', function(evt) {
     var t = evt.detail && evt.detail.target;
     if (!t || !t.id) return;
     if (t.id === 'aw-pane' || t.id === 'sightings-detail' || /(^|[-_])detail([-_]|$)/.test(t.id)) {
-        try { t.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (_e) { t.scrollIntoView(); }
+        try { t.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch { t.scrollIntoView(); }
     }
 });
 
@@ -214,7 +214,7 @@ window.collectTroubleContext = function collectTroubleContext() {
     try {
         const e = performance.getEntriesByType('navigation')[0];
         if (e) navTiming = { dom_interactive: Math.round(e.domInteractive), load: Math.round(e.loadEventEnd) };
-    } catch (_) { navTiming = null; }
+    } catch { navTiming = null; }
     return {
         nav_history: (window._ttNavHistory || []).slice(),
         current_view: m ? m[1] : null,
@@ -506,7 +506,7 @@ function syncDisplayTimezone() {
     let browserTz = '';
     try {
         browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
-    } catch (_) { /* Intl unavailable — skip */ }
+    } catch { /* Intl unavailable — skip */ }
     if (!browserTz) return;
     const storedTz = document.body.dataset.userTz || '';
     if (browserTz === storedTz) return;
@@ -651,7 +651,7 @@ htmx.on('htmx:responseError', (evt) => {
             if (msg_text && typeof msg_text === 'string') {
                 msg = msg_text;
             }
-        } catch (_) { /* not JSON — use fallback */ }
+        } catch { /* not JSON — use fallback */ }
         showToast(msg, 'error');
     } else {
         showToast('Request failed. Please try again.', 'error');
@@ -706,7 +706,7 @@ htmx.on('htmx:afterRequest', function(evt) {
 });
 
 // ── Clear stuck loading/swapping states after errors or timeouts ──
-htmx.on('htmx:timeout', (evt) => {
+htmx.on('htmx:timeout', () => {
     showToast('Request timed out. Please try again.', 'error');
 });
 
@@ -1466,7 +1466,7 @@ Alpine.data('materialsFilter', () => ({
 
   get activeFilterCount() {
     let count = 0;
-    for (const [key, val] of Object.entries(this.subFilters)) {
+    for (const val of Object.values(this.subFilters)) {
       if (Array.isArray(val)) count += val.length;
       else if (val !== '' && val !== null) count += 1;
     }
@@ -1527,7 +1527,7 @@ Alpine.data('materialsFilter', () => ({
   },
 
   init() {
-    try { this.displayNames = JSON.parse(this.$el.dataset.displayNames || '{}'); } catch (e) { this.displayNames = {}; }
+    try { this.displayNames = JSON.parse(this.$el.dataset.displayNames || '{}'); } catch { this.displayNames = {}; }
     this.syncFromURL();
     this._onPopstate = () => this.syncFromURL();
     window.addEventListener('popstate', this._onPopstate);
@@ -1597,7 +1597,7 @@ Alpine.data('materialsFilter', () => ({
                 this.subFilters[specKey] = items;
               }
             }
-          } catch (e) {
+          } catch {
             // Ignore unparseable sf_ param
           }
         }
@@ -2153,7 +2153,7 @@ Alpine.data('quoteBuilder', (initialLines, reqId, hasCustomerSite, requirementId
       const data = await resp.json();
       this.lines = data.lines || [];
       this._autoSelectFirst();
-    } catch (e) {
+    } catch {
       this.loadError = 'Network error loading quote data. Please check your connection.';
     } finally {
       this.loading = false;
@@ -2368,7 +2368,7 @@ Alpine.data('quoteBuilder', (initialLines, reqId, hasCustomerSite, requirementId
       } else {
         this.saveError = data.error || data.detail || 'Save failed';
       }
-    } catch (e) {
+    } catch {
       this.saveError = 'Network error';
     }
     this.saving = false;
@@ -2507,7 +2507,7 @@ Alpine.data('quoteBuilderTab', (reqId, hasCustomerSite, minMarginPct, quoteExist
   payload() {
     return JSON.stringify(
       Object.entries(this.data)
-        .filter(([id, l]) => l.sel && this._sellOf(l) !== null)
+        .filter(([, l]) => l.sel && this._sellOf(l) !== null)
         .map(([id, l]) => buildQuoteLinePayload({
           requirement_id: Number(id),
           offer_id: l.offerId,

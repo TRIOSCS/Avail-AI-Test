@@ -50,7 +50,7 @@
                 hx-include="#done-note-{{ task.id }}"
                 data-loading-disable
                 class="mt-0.5 h-5 w-5 rounded border-2 border-gray-300 hover:border-brand-500 flex-shrink-0 transition-colors"
-                title="Mark done">
+                title="Mark done" aria-label="Mark done">
         </button>
         <div class="flex-1 min-w-0">
           <p class="text-sm font-medium text-gray-900">{{ task.title }}</p>
@@ -111,7 +111,7 @@
                 hx-target="#part-detail"
                 data-loading-disable
                 class="mt-0.5 h-5 w-5 rounded border-2 border-green-400 bg-green-100 flex-shrink-0 flex items-center justify-center"
-                title="Reopen">
+                title="Reopen" aria-label="Reopen task">
           <svg class="h-3 w-3 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
             <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
           </svg>

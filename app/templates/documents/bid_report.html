@@ -25,9 +25,11 @@
 
   <h2>Bid Details</h2>
   <table class="meta-table">
+    <tbody>
     <tr><td class="meta-label">Bid Number</td><td>{{ bid_number }}</td></tr>
     <tr><td class="meta-label">Revision</td><td>{{ revision or 1 }}</td></tr>
     <tr><td class="meta-label">Status</td><td>{{ status }}</td></tr>
+    </tbody>
   </table>
 
   {% if line_items %}
@@ -53,9 +55,11 @@
   {% endif %}
 
   <table class="totals">
+    <tbody>
     {% if subtotal %}
     <tr><td class="total-label">Total Bid:</td><td>${{ subtotal|float|money }}</td></tr>
     {% endif %}
+    </tbody>
   </table>
 
   {% if notes %}

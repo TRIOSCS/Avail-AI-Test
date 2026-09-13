@@ -18,7 +18,7 @@
   <div hx-get="/v2/partials/quotes/recent-terms"
        hx-trigger="load"
        hx-target="this"
-       hx-swap="outerHTML"></div>
+       hx-swap="outerHTML"><span class="sr-only">Loading recent terms…</span></div>
 
   <form hx-post='/v2/partials/quotes/{{ quote.id }}/edit'
         hx-target='#main-content'

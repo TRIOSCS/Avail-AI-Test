@@ -47,7 +47,7 @@
       </div>
       {% endif %}
     </div>
-    <button @click="expanded = !expanded" class="ml-2 p-1 text-gray-400 hover:text-gray-600">
+    <button @click="expanded = !expanded" :aria-expanded="expanded" aria-label="Toggle offer details" class="ml-2 p-1 text-gray-400 hover:text-gray-600">
       <svg class="h-5 w-5 transition-transform" :class="{ 'rotate-180': expanded }" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
       </svg>

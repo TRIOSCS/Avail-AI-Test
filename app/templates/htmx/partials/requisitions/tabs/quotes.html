@@ -66,6 +66,12 @@
                       wrapper_class='py-6 sm:py-8 text-center',
                       message_class='text-sm font-medium text-gray-600 mt-3') %}
     <p class="text-secondary mt-1">Create a quote from the Offers tab by selecting offers and clicking "Create Quote."</p>
+    <button @click="activeTab = 'offers'"
+            hx-get="/v2/partials/requisitions/{{ req.id }}/tab/offers"
+            hx-target="#tab-content" hx-swap="innerHTML"
+            class="btn btn-primary btn-sm mt-3">
+      Go to Offers
+    </button>
   {% endcall %}
   {% endif %}
 </div>

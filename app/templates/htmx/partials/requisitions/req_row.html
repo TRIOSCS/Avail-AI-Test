@@ -123,6 +123,7 @@
               get outcomeReady(){ return this.outcomeReason.trim().length > 0; } }">
     <div class="relative">
       <button @click="open = !open" @click.outside="open = false"
+              aria-label="Row actions"
               class="p-1 text-gray-400 hover:text-gray-600 rounded hover:bg-gray-100" type="button">
         <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 20 20"><path d="M10 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4z"/></svg>
       </button>
@@ -197,7 +198,8 @@
     <input aria-label="Select requisition {{ req.name }}" type="checkbox" :value="{{ req.id }}"
            @change="$event.target.checked ? selectedIds.add({{ req.id }}) : selectedIds.delete({{ req.id }}); selectedIds = new Set(selectedIds)"
            :checked="selectedIds.has({{ req.id }})"
-           class="h-4 w-4 rounded border-gray-200 text-brand-500 input-focus">
+           class="h-4 w-4 rounded border-gray-200 text-accent-500 input-focus"
+           style="accent-color:var(--accent)">
   </td>
   {# Role-based column order #}
   {% if user_role == 'sales' %}

@@ -25,7 +25,8 @@
       <span x-show="saved && !saveError" x-cloak class="text-sm text-emerald-600 font-medium">Saved</span>
       <button @click="closeBuilder()"
               class="p-2 text-gray-400 hover:text-gray-600 hover:bg-white rounded-lg transition-colors"
-              title="Close (Esc)">
+              title="Close (Esc)"
+              aria-label="Close quote builder">
         <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
         </svg>

@@ -69,11 +69,11 @@
 
   {# actions — low-emphasis on desktop, full on hover/focus; always visible on mobile/touch #}
   <div class="flex lg:justify-end items-center gap-1 mt-2 lg:mt-0 lg:opacity-60 lg:group-hover:opacity-100 lg:focus-within:opacity-100 transition-opacity">
-    <button type="button" title="RFQ this vendor"
+    <button type="button" title="RFQ this vendor" aria-label="RFQ this vendor"
             hx-post="/v2/partials/search/quick-source/rfq"
             hx-vals='{"mpn": "{{ card.mpn_matched|e }}", "vendor_name": "{{ card.vendor_name|e }}"}'
             class="p-1.5 rounded text-gray-400 hover:text-brand-700 hover:bg-brand-50"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M3 11l18-8-8 18-2-7-8-3z"/></svg></button>
-    <button type="button" title="Add as offer"
+    <button type="button" title="Add as offer" aria-label="Add as offer"
             hx-post="/v2/partials/search/quick-source/offer"
             hx-vals='{"mpn": "{{ card.mpn_matched|e }}", "vendor_name": "{{ card.vendor_name|e }}"}'
             class="p-1.5 rounded text-gray-400 hover:text-brand-700 hover:bg-brand-50"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M12 4v16m8-8H4"/></svg></button>

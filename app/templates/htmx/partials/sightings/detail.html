@@ -31,6 +31,7 @@
 {# Denser meta strip: label + value share a baseline row (was a stacked dt-over-dd
    2×2 grid that ran ~4 lines tall); 4-up on wider panes, 2-up on a narrow split. #}
 <div class="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-1.5 px-5 py-2 border-b border-gray-200 text-sm flex-shrink-0">
+  <dl class="contents">
     <div class="flex items-baseline gap-1.5 min-w-0">
       <dt class="text-[11px] font-medium text-gray-400 uppercase shrink-0">Qty</dt>
       <dd class="text-gray-900 font-mono font-semibold truncate">{{ requirement.target_qty or '—' }}</dd>
@@ -80,6 +81,7 @@
       {% endif %}
       </dd>
     </div>
+  </dl>
 </div>
 
 {# ── Tabbed body: Vendors (default) / Activity ──────────────── #}

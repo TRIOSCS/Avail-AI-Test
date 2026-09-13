@@ -296,7 +296,7 @@
   {# Flex column so the email preview fills a resized panel (header/actions pinned). #}
   <div x-show="step === 'preview'" x-cloak class="flex-1 min-h-0 flex flex-col">
     <div class="flex items-center gap-2 mb-3 flex-shrink-0">
-      <button @click="step = 'compose'" class="text-gray-400 hover:text-gray-600">
+      <button @click="step = 'compose'" aria-label="Back to compose" class="text-gray-400 hover:text-gray-600">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
         </svg>

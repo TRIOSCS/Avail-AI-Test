@@ -68,12 +68,14 @@
     <p class="font-semibold text-gray-900 mb-1.5">{{ title }}</p>
     {% if factors %}
     <table class="w-full">
+      <tbody>
       {% for label, contrib in factors %}
       <tr>
         <td class="text-gray-600 pr-2 py-0.5">{{ label }}</td>
         <td class="text-right font-mono whitespace-nowrap {{ 'text-emerald-600' if contrib > 0 else ('text-rose-500' if contrib < 0 else 'text-gray-400') }}">{{ '%+.0f'|format(contrib) }}{{ suffix }}</td>
       </tr>
       {% endfor %}
+      </tbody>
     </table>
     <p class="text-gray-400 mt-1.5 pt-1.5 border-t border-gray-100">Deterministic — sums to the score.</p>
     {% else %}
