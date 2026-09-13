@@ -383,8 +383,12 @@ def can_verify_po_line(user: User | None, line) -> bool:
     limit: float | None = getattr(user, "purchase_order_approval_limit", None)
     if limit is None:
         return True
-    from .services.buyplan_workflow import _line_amount
+    from .services.buyplan_workflow import _line_amount, _line_amount_known
 
+    # An unknown amount (missing unit_cost/quantity) must fail closed against any
+    # finite limit — mirrors verify_po's fail-closed check so the button hides.
+    if not _line_amount_known(line):
+        return False
     return _line_amount(line) <= limit
 
 

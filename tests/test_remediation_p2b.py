@@ -79,6 +79,58 @@ def test_resume_returns_pending_plan_to_pending(db_session, test_user):
     assert bp.so_status == SOVerificationStatus.PENDING.value
 
 
+def test_resume_pending_plan_reopens_engine_request(db_session, test_user):
+    """A PENDING plan halted, then resumed, must have a live REQUESTED BUY_PLAN
+    ApprovalRequest again — halt_plan cancels the open request, so resume must
+    reopen it or the plan sits PENDING forever with nothing for an approver to
+    decide."""
+    from sqlalchemy import select
+
+    from app.constants import (
+        ApprovalGateType,
+        ApprovalRequestStatus,
+        ApprovalSubjectType,
+        BuyPlanStatus,
+        SOVerificationStatus,
+    )
+    from app.models.approvals import ApprovalRequest
+    from app.services.buyplan_workflow.buyplan_approval import halt_plan, resume_plan
+
+    mgr = _manager(db_session)
+    mgr.can_approve_buy_plans = True  # so the reopened request has an eligible approver
+    bp = _plan(db_session, test_user, status=BuyPlanStatus.PENDING.value, so_status=SOVerificationStatus.PENDING.value)
+    db_session.commit()
+
+    halt_plan(bp.id, mgr, db_session, reason="paused pre-approval")
+    db_session.commit()
+    assert (
+        db_session.execute(
+            select(ApprovalRequest).where(
+                ApprovalRequest.subject_type == ApprovalSubjectType.BUY_PLAN,
+                ApprovalRequest.subject_id == bp.id,
+                ApprovalRequest.gate_type == ApprovalGateType.BUY_PLAN,
+                ApprovalRequest.status == ApprovalRequestStatus.REQUESTED,
+            )
+        ).scalar_one_or_none()
+        is None
+    )  # halt_plan cancelled the open request
+
+    resume_plan(bp.id, mgr, db_session)
+    db_session.commit()
+    db_session.refresh(bp)
+    assert bp.status == BuyPlanStatus.PENDING.value
+
+    reopened = db_session.execute(
+        select(ApprovalRequest).where(
+            ApprovalRequest.subject_type == ApprovalSubjectType.BUY_PLAN,
+            ApprovalRequest.subject_id == bp.id,
+            ApprovalRequest.gate_type == ApprovalGateType.BUY_PLAN,
+            ApprovalRequest.status == ApprovalRequestStatus.REQUESTED,
+        )
+    ).scalar_one_or_none()
+    assert reopened is not None
+
+
 def test_resumed_active_plan_can_complete(db_session, test_user):
     """The whole point: after resume, a fully-verified plan completes (the halt→resume
     wedge was the only thing stopping it)."""

@@ -187,6 +187,16 @@ def decide(
     if recipient is None:
         raise PermissionError(f"User {user.id} is not a pending recipient of request {request_id}")
 
+    # Re-check eligibility AT DECISION TIME, not just at routing time: a recipient row
+    # is seeded when the request is CREATED, but the user's approval right/limit (or
+    # active status) may have been revoked since — a stale PENDING row must not still
+    # let them decide. Mirrors the same _eligible_approvers rule route_request applied.
+    from .routing import _eligible_approvers
+
+    eligible_ids = {u.id for u in _eligible_approvers(db, request.gate_type, request.amount)}
+    if not getattr(user, "is_active", True) or user.id not in eligible_ids:
+        raise PermissionError(f"User {user.id} is no longer eligible to decide request {request_id}")
+
     now = datetime.now(UTC)
     approved = action == _APPROVE
 
@@ -285,7 +295,10 @@ def decide(
                     prepayment.pay_token = secrets.token_urlsafe(32)
             else:
                 prepayment.status = PrepaymentStatus.VOID.value
-                prepayment.void_reason = "rejected by approver"
+                # Carry the approver's actual rejection comment (Prepayment.void_reason
+                # is String(255)) instead of always dropping it for a generic label —
+                # accounting/AP's DO-NOT-WIRE notice reads this field.
+                prepayment.void_reason = (comment or "rejected by approver")[:255]
                 prepayment.voided_at = datetime.now(UTC)
                 prepayment.voided_by_id = user.id
             db.flush()

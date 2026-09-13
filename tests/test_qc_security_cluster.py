@@ -184,6 +184,26 @@ def test_reassign_allows_eligible_target(db_session, test_user):
     assert new_recipient.status == ApprovalRecipientStatus.PENDING
 
 
+def test_reassign_reopens_existing_recipient_row(db_session, test_user):
+    """When the target was already eligible at routing time (route_request seeded a
+    recipient row for every eligible approver), reassigning to them must reopen that
+    EXISTING row rather than insert a second one — a duplicate insert violates
+    uq_approval_step_recipient."""
+    from app.constants import ApprovalRecipientStatus
+    from app.services.approvals.events import reassign
+
+    a = _approver(db_session, "aa@trioscs.com", "az-aa", prepay=True)
+    c = _approver(db_session, "cc@trioscs.com", "az-cc", prepay=True)  # eligible at routing too
+    db_session.commit()
+    request, _pp = _prepayment_request(db_session, test_user, Decimal("400"))
+
+    reopened = reassign(db_session, request.id, from_user=a, to_user=c, actor=test_user)
+    assert reopened.user_id == c.id
+    assert reopened.status == ApprovalRecipientStatus.PENDING
+    assert reopened.decided_at is None
+    assert reopened.decision_note is None
+
+
 # ── decide() stamps the prepayment lifecycle for every path ──────────────
 
 

@@ -504,6 +504,11 @@ async def test_paid_salesperson_falls_back_to_requisition_creator(db_session: Se
 
 @pytest.mark.asyncio
 async def test_voided_emails_stand_down(db_session: Session, approved_prepay: Prepayment, set_group_config):
+    # Every real caller (the teardown sweep) sets status=VOID BEFORE dispatching the
+    # notice — the re-check below (mirroring the 'approved' stale-notice guard) skips
+    # a DO-NOT-WIRE send against a prepayment that isn't actually void.
+    approved_prepay.status = PrepaymentStatus.VOID.value
+    db_session.commit()
     with (
         patch.object(pn, "_send_group_email", new=AsyncMock()) as email,
         patch("app.services.prepayment_notifications.post_teams_channel_card", new=AsyncMock()),
@@ -512,6 +517,23 @@ async def test_voided_emails_stand_down(db_session: Session, approved_prepay: Pr
     body = email.call_args.kwargs.get("html") or email.call_args.args[-1]
     assert "DO NOT WIRE" in body
     assert "plan cancelled" in body
+
+
+@pytest.mark.asyncio
+async def test_voided_skips_stale_notice_when_no_longer_void(
+    db_session: Session, approved_prepay: Prepayment, set_group_config
+):
+    """The symmetric re-check for the voided path: by the time the background task
+    runs, the prepayment may have moved on again (still 'approved') — skip the stale
+    DO-NOT-WIRE notice rather than emailing accounting/AP against it."""
+    with (
+        patch.object(pn, "_send_group_email", new=AsyncMock()) as email,
+        patch("app.services.prepayment_notifications.post_teams_channel_card", new=AsyncMock()) as teams,
+    ):
+        result = await pn.notify_prepayment_voided(approved_prepay.id, db=db_session, reason="plan cancelled")
+    email.assert_not_called()
+    teams.assert_not_called()
+    assert result == {"email_sent": False, "teams_sent": False, "recipients": []}
 
 
 @pytest.mark.asyncio

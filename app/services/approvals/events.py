@@ -158,13 +158,30 @@ def reassign(
     from_recipient.status = ApprovalRecipientStatus.REASSIGNED
     from_recipient.reassigned_to_id = to_user.id
 
-    # Add the new recipient on the same step.
-    new_recipient = ApprovalStepRecipient(
-        step_id=from_recipient.step_id,
-        user_id=to_user.id,
-        status=ApprovalRecipientStatus.PENDING,
-    )
-    db.add(new_recipient)
+    # route_request already seeds one recipient row per eligible user at request
+    # creation, so to_user may already hold a (non-PENDING, e.g. REJECTED/REASSIGNED)
+    # row on this step — inserting a second would violate uq_approval_step_recipient.
+    # Reopen the existing row instead of always inserting a fresh one.
+    existing_recipient = db.execute(
+        select(ApprovalStepRecipient).where(
+            ApprovalStepRecipient.step_id == from_recipient.step_id,
+            ApprovalStepRecipient.user_id == to_user.id,
+        )
+    ).scalar_one_or_none()
+
+    if existing_recipient is not None:
+        existing_recipient.status = ApprovalRecipientStatus.PENDING
+        existing_recipient.decided_at = None
+        existing_recipient.decision_note = None
+        existing_recipient.reassigned_to_id = None
+        new_recipient = existing_recipient
+    else:
+        new_recipient = ApprovalStepRecipient(
+            step_id=from_recipient.step_id,
+            user_id=to_user.id,
+            status=ApprovalRecipientStatus.PENDING,
+        )
+        db.add(new_recipient)
     db.flush()
 
     record(

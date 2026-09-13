@@ -235,12 +235,66 @@ def test_reject_with_reason_closes_request(db_session, prepayment_request_with_t
     assert db_session.get(ApprovalRequest, req.id).status == ApprovalRequestStatus.REJECTED
 
 
+def test_reject_prepayment_carries_the_approvers_comment_into_void_reason(
+    db_session, prepayment_request_with_two_recipients, mike
+):
+    """A prepayment rejection's void_reason must carry the approver's own comment
+    (truncated to the column's 255 chars), not always the generic fallback label —
+    accounting/AP's DO-NOT-WIRE notice reads this field."""
+    from app.models.quality_plan import Prepayment
+
+    req = prepayment_request_with_two_recipients
+    decide(db_session, req.id, mike, "reject", comment="Vendor docs incomplete")
+
+    prepayment = db_session.get(Prepayment, req.subject_id)
+    assert prepayment.void_reason == "Vendor docs incomplete"
+
+
+def test_reject_prepayment_truncates_long_comment_to_255_chars(
+    db_session, prepayment_request_with_two_recipients, mike
+):
+    from app.models.quality_plan import Prepayment
+
+    req = prepayment_request_with_two_recipients
+    long_comment = "x" * 400
+    decide(db_session, req.id, mike, "reject", comment=long_comment)
+
+    prepayment = db_session.get(Prepayment, req.subject_id)
+    assert prepayment.void_reason == "x" * 255
+
+
 # ── decide: authorization ───────────────────────────────────────────────────────
 
 
 def test_non_recipient_forbidden(db_session, prepayment_request_with_two_recipients, other_user):
     with pytest.raises(PermissionError):
         decide(db_session, prepayment_request_with_two_recipients.id, other_user, "approve")
+
+
+def test_revoked_eligibility_forbidden_despite_pending_recipient(
+    db_session, prepayment_request_with_two_recipients, mike
+):
+    """A user's PENDING recipient row is seeded at routing time and never revisited —
+    if their can_approve_prepayments right is revoked AFTER routing, decide() must
+    still refuse them at decision time, not just trust the stale PENDING row."""
+    req = prepayment_request_with_two_recipients
+    mike.can_approve_prepayments = False
+    db_session.flush()
+
+    with pytest.raises(PermissionError, match="no longer eligible"):
+        decide(db_session, req.id, mike, "approve")
+    assert db_session.get(ApprovalRequest, req.id).status == ApprovalRequestStatus.REQUESTED
+
+
+def test_deactivated_user_forbidden_despite_pending_recipient(db_session, prepayment_request_with_two_recipients, mike):
+    """A deactivated user must not still be able to decide a request they were
+    routed to while active."""
+    req = prepayment_request_with_two_recipients
+    mike.is_active = False
+    db_session.flush()
+
+    with pytest.raises(PermissionError, match="no longer eligible"):
+        decide(db_session, req.id, mike, "approve")
 
 
 def test_unknown_action_rejected(db_session, prepayment_request_with_two_recipients, mike):

@@ -37,7 +37,7 @@ from app.constants import (
 from app.models import ActivityLog
 from app.models.approvals import ApprovalRequest
 from app.models.quality_plan import Prepayment
-from app.services.prepayment_service import mark_prepayment_paid
+from app.services.prepayment_service import mark_prepayment_paid, unmark_prepayment_paid
 
 # reuse the plan/user builders the sibling prepayment tests rely on
 from tests.test_po_line_signoff import _make_plan, _make_user
@@ -88,6 +88,47 @@ def test_mark_paid_sets_fields_and_clears_token(db_session: Session, approved_pr
     assert pp.paid_by_label == "MK"
     assert pp.paid_at is not None
     assert pp.pay_token is None
+
+
+def test_mark_paid_rejects_zero_or_negative_amount(db_session: Session, approved_prepay: Prepayment):
+    """A zero/negative paid_amount is refused — a $0 'wire' would silently close out a
+    real prepayment with no money having moved."""
+    for bad_amount in (Decimal("0"), Decimal("-5.00")):
+        with pytest.raises(ValueError, match="greater than zero"):
+            mark_prepayment_paid(
+                db_session,
+                approved_prepay,
+                wire_reference="WIRE-BAD",
+                paid_amount=bad_amount,
+                paid_via="in_app",
+            )
+    assert approved_prepay.status == PrepaymentStatus.APPROVED.value  # untouched
+
+
+def test_mark_paid_rejects_none_amount(db_session: Session, approved_prepay: Prepayment):
+    with pytest.raises(ValueError, match="greater than zero"):
+        mark_prepayment_paid(
+            db_session,
+            approved_prepay,
+            wire_reference="WIRE-BAD",
+            paid_amount=None,  # type: ignore[arg-type]
+            paid_via="in_app",
+        )
+
+
+def test_mark_paid_logs_warning_when_amount_differs_from_total(db_session: Session, approved_prepay: Prepayment):
+    """A paid_amount that diverges from the authorised total_incl_fees is still
+    allowed (a partial/adjusted wire is a real thing) but must be logged."""
+    with patch("app.services.prepayment_service.logger") as mock_logger:
+        mark_prepayment_paid(
+            db_session,
+            approved_prepay,
+            wire_reference="WIRE-DIFF",
+            paid_amount=Decimal("19000.00"),  # total_incl_fees is 20002.38
+            paid_via="in_app",
+        )
+    assert approved_prepay.status == PrepaymentStatus.PAID.value
+    assert mock_logger.warning.called
 
 
 def test_mark_paid_requires_approved(db_session: Session, requested_prepay: Prepayment):
@@ -233,6 +274,26 @@ def test_unmark_paid_reverts_and_remints_token(db_session: Session):
     assert pp.wire_reference is None
     assert pp.paid_amount is None
     assert pp.pay_token and len(pp.pay_token) >= 32  # a fresh single-use token minted
+
+
+def test_unmark_paid_refuses_on_blocked_plan_status(db_session: Session):
+    """A paid prepayment on a plan that has since gone terminal (cancelled/halted/
+    completed/inbound) must not be reversible — that would resurrect a live
+    'approved' wire authorisation on a plan that can no longer act on it."""
+    from app.constants import BuyPlanStatus
+
+    manager = _make_user(db_session, role="manager")
+    pp = _approved_prepay_on_plan(db_session, manager)
+    mark_prepayment_paid(db_session, pp, wire_reference="WIRE-9", paid_amount=Decimal("20002.38"), paid_via="in_app")
+    assert pp.status == PrepaymentStatus.PAID.value
+
+    pp.buy_plan.status = BuyPlanStatus.CANCELLED.value
+    db_session.commit()
+
+    with pytest.raises(ValueError, match="Cannot reverse"):
+        unmark_prepayment_paid(db_session, pp, manager)
+    db_session.refresh(pp)
+    assert pp.status == PrepaymentStatus.PAID.value  # untouched
 
 
 def test_unmark_paid_manager_only(db_session: Session):

@@ -21,6 +21,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from decimal import Decimal
 
+from loguru import logger
 from sqlalchemy.orm import Session
 
 from ..constants import (
@@ -292,6 +293,16 @@ def mark_prepayment_paid(
     if prepayment.status != PrepaymentStatus.APPROVED.value:
         raise ValueError("Only an approved prepayment can be marked paid.")
 
+    if paid_amount is None or paid_amount <= 0:
+        raise ValueError("Paid amount must be greater than zero.")
+    if prepayment.total_incl_fees is not None and paid_amount != prepayment.total_incl_fees:
+        logger.warning(
+            "Prepayment {} paid_amount ${} differs from its authorised total_incl_fees ${}",
+            prepayment.id,
+            paid_amount,
+            prepayment.total_incl_fees,
+        )
+
     prepayment.status = PrepaymentStatus.PAID.value
     prepayment.paid_at = datetime.now(UTC)
     prepayment.wire_reference = wire_reference
@@ -335,6 +346,13 @@ def unmark_prepayment_paid(db: Session, prepayment: Prepayment, actor) -> Prepay
 
     if prepayment.status != PrepaymentStatus.PAID.value:
         raise ValueError("Only a paid prepayment can be reversed.")
+
+    # A dead/terminal plan (mirrors create_prepayment's own guard) must not have its
+    # prepayment un-paid back into a live 'approved' (about-to-wire) state — that would
+    # resurrect a wire authorisation on a plan that can no longer act on it.
+    plan_status = prepayment.buy_plan.status if prepayment.buy_plan is not None else None
+    if plan_status in PREPAYMENT_BLOCKED_PLAN_STATUSES:
+        raise ValueError(f"Cannot reverse a payment on a {plan_status} buy plan.")
 
     prepayment.status = PrepaymentStatus.APPROVED.value
     prepayment.paid_at = None

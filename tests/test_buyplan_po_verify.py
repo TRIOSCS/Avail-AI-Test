@@ -45,11 +45,18 @@ def _make_line(
     buyer: User | None = None,
     po_number: str | None = None,
     status: str = BuyPlanLineStatus.PENDING_VERIFY.value,
+    unit_cost: float | None = 5.0,
 ) -> BuyPlanLine:
-    """Create a BuyPlanLine attached to plan."""
+    """Create a BuyPlanLine attached to plan.
+
+    ``unit_cost`` defaults to a real value (5.0) so confirm_po's "enter unit cost
+    first" gate doesn't trip up the verify_po_sent scanning tests, which never call
+    confirm_po/verify_po and don't care about the line's dollar amount.
+    """
     line = BuyPlanLine(
         buy_plan_id=plan.id,
         quantity=100,
+        unit_cost=unit_cost,
         status=status,
         po_number=po_number,
         buyer_id=buyer.id if buyer else None,
@@ -238,6 +245,22 @@ def test_confirm_po_payment_method_invalid_rejected(db_session, test_user, test_
 
     with pytest.raises(ValueError, match="Invalid payment method"):
         confirm_po(plan.id, line.id, "PO-PM-2", datetime.now(UTC), test_user, db_session, payment_method="crypto")
+    db_session.rollback()
+    assert line.status == BuyPlanLineStatus.AWAITING_PO.value
+    assert line.po_number is None
+
+
+def test_confirm_po_rejects_missing_unit_cost(db_session, test_user, test_quote, test_requisition):
+    """A NULL unit_cost prices the PO at $0 and would pass any approver's dollar
+    limit — confirm_po must fail closed instead of cutting a free-money PO."""
+    from app.services.buyplan_workflow import confirm_po
+
+    plan = _make_plan(db_session, test_user, test_quote, test_requisition)
+    line = _make_line(db_session, plan, buyer=test_user, status=BuyPlanLineStatus.AWAITING_PO.value, unit_cost=None)
+    db_session.commit()
+
+    with pytest.raises(ValueError, match="unit cost and quantity"):
+        confirm_po(plan.id, line.id, "PO-PM-3", datetime.now(UTC), test_user, db_session, payment_method="wire")
     db_session.rollback()
     assert line.status == BuyPlanLineStatus.AWAITING_PO.value
     assert line.po_number is None

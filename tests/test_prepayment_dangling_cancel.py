@@ -40,6 +40,7 @@ from app.services.buyplan_workflow import (
     check_completion,
     halt_plan,
     resource_line,
+    verify_po,
 )
 from app.services.prepayment_service import create_prepayment
 
@@ -197,6 +198,44 @@ def test_approved_prepayment_not_touched_on_teardown(db_session: Session) -> Non
 
     db_session.refresh(req)
     assert req.status == ApprovalRequestStatus.APPROVED  # untouched
+
+
+def test_po_reject_voids_the_requested_prepayment_itself(db_session: Session) -> None:
+    """PO send-back must void the Prepayment row, not just cancel its ApprovalRequest.
+
+    Regression: the teardown sweep's step (1) loop cancelled the REQUESTED
+    ApprovalRequest but left the Prepayment itself stuck 'requested' forever — the
+    line's live-prepayment guard in create_prepayment then permanently blocked a
+    fresh request. Verifies both halves: the Prepayment is VOID, and a new request
+    on the same line succeeds.
+    """
+    u = _prepay_approver(db_session)
+    u.can_approve_purchase_orders = True
+    plan = _make_plan(db_session, u, status=BuyPlanStatus.ACTIVE.value)
+    line = _make_line(db_session, plan)  # PENDING_VERIFY, has PO
+    db_session.commit()
+    pp, req = _prepay(db_session, u, plan, line)
+
+    verify_po(plan.id, line.id, "reject", u, db_session, rejection_note="wrong vendor")
+
+    db_session.refresh(req)
+    db_session.refresh(pp)
+    assert req.status == ApprovalRequestStatus.CANCELLED
+    assert pp.status == PrepaymentStatus.VOID.value
+    assert pp.voided_at is not None
+    assert pp.void_reason == "PO sent back — prepayment voided"
+    assert pp.pay_token is None
+
+    # The line reopens (verify_po's reject resets it to AWAITING_PO); a fresh
+    # confirm + prepayment request on the same line must succeed, not 400 forever.
+    db_session.refresh(line)
+    assert line.status == BuyPlanLineStatus.AWAITING_PO.value
+    line.status = BuyPlanLineStatus.PENDING_VERIFY.value
+    line.po_number = "PO-NEW"
+    db_session.commit()
+    pp2, req2 = _prepay(db_session, u, plan, line)
+    assert pp2.status == PrepaymentStatus.REQUESTED.value
+    assert req2.status == ApprovalRequestStatus.REQUESTED
 
 
 def test_helper_is_idempotent_and_counts(db_session: Session) -> None:

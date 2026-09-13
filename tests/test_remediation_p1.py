@@ -152,8 +152,12 @@ def test_po_reject_voids_the_lines_prepayment(db_session, test_user):
     )
     # Simulate an approved (about-to-wire) prepayment.
     pp.status = PrepaymentStatus.APPROVED.value
-    # verify_po requires the PO-approval right.
+    # verify_po requires the PO-approval right and an ACTIVE plan (the fixture's plan
+    # is seeded 'draft', which is fine for create_prepayment but not for verify_po).
     test_user.can_approve_purchase_orders = True
+    from app.constants import BuyPlanStatus
+
+    bp.status = BuyPlanStatus.ACTIVE.value
     db_session.commit()
 
     verify_po(bp.id, line.id, "reject", test_user, db_session, rejection_note="wrong vendor")

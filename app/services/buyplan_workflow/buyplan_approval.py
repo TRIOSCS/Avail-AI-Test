@@ -382,6 +382,18 @@ def _cancel_open_prepayment_requests_for_plan(
         ar.status = ApprovalRequestStatus.CANCELLED
         ar.resolved_at = now
         ar.resolution_note = reason
+        # Mirror the APPROVED branch below: cancelling the REQUESTED approval request
+        # must also void the still-'requested' Prepayment row itself — otherwise the
+        # request goes CANCELLED while the Prepayment lingers 'requested' forever (no
+        # pay_token to clear, but the line stays blocked from a fresh prepayment
+        # request and the row shows as a live, decidable prepayment in the queue).
+        if ar.subject_type == ApprovalSubjectType.PREPAYMENT and ar.subject_id is not None:
+            pp = db.get(Prepayment, ar.subject_id)
+            if pp is not None and pp.status == PrepaymentStatus.REQUESTED.value:
+                pp.status = PrepaymentStatus.VOID.value
+                pp.voided_at = now
+                pp.void_reason = reason
+                pp.pay_token = None
 
     # (2) Void every APPROVED-but-unwired prepayment on the same scope + stand down AP.
     pp_stmt = select(Prepayment).where(
@@ -645,10 +657,16 @@ def check_completion(plan_id: int, db: Session) -> BuyPlan:
         logger.info("Buy plan {} auto-completed (all lines terminal)", plan_id)
         db.flush()
         # Feed the proactive backbone from this confirmed customer purchase (best-effort).
+        # A failure here must not poison the outer transaction: without a SAVEPOINT, an
+        # exception mid-flush leaves the session "pending rollback" — the completion
+        # itself (already flushed above) would then be lost when the caller's own
+        # db.flush()/commit blows up with PendingRollbackError. begin_nested() scopes
+        # the rollback to just this best-effort side effect.
         try:
-            from app.services.purchase_history_service import record_buyplan_purchase_history
+            with db.begin_nested():
+                from app.services.purchase_history_service import record_buyplan_purchase_history
 
-            record_buyplan_purchase_history(db, plan)
+                record_buyplan_purchase_history(db, plan)
         except Exception:
             logger.exception("BUYPLAN_CPH: failed to record purchase history for plan {}", plan_id)
         db.flush()
@@ -848,6 +866,11 @@ def resume_plan(plan_id: int, user: User, db: Session) -> BuyPlan:
         plan.so_status,
         user.email,
     )
+    # A plan halted while still PENDING had its BUY_PLAN engine request cancelled by
+    # halt_plan — restoring PENDING here must reopen that gate, or the plan sits
+    # PENDING forever with no REQUESTED row for an approver to decide.
+    if plan.status == BuyPlanStatus.PENDING.value:
+        _open_engine_request_for_plan(plan, user, db)
     # The plan may already be complete-able (all lines terminal + so_status APPROVED) —
     # the halt→resume wedge was the only thing stopping it. Run the check now.
     check_completion(plan_id, db)

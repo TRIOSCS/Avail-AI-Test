@@ -289,7 +289,10 @@ def test_pending_count_for_gate_is_org_wide(db_session: Session) -> None:
 
 
 def test_can_act_only_for_eligible_pending_recipient(db_session: Session) -> None:
-    me = _user(db_session)
+    # can_approve_prepayments=True: a real routed request only ever seeds a PENDING
+    # recipient for an eligible user, so _actionable_request_ids's decision-time
+    # eligibility re-check (mirroring decide()) must still say yes for `me`.
+    me = _user(db_session, can_approve_prepayments=True)
     other = _user(db_session)
     bp = _bp(db_session, me)
     a = _seed(
@@ -310,6 +313,27 @@ def test_can_act_only_for_eligible_pending_recipient(db_session: Session) -> Non
     by_id = {r.id: r for r in pending_rows_for_gate(db_session, me, ApprovalGateType.PREPAYMENT)}
     assert by_id[a.id].can_act is True
     assert by_id[b.id].can_act is False
+
+
+def test_can_act_false_when_eligibility_revoked_after_routing(db_session: Session) -> None:
+    """A stale PENDING recipient row must not still offer the Decide button once the
+    user's approval right is revoked — mirrors decide()'s own decision-time re-check
+    (a routed-then-revoked user could otherwise still see and click Approve)."""
+    me = _user(db_session, can_approve_prepayments=True)
+    bp = _bp(db_session, me)
+    a = _seed(
+        db_session,
+        ApprovalGateType.PREPAYMENT,
+        subject_type=ApprovalSubjectType.PREPAYMENT,
+        subject_id=_prepay(db_session, bp, me).id,
+        pending_recipients=(me,),
+    )
+
+    me.can_approve_prepayments = False  # revoked after routing
+    db_session.flush()
+
+    by_id = {r.id: r for r in pending_rows_for_gate(db_session, me, ApprovalGateType.PREPAYMENT)}
+    assert by_id[a.id].can_act is False
 
 
 def test_org_wide_shows_unactionable_row_with_approver_names(db_session: Session) -> None:

@@ -92,6 +92,12 @@ def confirm_po(
     if line.status != BuyPlanLineStatus.AWAITING_PO.value:
         raise ValueError(f"Line must be awaiting PO (current: {line.status})")
 
+    # A NULL unit_cost/quantity prices this PO at $0, which silently passes every
+    # approver's purchase_order_approval_limit at verify_po (fail-open money hole).
+    # 0 is a legitimate value (e.g. a free-sample line); only a missing value is refused.
+    if line.unit_cost is None or line.quantity is None or line.quantity <= 0:
+        raise ValueError("Enter the unit cost and quantity before confirming the PO.")
+
     line.po_number = po_number
     line.estimated_ship_date = estimated_ship_date
     line.po_confirmed_at = datetime.now(UTC)
@@ -185,6 +191,18 @@ def _line_amount(line: BuyPlanLine) -> Decimal:
     return (line.unit_cost or Decimal("0")) * (line.quantity or 0)
 
 
+def _line_amount_known(line: BuyPlanLine) -> bool:
+    """True when *line* carries a real (non-NULL) unit_cost AND quantity.
+
+    ``_line_amount`` silently substitutes 0 for either missing value, so a line with
+    no cost data yet would price as a free $0 PO and pass any finite dollar limit.
+    Callers (``verify_po``, ``can_verify_po_line``) must treat an unknown amount as
+    exceeding every FINITE approval limit — only an unlimited (``None``-limit)
+    approver may still act on it.
+    """
+    return line.unit_cost is not None and line.quantity is not None
+
+
 def _log_po_line_activity(
     plan: BuyPlan, line: BuyPlanLine, action: str, user: User, note: str | None, db: Session
 ) -> None:
@@ -240,6 +258,8 @@ def verify_po(
     plan = db.get(BuyPlan, plan_id)
     if not plan:
         raise ValueError(f"Buy plan {plan_id} not found")
+    if plan.status != BuyPlanStatus.ACTIVE.value:
+        raise ValueError(f"Plan must be active (current: {plan.status})")
 
     line = db.get(BuyPlanLine, line_id)
     if not line or line.buy_plan_id != plan_id:
@@ -250,10 +270,19 @@ def verify_po(
     if not can_approve_purchase_orders(user):
         raise PermissionError("Purchase-order approval right required to verify a PO")
     limit = getattr(user, "purchase_order_approval_limit", None)
-    if limit is not None and _line_amount(line) > limit:
-        raise PermissionError(
-            f"PO amount ${_line_amount(line):,.2f} exceeds your purchase-order approval limit (${limit:,.2f})"
-        )
+    if limit is not None:
+        # An unknown amount (missing unit_cost/quantity) must fail closed against any
+        # FINITE limit — it must never silently price as a free $0 PO (only an
+        # unlimited approver, limit is None, may act on it).
+        if not _line_amount_known(line):
+            raise PermissionError(
+                "PO amount is unknown (missing unit cost/quantity) — "
+                f"your purchase-order approval limit (${limit:,.2f}) requires a known amount"
+            )
+        if _line_amount(line) > limit:
+            raise PermissionError(
+                f"PO amount ${_line_amount(line):,.2f} exceeds your purchase-order approval limit (${limit:,.2f})"
+            )
 
     now = datetime.now(UTC)
     if action == "approve":

@@ -42,9 +42,13 @@ _RUNNER = "app.services.prepayment_notifications.run_prepayment_notify_bg"
 
 @pytest.fixture()
 def approver_client(db_session: Session, test_user: User):
-    """TestClient authed as test_user (the prepay decide route only needs require_user;
-    the pending recipient row is what authorizes the decision)."""
+    """TestClient authed as test_user (the prepay decide route needs require_user AND
+    the per-user can_approve_prepayments right — decide() re-checks eligibility at
+    decision time, not just the seeded PENDING recipient row)."""
     from app.main import app
+
+    test_user.can_approve_prepayments = True
+    db_session.commit()
 
     app.dependency_overrides[get_db] = lambda: (yield db_session)  # type: ignore[misc]
     app.dependency_overrides[require_user] = lambda: test_user

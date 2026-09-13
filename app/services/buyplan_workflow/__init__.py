@@ -68,6 +68,7 @@ from .buyplan_lines import (
 )
 from .buyplan_po import (
     _line_amount,
+    _line_amount_known,
     _log_po_line_activity,
     confirm_po,
     mark_line_received,
@@ -92,6 +93,7 @@ __all__ = [
     "_has_open_po_gate",
     "_is_stock_sale",
     "_line_amount",
+    "_line_amount_known",
     "_line_margin_pct",
     "_log_approval_activity",
     "_log_po_line_activity",

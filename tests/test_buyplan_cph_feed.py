@@ -170,6 +170,39 @@ def test_check_completion_records_cph(db_session):
     assert db_session.query(CustomerPartHistory).filter_by(company_id=company.id, source="buy_plan").count() == 1
 
 
+def test_check_completion_survives_cph_failure(db_session):
+    """A record_buyplan_purchase_history failure must not poison the session: the
+    completion itself (already flushed) must survive, and a subsequent db.flush()
+    must not raise PendingRollbackError.
+
+    Regression: the swallowed exception previously left the session in a failed
+    state with no SAVEPOINT to roll back to — the very next db.flush() (right after
+    the try/except) then raised PendingRollbackError instead of completing cleanly.
+    """
+    from unittest.mock import patch
+
+    from app.services.buyplan_workflow import check_completion
+
+    plan, _company, _cards = _completed_plan(
+        db_session, line_specs=[(BuyPlanLineStatus.VERIFIED.value, 15.0, 50, True)]
+    )
+    plan.status = BuyPlanStatus.ACTIVE.value
+    plan.completed_at = None
+    plan.purchase_history_recorded_at = None
+    db_session.commit()
+
+    with patch(
+        "app.services.purchase_history_service.record_buyplan_purchase_history",
+        side_effect=RuntimeError("boom"),
+    ):
+        result = check_completion(plan.id, db_session)
+
+    assert result.status == BuyPlanStatus.COMPLETED.value
+    # The session must still be usable — no PendingRollbackError on a later flush.
+    db_session.commit()
+    assert db_session.get(type(plan), plan.id).status == BuyPlanStatus.COMPLETED.value
+
+
 # ── Task 4: immediate proactive re-match on completion ───────────────
 
 

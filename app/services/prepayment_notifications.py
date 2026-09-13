@@ -256,6 +256,19 @@ async def _notify_inner(db: Session, prepayment_id: int, event: str, reason: str
         )
         return result
 
+    # Symmetric re-check for the voided DO-NOT-WIRE notice: by the time this
+    # fire-and-forget background task actually runs, the prepayment may have moved on
+    # again (e.g. a fresh request was raised on the line after the void) — skip a
+    # stale DO-NOT-WIRE notice rather than emailing accounting/AP against a
+    # no-longer-void prepayment.
+    if event == "voided" and prepayment.status != PrepaymentStatus.VOID.value:
+        logger.info(
+            "notify_prepayment_voided: prepayment {} is now {} (not void) — skipping stale DO-NOT-WIRE notice",
+            prepayment_id,
+            prepayment.status,
+        )
+        return result
+
     cfg = get_config_values(db, _CONFIG_KEYS)
     recipients = [a for a in ((cfg.get("accounting_group_email"), cfg.get("ap_group_email"))) if a]
     webhook = (cfg.get("prepayment_teams_webhook") or "").strip() or None

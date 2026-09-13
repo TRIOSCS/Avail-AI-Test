@@ -61,6 +61,9 @@ def hub_client(db_session: Session, test_user: User):
 
     test_user.can_approve_buy_plans = True
     test_user.can_approve_purchase_orders = True
+    # decide() re-checks eligibility at decision time (not just the seeded PENDING
+    # recipient row), so the prepayment-decide tests below need the actual right too.
+    test_user.can_approve_prepayments = True
     db_session.commit()
 
     app.dependency_overrides[get_db] = lambda: (yield db_session)  # type: ignore[misc]

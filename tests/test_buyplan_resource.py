@@ -115,6 +115,25 @@ class TestResourceLine:
         assert payload["plan_id"] == plan.id
         assert len(payload["resourced_lines"]) == 1
 
+    def test_recalculates_plan_financials_after_resourcing(
+        self, db_session: Session, test_user, test_quote, test_requisition, test_vendor_card
+    ):
+        """Re-sourcing nulls the line's unit_cost — the plan's persisted total_cost
+        rollup must reflect that immediately, not carry the stale pre-resource cost."""
+        plan = _make_plan(db_session, test_quote, test_requisition, total_cost=100.0)
+        requirement = test_requisition.requirements[0]
+        offer = _make_offer(db_session, requirement, test_vendor_card)
+        # unit_cost=1.0 * quantity=100 == 100.0, matching the plan's seeded total_cost.
+        line = _make_cut_line(db_session, plan, requirement, offer, test_user)
+
+        resource_line(plan.id, line.id, LineResourceReason.SOLD_ELSEWHERE.value, "Vendor flaked", test_user, db_session)
+        db_session.commit()
+        db_session.refresh(plan)
+
+        # The only line's unit_cost is now None, so the recalculated total_cost drops
+        # from 100.0 to None (no line contributes a real cost anymore).
+        assert plan.total_cost is None
+
     def test_records_cancellation_and_marks_offer_sold(
         self, db_session: Session, test_user, test_quote, test_requisition, test_vendor_card
     ):

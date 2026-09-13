@@ -187,6 +187,11 @@ def resource_line(
         plan.completed_at = None
         plan.case_report = None
 
+    # Re-sourcing just nulled unit_cost on every target line — the plan's persisted
+    # total_cost/margin rollups would otherwise still carry the stale (pre-resource)
+    # cost until some unrelated edit happens to trigger a recalc.
+    _recalculate_financials(plan)
+
     # Flush so the new POCancellation rows are visible to the metric refresh
     # (the test session runs autoflush=False).
     db.flush()

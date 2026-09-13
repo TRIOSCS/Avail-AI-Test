@@ -250,6 +250,38 @@ def test_verify_po_respects_dollar_limit(db_session: Session) -> None:
     assert verified.po_verified_by_id == unlimited.id
 
 
+def test_verify_po_unknown_amount_fails_closed_for_limited_approver(db_session: Session) -> None:
+    """A line with no unit_cost yet must NOT price as a free $0 PO — a limited
+    approver is rejected (fail closed); an unlimited approver still passes."""
+    capped = _make_user(db_session, can_approve_purchase_orders=True, purchase_order_approval_limit=Decimal("500"))
+    unlimited = _make_user(db_session, can_approve_purchase_orders=True)
+    plan = _make_plan(db_session, capped, so_status=SOVerificationStatus.PENDING.value)
+    line = _make_line(db_session, plan, unit_cost=None, quantity=100)
+
+    assert can_verify_po_line(capped, line) is False
+    assert can_verify_po_line(unlimited, line) is True
+
+    with pytest.raises(PermissionError, match="unknown"):
+        verify_po(plan.id, line.id, "approve", capped, db_session)
+    db_session.refresh(line)
+    assert line.status == BuyPlanLineStatus.PENDING_VERIFY.value  # untouched
+
+    verified = verify_po(plan.id, line.id, "approve", unlimited, db_session)
+    assert verified.status == BuyPlanLineStatus.VERIFIED.value
+
+
+def test_verify_po_requires_active_plan(db_session: Session) -> None:
+    """verify_po refuses on a HALTED plan — mirrors confirm_po's active-plan guard."""
+    approver = _make_user(db_session, can_approve_purchase_orders=True)
+    plan = _make_plan(db_session, approver, status=BuyPlanStatus.HALTED.value)
+    line = _make_line(db_session, plan)
+
+    with pytest.raises(ValueError, match="Plan must be active"):
+        verify_po(plan.id, line.id, "approve", approver, db_session)
+    db_session.refresh(line)
+    assert line.status == BuyPlanLineStatus.PENDING_VERIFY.value  # untouched
+
+
 # ── verify_po writes a durable audit trail ─────────────────────────────────
 
 

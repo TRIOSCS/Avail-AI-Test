@@ -386,20 +386,44 @@ def _resolved_rows(db: Session, gate, *, mine: bool = False, user: User | None =
 
 def _actionable_request_ids(db: Session, user: User) -> set[int]:
     """Request ids *user* may decide (REQUESTED + a PENDING recipient row) — mirrors
-    decide()."""
-    return set(
-        db.execute(
-            select(ApprovalRequest.id)
-            .join(ApprovalStep, ApprovalStep.request_id == ApprovalRequest.id)
-            .join(ApprovalStepRecipient, ApprovalStepRecipient.step_id == ApprovalStep.id)
-            .where(
-                ApprovalRequest.status == ApprovalRequestStatus.REQUESTED,
-                ApprovalStepRecipient.user_id == user.id,
-                ApprovalStepRecipient.status == ApprovalRecipientStatus.PENDING,
-            )
-            .distinct()
-        ).scalars()
-    )
+    decide().
+
+    decide() also re-checks eligibility AT DECISION TIME (a recipient row is seeded at
+    routing time, but the user's right/limit/active status may have been revoked
+    since) — this mirrors that same re-check so a stale PENDING row never offers the
+    Decide button for a request the user could no longer actually decide.
+    """
+    if not getattr(user, "is_active", True):
+        return set()
+
+    from .routing import _eligible_approvers
+
+    rows = db.execute(
+        select(ApprovalRequest.id, ApprovalRequest.gate_type, ApprovalRequest.amount)
+        .join(ApprovalStep, ApprovalStep.request_id == ApprovalRequest.id)
+        .join(ApprovalStepRecipient, ApprovalStepRecipient.step_id == ApprovalStep.id)
+        .where(
+            ApprovalRequest.status == ApprovalRequestStatus.REQUESTED,
+            ApprovalStepRecipient.user_id == user.id,
+            ApprovalStepRecipient.status == ApprovalRecipientStatus.PENDING,
+        )
+        .distinct()
+    ).all()
+
+    # Cache eligibility per (gate_type, amount) pair — the same pair repeats across
+    # many rows on a busy queue, so this keeps the query count constant regardless of
+    # row count (the module's no-N+1 contract).
+    eligible_cache: dict[tuple[str, str], bool] = {}
+    actionable: set[int] = set()
+    for request_id, gate_type, amount in rows:
+        cache_key = (gate_type, str(amount))
+        is_eligible = eligible_cache.get(cache_key)
+        if is_eligible is None:
+            is_eligible = user.id in {u.id for u in _eligible_approvers(db, gate_type, amount)}
+            eligible_cache[cache_key] = is_eligible
+        if is_eligible:
+            actionable.add(request_id)
+    return actionable
 
 
 def _approver_names_by_request(db: Session, request_ids: list[int]) -> dict[int, list[str]]:

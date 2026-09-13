@@ -28,13 +28,16 @@ from tests.test_approvals_hub_tabs import _pending_prepay_request, _plan, _req_q
 
 @pytest.fixture()
 def approved_manager_client(db_session: Session, test_user: User):
-    """TestClient authed as test_user — the pending recipient that authorizes the
-    decision.
+    """TestClient authed as test_user, granted the prepayment-approval right.
 
-    The prepay decide route only needs require_user; the pending recipient slot (created
-    by _pending_prepay_request against test_user) is what authorizes approve/reject.
+    The prepay decide route needs require_user AND the per-user can_approve_prepayments
+    right — decide() re-checks eligibility at decision time, not just the pending
+    recipient slot (created by _pending_prepay_request against test_user).
     """
     from app.main import app
+
+    test_user.can_approve_prepayments = True
+    db_session.commit()
 
     app.dependency_overrides[get_db] = lambda: (yield db_session)  # type: ignore[misc]
     app.dependency_overrides[require_user] = lambda: test_user
