@@ -222,6 +222,13 @@ hx-on::after-request='if(event.detail.successful){htmx.ajax("GET","/v2/partials/
     </div>
   </div>
 
+  {# Worker-backed health: the heartbeat verdict, for EVERY worker-backed card — the
+     browser workers (control_type browser_login) and the eBay API poller (control_type
+     key, because it also owns real API credentials). Only surfaced when the source is
+     switched on (worker_active / worker_down); an operator-disabled source reads 'Off'
+     and shows no worker note. #}
+  {% if s.state in ('worker_active', 'worker_down') %}{{ worker_detail(s) }}{% endif %}
+
   {# Credential / connect controls #}
   {% if s.control_type == 'oauth_clay' %}
     {% if is_admin %}
@@ -268,10 +275,6 @@ hx-on::after-request='if(event.detail.successful){htmx.ajax("GET","/v2/partials/
     {{ multi_field_form(s, 'Save key') }}
 
   {% elif s.control_type == 'browser_login' %}
-    {# Worker-backed: health is the worker heartbeat, not a direct API. Only surface the
-       worker verdict when the source is switched on (worker_active / worker_down); an
-       operator-disabled source reads 'Off' and shows no worker note. #}
-    {% if s.state in ('worker_active', 'worker_down') %}{{ worker_detail(s) }}{% endif %}
     <p class="text-secondary">A background worker signs in to {{ s.display_name }} and searches for you. Update the login it uses below.</p>
     <div class="space-y-2">
       {% for ev, field in s.creds.items() %}
@@ -286,8 +289,10 @@ hx-on::after-request='if(event.detail.successful){htmx.ajax("GET","/v2/partials/
     {{ multi_field_form(s, 'Save credentials') }}
   {% endif %}
 
-  {# Error message #}
-  {% if s.state == 'error' and s.last_error %}
+  {# Error message. Worker-backed cards never reach state 'error' (their state comes
+     from the heartbeat), but eBay still gets pinged by health_monitor — which clears
+     last_error on success — so its credential failures must stay visible. #}
+  {% if s.last_error and (s.state == 'error' or s.worker) %}
   <p class="text-xs text-red-600">{{ s.last_error }}</p>
   {% endif %}
   {% endif %}{# end planned/active branch #}

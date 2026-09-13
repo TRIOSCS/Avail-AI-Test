@@ -1,0 +1,36 @@
+[Unit]
+Description=AVAIL eBay Search Worker (Browse API poller)
+Documentation=https://github.com/TRIOSCS/Avail-AI-Test
+# No Xvfb / no browser: this worker is an HTTP API poller, unlike the
+# ICS/NC/TBF browser workers.
+After=network.target
+# Crash-loop backoff: if it restarts >5 times in an hour, systemd stops trying
+# (and the app-side liveness watchdog alerts on the stale heartbeat).
+StartLimitIntervalSec=3600
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/root/availai
+# EBAY_* tuning knobs only. The API credentials come from Settings ->
+# Connectors (encrypted in the DB); the env vars in this file are the fallback.
+EnvironmentFile=/root/availai/.env.ebay-worker
+Environment="PYTHONPATH=/root/availai"
+# Runs from the pinned-lockfile venv (requirements.txt), NOT system python, so the
+# host workers carry the same pinned deps as the docker app/enrichment images.
+# deploy.sh refreshes this venv from requirements.txt on every deploy.
+ExecStart=/root/availai/.venv/bin/python -m app.services.ebay_worker.worker
+# always (not on-failure) so a clean exit(0) still restarts.
+Restart=always
+RestartSec=300
+StandardOutput=journal
+StandardError=journal
+
+# Safety limits — half the browser workers' budget: no Chrome process here.
+MemoryMax=1G
+CPUQuota=25%
+
+[Install]
+WantedBy=multi-user.target

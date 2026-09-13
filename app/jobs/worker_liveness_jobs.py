@@ -1,6 +1,6 @@
 """Worker liveness watchdog — alerts when a background worker stops heartbeating.
 
-Each worker (ICS, NetComponents, The Broker Forum, enrichment) writes
+Each worker (ICS, NetComponents, The Broker Forum, eBay, enrichment) writes
 ``last_heartbeat`` on every loop tick. systemd/docker restart a *crashed* worker,
 but a *hung* one (wedged browser, deadlock, network stall) keeps its process alive
 while doing nothing — nobody notices. This job reads the heartbeats every few
@@ -112,7 +112,13 @@ async def _emit_alert(label: str, message: str, debounce_minutes: int) -> None:
 async def _job_monitor_worker_heartbeats():
     from ..config import settings
     from ..database import SessionLocal
-    from ..models import EnrichmentWorkerStatus, IcsWorkerStatus, NcWorkerStatus, TbfWorkerStatus
+    from ..models import (
+        EbayWorkerStatus,
+        EnrichmentWorkerStatus,
+        IcsWorkerStatus,
+        NcWorkerStatus,
+        TbfWorkerStatus,
+    )
 
     now = datetime.now(UTC)
     stale_minutes = settings.worker_heartbeat_stale_minutes
@@ -122,6 +128,7 @@ async def _job_monitor_worker_heartbeats():
         ("ICS", IcsWorkerStatus),
         ("NetComponents", NcWorkerStatus),
         ("The Broker Forum", TbfWorkerStatus),
+        ("eBay", EbayWorkerStatus),
         ("Enrichment", EnrichmentWorkerStatus),
     )
     db = SessionLocal()

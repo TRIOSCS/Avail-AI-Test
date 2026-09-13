@@ -238,17 +238,33 @@ def test_connector_state_planned_ignores_active_flag():
     assert result == "planned"
 
 
-# ── Worker-aware status (TBF / NetComponents / ICsource browser workers) ──────
+# ── Worker-aware status (TBF / NetComponents / ICsource browser workers + the
+#    eBay API poller) ────────────────────────────────────────────────────────
 
 
 def test_worker_backed_sources_mapping():
-    """The three browser-worker sources map to their worker keys; others don't."""
-    for name in ("thebrokersite", "netcomponents", "icsource"):
+    """The four worker-backed sources map to their worker keys; others don't."""
+    for name in ("thebrokersite", "netcomponents", "icsource", "ebay"):
         assert cs.is_worker_backed(_src(name=name))
         assert name in cs.WORKER_BACKED_SOURCES
     assert not cs.is_worker_backed(_src(name="nexar"))
     assert not cs.is_worker_backed(_src(name="mouser"))
-    assert cs.WORKER_BACKED_SOURCES == {"thebrokersite": "tbf", "netcomponents": "nc", "icsource": "ics"}
+    assert cs.WORKER_BACKED_SOURCES == {
+        "thebrokersite": "tbf",
+        "netcomponents": "nc",
+        "icsource": "ics",
+        "ebay": "ebay",
+    }
+
+
+def test_ebay_is_worker_backed_but_not_a_browser_worker():
+    """EBay's search is worker-driven, but it still owns real API credentials — so
+    health_monitor must go on pinging it (it is NOT in BROWSER_WORKER_SOURCES, whose
+    members are pinned live and excluded from the ping loop)."""
+    from app.constants import BROWSER_WORKER_SOURCES
+
+    assert cs.is_worker_backed(_src(name="ebay"))
+    assert "ebay" not in BROWSER_WORKER_SOURCES
 
 
 def test_worker_health_healthy_recent_heartbeat():

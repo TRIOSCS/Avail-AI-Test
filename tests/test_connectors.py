@@ -509,6 +509,12 @@ class TestDigiKeyConnector:
 
 # ═══════════════════════════════════════════════════════════════════════
 #  eBay Connector tests
+#
+#  eBay SEARCH is worker-backed now (app/services/ebay_worker) and this
+#  connector is no longer built by search_service._build_connectors. It stays
+#  live — and stays tested — because three callers still need it: the Settings
+#  -> Connectors Test button, health_monitor's credential ping, and
+#  enrichment.harvest_ebay_titles.
 # ═══════════════════════════════════════════════════════════════════════
 
 
@@ -624,6 +630,24 @@ class TestEbayConnector:
         c = EbayConnector(client_id="", client_secret="secret")
         results = await c._do_search("LM317T")
         assert results == []
+
+    @pytest.mark.asyncio
+    async def test_token_helper_is_shared_with_the_worker(self):
+        """_get_token delegates to the module-level helper the ebay_worker also uses, on
+        the SAME cache key — one bearer for both, not two mints."""
+        from app.connectors.ebay import ebay_token_cache_key, get_ebay_access_token
+
+        c = self._make_connector()
+        assert ebay_token_cache_key("ebay-id") == c._token_cache_key()
+        assert await c._get_token() == "cached-token"
+        assert await get_ebay_access_token("ebay-id", "ebay-secret") == "cached-token"
+
+    def test_connector_is_not_in_the_synchronous_fanout(self):
+        """search_service must not build it — requirements reach eBay via the worker."""
+        import app.search_service as ss
+
+        assert not hasattr(ss, "EbayConnector")
+        assert "EbayConnector" not in ss._CONNECTOR_SOURCE_MAP
 
     @pytest.mark.asyncio
     async def test_do_search_401_retry(self):

@@ -48,6 +48,11 @@ class QueueManager[QM: Base]:
         link_sighting_fn: Optional callback to create a linked sighting.
             Signature: (original_sighting, requirement_id, material_card_id) -> Sighting.
             If None, a default linker is used that copies all common fields.
+        initial_status: Status a freshly enqueued row is created with. Defaults to
+            PENDING, which is what the browser workers need: their AI commodity gate
+            promotes PENDING -> QUEUED before the worker may claim the row. A worker
+            with no gate (the eBay poller) passes QUEUED so its rows are immediately
+            claimable — nothing else in the codebase moves PENDING -> QUEUED.
     """
 
     def __init__(
@@ -57,12 +62,14 @@ class QueueManager[QM: Base]:
         dedup_window_days: int = 7,
         log_prefix: str = "WORKER",
         link_sighting_fn: Callable[..., Any] | None = None,
+        initial_status: str = SearchQueueStatus.PENDING,
     ):
         self.queue_model = queue_model
         self.source_type = source_type
         self.dedup_window_days = dedup_window_days
         self.log_prefix = log_prefix
         self._link_sighting = link_sighting_fn or self._default_link_sighting
+        self.initial_status = initial_status
 
     @staticmethod
     def _default_link_sighting(s: Sighting, requirement_id: int, material_card_id: int, source_type: str) -> Sighting:
@@ -221,7 +228,7 @@ class QueueManager[QM: Base]:
             mpn=mpn_to_search,
             normalized_mpn=norm_mpn,
             manufacturer=req.brand,
-            status=SearchQueueStatus.PENDING,
+            status=self.initial_status,
             priority=priority,
             resolved_via_spec_code=resolved_via_spec_code,
         )

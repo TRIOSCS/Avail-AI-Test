@@ -1,14 +1,19 @@
 """Shared sighting writer for search worker packages.
 
-One implementation of the save skeleton every browser-worker sighting writer
-uses: requirement fetch (with missing-requirement guard), existing-sightings
-dedup set keyed on vendor/mpn/qty, per-row normalize + dedup loop, durable
-vendor-unavailability re-application BEFORE the commit (async results must
-not resurrect a dead vendor), commit, and vendor-summary rebuild. Each
-worker supplies only its marketplace-specific Sighting kwargs via
-``build_sighting_fields``.
+One implementation of the save skeleton every worker sighting writer uses:
+requirement fetch (with missing-requirement guard), existing-sightings dedup
+set, per-row normalize + dedup loop, durable vendor-unavailability
+re-application BEFORE the commit (async results must not resurrect a dead
+vendor), commit, and vendor-summary rebuild. Each worker supplies only its
+marketplace-specific Sighting kwargs via ``build_sighting_fields``.
 
-Called by: ics_worker/nc_worker/tbf_worker sighting_writer wrappers
+Dedup defaults to the (vendor, mpn, qty) triple every browser worker uses.
+A worker whose marketplace carries a stronger listing identity passes
+``dedup_key_fn`` instead — the eBay worker keys on (vendor, eBay item id),
+because one seller routinely lists the same part several times at the same
+quantity and the default triple would collapse those into one sighting.
+
+Called by: ics_worker/nc_worker/tbf_worker/ebay_worker sighting_writer wrappers
 Depends on: Requirement/Sighting models, vendor_unavailability, vendor_utils,
     mpn_normalizer
 """
@@ -27,6 +32,16 @@ from app.vendor_utils import normalize_vendor_name
 from .mpn_normalizer import strip_packaging_suffixes
 
 
+def default_dedup_key(*, vendor_norm: str, mpn: str, qty, raw_data: dict | None) -> tuple:
+    """The historical dedup key: (vendor, mpn, quantity), case-folded.
+
+    ``raw_data`` is unused here — it is part of the hook signature so a worker
+    with a stronger listing identity (eBay's item id) can reach it.
+    """
+    del raw_data  # part of the hook contract; the default key ignores it
+    return ((vendor_norm or "").lower(), (mpn or "").lower(), qty)
+
+
 def save_sightings(
     db: Session,
     queue_item,
@@ -35,14 +50,20 @@ def save_sightings(
     source_type: str,
     log_prefix: str,
     build_sighting_fields: Callable[[Any], dict],
+    dedup_key_fn: Callable[..., tuple] | None = None,
 ) -> int:
     """Save parsed marketplace sightings to the AVAIL sightings table.
 
-    Deduplicates by vendor_name + mpn + quantity combo to avoid duplicate records.
+    Deduplicates on ``dedup_key_fn`` (default: the vendor + mpn + quantity
+    triple) against both the rows already stored for this requirement/source
+    and the rows created earlier in this same batch.
     ``build_sighting_fields(row)`` returns the marketplace-specific Sighting
-    kwargs (confidence, raw_data, vendor contact / price / authorization fields).
+    kwargs (confidence, raw_data, vendor contact / price / authorization fields);
+    it is evaluated BEFORE the dedup check so a key function can read the
+    marketplace's raw_data (e.g. the eBay item id).
     Returns count of sightings created.
     """
+    dedup_key_fn = dedup_key_fn or default_dedup_key
     req = db.get(Requirement, queue_item.requirement_id)
     if not req:
         logger.error("{} sighting writer: requirement {} not found", log_prefix, queue_item.requirement_id)
@@ -51,16 +72,26 @@ def save_sightings(
     material_card_id = req.material_card_id
     now = datetime.now(UTC)
 
-    # Build dedup set from existing sightings of this source for this requirement
+    # Build dedup set from existing sightings of this source for this requirement.
+    # raw_data comes along so a custom key can read the marketplace's own listing
+    # id back out of an already-stored row.
     existing = (
-        db.query(Sighting.vendor_name_normalized, Sighting.mpn_matched, Sighting.qty_available)
+        db.query(
+            Sighting.vendor_name_normalized,
+            Sighting.mpn_matched,
+            Sighting.qty_available,
+            Sighting.raw_data,
+        )
         .filter(
             Sighting.requirement_id == req.id,
             Sighting.source_type == source_type,
         )
         .all()
     )
-    existing_keys = {((v or "").lower(), (m or "").lower(), q) for v, m, q in existing}
+    existing_keys = {
+        dedup_key_fn(vendor_norm=v or "", mpn=m or "", qty=q, raw_data=rd if isinstance(rd, dict) else None)
+        for v, m, q, rd in existing
+    }
 
     created = 0
     created_rows: list[Sighting] = []
@@ -70,9 +101,15 @@ def save_sightings(
 
         vendor_norm = normalize_vendor_name(row.vendor_name)
         mpn_norm = strip_packaging_suffixes(row.part_number)
+        extra_fields = build_sighting_fields(row)
 
         # Dedup check
-        dedup_key = (vendor_norm.lower(), mpn_norm.lower(), row.quantity)
+        dedup_key = dedup_key_fn(
+            vendor_norm=vendor_norm,
+            mpn=mpn_norm,
+            qty=row.quantity,
+            raw_data=extra_fields.get("raw_data"),
+        )
         if dedup_key in existing_keys:
             continue
         existing_keys.add(dedup_key)
@@ -90,7 +127,7 @@ def save_sightings(
             source_searched_at=now,
             date_code=row.date_code or None,
             created_at=now,
-            **build_sighting_fields(row),
+            **extra_fields,
         )
         db.add(sighting)
         created_rows.append(sighting)

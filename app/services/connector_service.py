@@ -38,6 +38,11 @@ WORKER_BACKED_SOURCES: dict[str, str] = {
     "thebrokersite": "tbf",
     "netcomponents": "nc",
     "icsource": "ics",
+    # eBay is worker-backed too, but it is an API poller rather than a browser
+    # worker: it keeps its api_sources credentials, its health_monitor ping and
+    # its Settings Test button (see BROWSER_WORKER_SOURCES, which deliberately
+    # does NOT list it) while its search health comes from the heartbeat.
+    "ebay": "ebay",
 }
 
 # A worker heartbeat older than this is treated as stalled (the worker crashed or
@@ -116,7 +121,8 @@ def is_worker_backed(source) -> bool:
 def worker_health(row, *, now: datetime | None = None, stale_seconds: int = WORKER_HEARTBEAT_STALE_SECONDS) -> dict:
     """Collapse a worker-status heartbeat row into a health verdict (pure, no IO).
 
-    `row` is a *WorkerStatus singleton (TbfWorkerStatus / NcWorkerStatus / IcsWorkerStatus)
+    `row` is a *WorkerStatus singleton (TbfWorkerStatus / NcWorkerStatus / IcsWorkerStatus /
+    EbayWorkerStatus)
     or None when the row is absent. Returns a dict the connectors UI renders directly:
 
         healthy            — bool: heartbeat recent, running, breaker closed

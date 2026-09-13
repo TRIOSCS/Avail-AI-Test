@@ -629,14 +629,19 @@ def _build_connector_field(source, env_var: str, *, mask_fully: bool = False) ->
 def _worker_status_row(source_name: str, db):
     """Return the worker-status singleton for a worker-backed source (or None).
 
-    Maps an ApiSource.name (thebrokersite/netcomponents/icsource) to its heartbeat model
-    via connector_service.WORKER_BACKED_SOURCES, reading the id=1 singleton.
+    Maps an ApiSource.name (thebrokersite/netcomponents/icsource/ebay) to its heartbeat
+    model via connector_service.WORKER_BACKED_SOURCES, reading the id=1 singleton.
     """
-    from ...models import IcsWorkerStatus, NcWorkerStatus, TbfWorkerStatus
+    from ...models import EbayWorkerStatus, IcsWorkerStatus, NcWorkerStatus, TbfWorkerStatus
     from ...services import connector_service
 
     worker_key = connector_service.WORKER_BACKED_SOURCES.get(source_name)
-    model = {"tbf": TbfWorkerStatus, "nc": NcWorkerStatus, "ics": IcsWorkerStatus}.get(worker_key)
+    model = {
+        "tbf": TbfWorkerStatus,
+        "nc": NcWorkerStatus,
+        "ics": IcsWorkerStatus,
+        "ebay": EbayWorkerStatus,
+    }.get(worker_key)
     if model is None:
         return None
     return db.get(model, 1)
@@ -694,16 +699,20 @@ def _enrich_source(source, db) -> dict:
 
     # Testability:
     #  - planned: never (no implementation yet)
-    #  - worker-backed: never via the API-probe Test button — health is the heartbeat,
-    #    not a synchronous search (the worker runs out-of-process on a schedule)
+    #  - worker-backed: only when a real probe exists. The three BROWSER workers
+    #    (ICS/NC/TBF) have no connector at all, so source_has_test_path is False and
+    #    their card shows no Test button — health is the heartbeat, not a synchronous
+    #    search. eBay is worker-backed too but is an API poller: its OAuth credentials
+    #    still build an EbayConnector, so the Test button (and the health_monitor ping)
+    #    keep working.
     #  - keyless: only when a real test path exists — some keyless sources
     #    (sam_gov_enrichment, stock_list_import) have no connector/test hook, so their
     #    Test button was a cosmetic no-op that falsely reported OK. Derive it from
     #    whether _get_connector_for_source can actually build a probe.
     #  - else (credentialed / oauth): has some form of access
-    if ct == "planned" or worker is not None:
+    if ct == "planned":
         testable = False
-    elif keyless:
+    elif worker is not None or keyless:
         from ...services.connector_registry import source_has_test_path
 
         testable = source_has_test_path(name, db)

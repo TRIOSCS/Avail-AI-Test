@@ -24,7 +24,7 @@
         "display_name": "eBay",
         "category": "api",
         "source_type": "marketplace",
-        "description": "Browse API — searches eBay listings for electronic components. Returns seller, price, condition, qty. Good for surplus/used parts.",
+        "description": "Browse API — worker-backed: the avail-ebay-worker poller searches queued MPNs on eBay and writes sightings. Returns seller, price, condition, qty. Good for surplus/used parts.",
         "signup_url": "https://developer.ebay.com",
         "env_vars": ["EBAY_CLIENT_ID", "EBAY_CLIENT_SECRET"],
         "setup_notes": "Create app at developer.ebay.com → get client_id + secret. OAuth client credentials. Need production access approval."

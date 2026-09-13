@@ -8,11 +8,21 @@
 
 These have full Python connectors, are registered in the search service, and will fire automatically when env vars are set.
 
+> **eBay is worker-backed (2026-09-05).** It is still on this list and still uses
+> `EBAY_CLIENT_ID` / `EBAY_CLIENT_SECRET`, but its search no longer runs inside a
+> user's request. Requirements are queued to `ebay_search_queue` and the
+> `avail-ebay-worker` systemd unit polls the Browse API out of process
+> (`app/services/ebay_worker`), writing Sightings asynchronously — the same shape as
+> the ICS / NetComponents / The Broker Forum browser workers, but over HTTPS instead
+> of a browser. `EbayConnector` remains live for the Settings → Connectors Test
+> button, the health_monitor credential ping, and eBay title mining during material
+> enrichment.
+
 | # | Source | Type | Auth Method | Env Vars Needed | Signup URL | Notes |
 |---|--------|------|-------------|-----------------|------------|-------|
 | 1 | **Octopart (Nexar)** | Aggregator | OAuth2 client_credentials | `NEXAR_CLIENT_ID`, `NEXAR_CLIENT_SECRET` | nexar.com/api | GraphQL. 1000 queries/month free. Returns sellers, prices, authorized status. |
 | 2 | **BrokerBin** | Broker | API key + username | `BROKERBIN_API_KEY`, `BROKERBIN_API_SECRET` | brokerbin.com | REST v2. Independent broker/distributor inventories. Contact sales for API. |
-| 3 | **eBay** | Marketplace | OAuth2 client_credentials | `EBAY_CLIENT_ID`, `EBAY_CLIENT_SECRET` | developer.ebay.com | Browse API. Surplus/used parts. Need production access approval. |
+| 3 | **eBay** | Marketplace | OAuth2 client_credentials | `EBAY_CLIENT_ID`, `EBAY_CLIENT_SECRET` | developer.ebay.com | Browse API, **worker-backed** (`avail-ebay-worker`). Surplus/used parts. Need production access approval. Searches all of eBay by default (no category filter); results pass a strict part-number-in-title filter, and "For parts or not working" + auction-only listings are dropped. Paced by `EBAY_DAILY_CALL_BUDGET` (default 4000 calls/UTC day) — see `.env.ebay-worker.example`. |
 | 4 | **DigiKey** | Authorized | OAuth2 client_credentials | `DIGIKEY_CLIENT_ID`, `DIGIKEY_CLIENT_SECRET` | developer.digikey.com | Product Search v4. Real-time pricing/inventory. Free tier. |
 | 5 | **Mouser** | Authorized | API key | `MOUSER_API_KEY` | mouser.com/api-hub | Search API v2. Up to 50 results per query. Choose locale at signup. |
 | 6 | **OEMSecrets** | Aggregator | API key | `OEMSECRETS_API_KEY` | oemsecrets.com/api | META-AGGREGATOR — one call gets 140+ distributors (DigiKey, Mouser, Arrow, Avnet, Farnell, RS, Future, TME). Highest ROI single source. |
@@ -21,7 +31,7 @@ These have full Python connectors, are registered in the search service, and wil
 
 ### Priority Setup Order:
 1. **OEMSecrets** — single API covers 140+ distributors (may overlap with DigiKey/Mouser but catches Arrow, Avnet, Farnell, RS, Future, etc.)
-2. **eBay** — easy OAuth, covers surplus/used market nobody else has
+2. **eBay** — easy OAuth, covers surplus/used market nobody else has (enter the keys in Settings → Connectors; the worker reads them DB-first)
 3. **DigiKey** — direct authorized pricing
 4. **Mouser** — direct authorized pricing
 5. **Sourcengine** — B2B marketplace, different vendor pool

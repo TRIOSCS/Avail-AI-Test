@@ -126,7 +126,6 @@ def _all_connector_patches():
     return (
         patch("app.search_service.NexarConnector"),
         patch("app.search_service.BrokerBinConnector"),
-        patch("app.search_service.EbayConnector"),
         patch("app.search_service.DigiKeyConnector"),
         patch("app.search_service.MouserConnector"),
         patch("app.search_service.OEMSecretsConnector"),
@@ -138,7 +137,6 @@ def _all_connector_patches():
 _CONNECTOR_CLASS_NAMES = [
     "NexarConnector",
     "BrokerBinConnector",
-    "EbayConnector",
     "DigiKeyConnector",
     "MouserConnector",
     "OEMSecretsConnector",
@@ -162,7 +160,6 @@ def _setup_mock_connectors(mocks, default_results=None, class_names=None):
 _CONNECTOR_ATTR_NAMES = [
     "nexar",
     "brokerbin",
-    "ebay",
     "digikey",
     "mouser",
     "oemsecrets",
@@ -173,9 +170,9 @@ _CONNECTOR_ATTR_NAMES = [
 
 @contextmanager
 def _patched_connectors(creds_value="fake-key"):
-    """Patch all 8 connector classes (at their source in app.search_service) plus the
-    standard credential lookups, configure them with default empty results, and yield a
-    namespace of the mocks keyed by short name (m.nexar, m.brokerbin, ...).
+    """Patch all 7 synchronous connector classes (at their source in app.search_service)
+    plus the standard credential lookups, configure them with default empty results, and
+    yield a namespace of the mocks keyed by short name (m.nexar, m.brokerbin, ...).
 
     Tests override individual connectors via m.<name>.return_value.search = AsyncMock(...).
     """
@@ -1765,7 +1762,7 @@ class TestFetchFresh:
     @pytest.mark.asyncio
     async def test_all_disabled(self, db_session):
         """When all sources are disabled, returns empty results."""
-        for name in ["nexar", "brokerbin", "ebay", "digikey", "mouser", "oemsecrets", "sourcengine", "element14"]:
+        for name in ["nexar", "brokerbin", "digikey", "mouser", "oemsecrets", "sourcengine", "element14"]:
             _make_api_source(db_session, name, status="disabled")
 
         with (
@@ -1776,7 +1773,7 @@ class TestFetchFresh:
 
         assert results == []
         disabled_count = sum(1 for s in stats if s["status"] == "disabled")
-        assert disabled_count == 8
+        assert disabled_count == 7
 
     @pytest.mark.asyncio
     async def test_no_credentials(self, db_session):
@@ -1789,7 +1786,7 @@ class TestFetchFresh:
 
         assert results == []
         skipped_count = sum(1 for s in stats if s["status"] == "skipped")
-        assert skipped_count == 9
+        assert skipped_count == 8
 
     @pytest.mark.asyncio
     async def test_successful_search(self, db_session):
@@ -1950,7 +1947,7 @@ class TestFetchFresh:
     async def test_mixed_disabled_and_no_creds(self, db_session):
         """Mix of disabled sources and sources without credentials."""
         _make_api_source(db_session, "nexar", status="disabled")
-        _make_api_source(db_session, "ebay", status="disabled")
+        _make_api_source(db_session, "mouser", status="disabled")
 
         def selective_cred(db, source_name, var_name):
             if source_name == "brokerbin":
@@ -1976,7 +1973,9 @@ class TestFetchFresh:
 
         statuses = {s["source"]: s["status"] for s in stats}
         assert statuses.get("nexar") == "disabled"
-        assert statuses.get("ebay") == "disabled"
+        assert statuses.get("mouser") == "disabled"
+        # eBay is worker-backed now — it never appears in the synchronous fan-out.
+        assert "ebay" not in statuses
         bb_stat = next((s for s in stats if s["source"] == "brokerbin"), None)
         assert bb_stat is not None
         assert bb_stat["status"] == "ok"
@@ -2036,7 +2035,7 @@ class TestFetchFresh:
     @pytest.mark.asyncio
     async def test_no_connectors_returns_early(self, db_session):
         """If all sources are disabled or skipped, returns early."""
-        for name in ["nexar", "brokerbin", "ebay", "digikey", "mouser", "oemsecrets", "sourcengine", "element14"]:
+        for name in ["nexar", "brokerbin", "digikey", "mouser", "oemsecrets", "sourcengine", "element14"]:
             _make_api_source(db_session, name, status="disabled")
 
         with (
@@ -2046,7 +2045,7 @@ class TestFetchFresh:
             results, stats = await _fetch_fresh(["LM317T"], db_session)
 
         assert results == []
-        assert len(stats) == 9
+        assert len(stats) == 8
 
     @pytest.mark.asyncio
     async def test_api_source_stats_updated(self, db_session):
@@ -2198,14 +2197,13 @@ class TestFetchFresh:
             patch("app.search_service.should_trigger_ai_search", return_value=False),
             patch("app.search_service.NexarConnector") as MockNexar,
             patch("app.search_service.BrokerBinConnector") as MockBB,
-            patch("app.search_service.EbayConnector") as MockEbay,
             patch("app.search_service.DigiKeyConnector") as MockDK,
             patch("app.search_service.MouserConnector") as MockMouser,
             patch("app.search_service.OEMSecretsConnector") as MockOEM,
             patch("app.search_service.SourcengineConnector") as MockSrc,
             patch("app.search_service.Element14Connector") as MockE14,
         ):
-            mocks = [MockNexar, MockBB, MockEbay, MockDK, MockMouser, MockOEM, MockSrc, MockE14]
+            mocks = [MockNexar, MockBB, MockDK, MockMouser, MockOEM, MockSrc, MockE14]
             _setup_mock_connectors(mocks)
             MockAI.return_value.__class__.__name__ = "AIWebSearchConnector"
             MockAI.return_value.search = AsyncMock(return_value=[])

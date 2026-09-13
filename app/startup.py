@@ -1669,8 +1669,24 @@ def seed_tbf_worker_status_singleton(db) -> None:
     _seed_worker_status_singleton(db, TbfWorkerStatus)
 
 
+def seed_ebay_worker_status_singleton(db) -> None:
+    """Insert ebay_worker_status id=1 row if absent (see _seed_worker_status_singleton).
+
+    Migration 219 seeds the row at deploy; this is the idempotent backup for fresh
+    DBs/tests. NOTE the eBay source itself is deliberately NOT in BROWSER_WORKER_SOURCES
+    — it keeps real API credentials, so health_monitor should go on pinging it rather
+    than having its status pinned to 'live' by the seed.
+    """
+    from .models import EbayWorkerStatus
+
+    _seed_worker_status_singleton(db, EbayWorkerStatus)
+
+
 def seed_browser_workers() -> None:
-    """Run all browser-worker seeds in a single SessionLocal transaction.
+    """Run all worker-status seeds in a single SessionLocal transaction.
+
+    Covers the three browser workers plus the eBay API poller (its status
+    singleton, not its api_sources row — see seed_ebay_worker_status_singleton).
 
     Called by: main.py lifespan (after seed_api_sources)
     """
@@ -1680,6 +1696,7 @@ def seed_browser_workers() -> None:
         seed_ics_worker_status_singleton(db)
         seed_nc_worker_status_singleton(db)
         seed_tbf_worker_status_singleton(db)
+        seed_ebay_worker_status_singleton(db)
         db.commit()
     except (SQLAlchemyError, DBAPIError) as e:
         logger.warning("Browser worker seed error: {}", e)
