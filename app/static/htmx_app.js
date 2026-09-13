@@ -1991,9 +1991,12 @@ Alpine.data('unifiedReqModal', () => ({
             return;
         }
         try {
+            // Raw fetch (not htmx), so the CSRF double-submit header must be added by
+            // hand — starlette_csrf 403s any session POST without it, and the resp.ok
+            // guard below would swallow that 403 as a silent no-op.
             const resp = await fetch('/api/ai/standardize-description', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', 'x-csrftoken': csrfToken() },
                 body: JSON.stringify({
                     description: raw,
                     mpn: part.primary_mpn || '',
@@ -2012,9 +2015,11 @@ Alpine.data('unifiedReqModal', () => ({
         const mpn = (part.primary_mpn || '').trim();
         if (!mpn || mpn.length < 3) return;
         try {
+            // Same as standardizeDescription: raw fetch needs the x-csrftoken header
+            // by hand or starlette_csrf 403s the session POST before the route runs.
             const resp = await fetch('/api/ai/generate-description', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', 'x-csrftoken': csrfToken() },
                 body: JSON.stringify({
                     mpn: mpn,
                     manufacturer: part.manufacturer || '',
