@@ -24,6 +24,12 @@ app.availai.net {
 		level INFO
 	}
 
+	# Tokenized confirm links (/p/confirm/<token>, /po/confirm/<token>) carry a
+	# bearer token in the URL path. Never write those requests to the access
+	# log — a copied log line would be a live wire/PO authorization.
+	@tokenized path /p/confirm/* /po/confirm/*
+	log_skip @tokenized
+
 	header {
 		Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
 		X-Frame-Options "SAMEORIGIN"
