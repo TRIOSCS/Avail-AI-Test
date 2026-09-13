@@ -22,7 +22,23 @@ who offered or quoted it by email, and who to call.
 Not in 2.0. Delete rather than maintain:
 approvals, buy plans, prepayments, quotes and quote builder, quality
 plans, resell, prospecting, trouble tickets, offer review queue,
-follow-up queue, CRM module, split-pane workspace.
+follow-up queue, CRM module, split-pane workspace, Sales Hub
+(requisitions workspace), My Day, Reports.
+
+Keep (decided 2026-09-13): the search page and part dossier, the
+sightings board and RFQ send (where buyers act on the report),
+vendor cards and vendor contacts (who to call), offers as history
+(offered us by email), material cards and their tags (part history
+builder), proactive part matching as a sub-page buyers can move to,
+and Requisition/Requirement only in their scratch "search session"
+shape.
+
+Deletion rules: the Offer write API currently lives in
+app/routers/crm/offers.py and must be extracted first, as its own
+PR with its own tests, before any CRM file is removed. Proactive
+matching must be rewired off companies, customer sites, and quotes
+before those tables go. Model removal, plumbing edits, and the drop
+migration land in one commit so the schema-drift gate stays green.
 
 Standing rule: no work on anything in that list unless I ask for it
 by name in the session prompt. That includes bug fixes, refactors,
