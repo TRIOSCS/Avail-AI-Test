@@ -12,6 +12,27 @@ developer. Hosted on DigitalOcean at app.availai.net.
 AVAIL. We issue buy instructions to buyers, who cut the POs in the
 ERP and send them.
 
+## SCOPE LOCK — Avail 2.0 (set 2026-09-13; overrides everything below)
+
+Avail 2.0 is a sourcing engine and a part history builder. Nothing
+else. Enter a part number, optionally with substitutes, and get one
+report: vendors posting it now, vendors who posted it before, vendors
+who offered or quoted it by email, and who to call.
+
+Not in 2.0. Delete rather than maintain:
+approvals, buy plans, prepayments, quotes and quote builder, quality
+plans, resell, prospecting, trouble tickets, offer review queue,
+follow-up queue, CRM module, split-pane workspace.
+
+Standing rule: no work on anything in that list unless I ask for it
+by name in the session prompt. That includes bug fixes, refactors,
+tests, and "while I was in there" changes. If a task would touch one
+of them, stop and say so.
+
+The business-context sections below describe the legacy platform
+still running in production. They are reference only. They do not
+authorize work.
+
 ## Systems of record
 
 | Lives in Acctivate (ERP) | Lives in AVAIL |
