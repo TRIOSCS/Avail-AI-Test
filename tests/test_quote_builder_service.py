@@ -475,7 +475,9 @@ class TestSaveQuoteFromBuilderRfqsSent:
         self, db_session: Session, req_with_offers, test_user: User, test_customer_site
     ):
         """RFQS_SENT -> QUOTED is a normal, allowed transition (requisition_state.
-        ALLOWED_TRANSITIONS) and must fire on save, not just from OPEN/OFFERS."""
+
+        ALLOWED_TRANSITIONS) and must fire on save, not just from OPEN/OFFERS.
+        """
         req, item, offers = req_with_offers
         req.status = RequisitionStatus.RFQS_SENT
         req.customer_site_id = test_customer_site.id
@@ -493,8 +495,8 @@ class TestRecalcQuoteTotals:
         self, db_session: Session, req_with_offers, test_user: User
     ):
         """recalc_quote_totals must use `qty or 0` (matching quote_export_context) so
-        the header total equals the sum of the visible rows — a None/zero qty row
-        must not be treated as 1 unit of phantom revenue/cost."""
+        the header total equals the sum of the visible rows — a None/zero qty row must
+        not be treated as 1 unit of phantom revenue/cost."""
         req, _item, _offers = req_with_offers
         quote = Quote(
             requisition_id=req.id,

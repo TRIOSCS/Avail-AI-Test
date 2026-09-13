@@ -152,9 +152,9 @@ def test_delete_requirement(client):
 
 
 def test_delete_requirement_blocked_when_offer_referenced_by_buy_plan_line(client, db_session, test_user):
-    """A requirement whose offer has already been picked onto a buy plan line must
-    NOT be deletable — deleting it would cascade-delete the Offer and SET NULL the
-    buy plan line's offer_id, silently losing the approved plan's offer provenance."""
+    """A requirement whose offer has already been picked onto a buy plan line must NOT
+    be deletable — deleting it would cascade-delete the Offer and SET NULL the buy plan
+    line's offer_id, silently losing the approved plan's offer provenance."""
     req_id = _create_req(client, name="REQ-DEL-BLOCKED")
     items = _add_requirements(
         client,

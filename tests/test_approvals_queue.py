@@ -317,8 +317,8 @@ def test_can_act_only_for_eligible_pending_recipient(db_session: Session) -> Non
 
 def test_can_act_false_when_eligibility_revoked_after_routing(db_session: Session) -> None:
     """A stale PENDING recipient row must not still offer the Decide button once the
-    user's approval right is revoked — mirrors decide()'s own decision-time re-check
-    (a routed-then-revoked user could otherwise still see and click Approve)."""
+    user's approval right is revoked — mirrors decide()'s own decision-time re-check (a
+    routed-then-revoked user could otherwise still see and click Approve)."""
     me = _user(db_session, can_approve_prepayments=True)
     bp = _bp(db_session, me)
     a = _seed(

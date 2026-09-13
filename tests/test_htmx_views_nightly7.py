@@ -261,6 +261,38 @@ class TestRfqSend:
         # Only Arrow (with email) should be created
         assert len(contacts) == 1
 
+    def test_batch_send_failure_reports_not_sent_not_sent_as_sent(self, client, db_session, test_user, monkeypatch):
+        """Item 13: when send_batch_rfq raises (a real, non-TESTING send attempt), the
+        DB-only fallback writes PENDING contacts and must report them as not_sent —
+        not append them to `sent`, which previously inflated total_sent with RFQs that
+        were never actually emailed."""
+        monkeypatch.setenv("TESTING", "0")
+        req = _make_requisition(db_session, test_user)
+
+        with (
+            patch("app.dependencies.require_fresh_token", new=AsyncMock(return_value="tok")),
+            patch("app.email_service.send_batch_rfq", new=AsyncMock(side_effect=RuntimeError("graph down"))),
+        ):
+            resp = client.post(
+                f"/v2/partials/requisitions/{req.id}/rfq-send",
+                data={
+                    "vendor_names": ["Arrow Electronics"],
+                    "vendor_emails": ["sales@arrow.com"],
+                    "subject": "RFQ for LM317T",
+                },
+            )
+        assert resp.status_code == 200
+
+        from app.constants import ContactStatus
+        from app.models.offers import Contact as C
+
+        contact = db_session.query(C).filter(C.requisition_id == req.id).one()
+        assert contact.status == ContactStatus.PENDING
+        # The response's own not_sent/total_sent counters must agree with the DB write —
+        # a "sent" banner here would be success theater for an RFQ that never went out.
+        assert "1 RFQ(s) NOT sent" in resp.text
+        assert "RFQ sent to" not in resp.text
+
 
 # ── Section 2: edit_offer ─────────────────────────────────────────────
 

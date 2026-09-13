@@ -389,9 +389,9 @@ def _actionable_request_ids(db: Session, user: User) -> set[int]:
     decide().
 
     decide() also re-checks eligibility AT DECISION TIME (a recipient row is seeded at
-    routing time, but the user's right/limit/active status may have been revoked
-    since) — this mirrors that same re-check so a stale PENDING row never offers the
-    Decide button for a request the user could no longer actually decide.
+    routing time, but the user's right/limit/active status may have been revoked since)
+    — this mirrors that same re-check so a stale PENDING row never offers the Decide
+    button for a request the user could no longer actually decide.
     """
     if not getattr(user, "is_active", True):
         return set()

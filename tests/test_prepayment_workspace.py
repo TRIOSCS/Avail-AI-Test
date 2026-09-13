@@ -267,6 +267,35 @@ def test_method_adjust_updates_logs_and_rerenders(hub_client: TestClient, db_ses
     assert audit.buy_plan_id == bp.id
 
 
+def test_method_adjust_matches_write_for_restricted_non_owner_approver(
+    hub_client: TestClient, db_session: Session, test_user: User, admin_user: User
+):
+    """Item 8: a restricted-role approver who does not own the buy plan's
+    requisition, but IS an eligible prepayment approver (can_approve_prepayments),
+    must get the SAME outcome from the write and its re-render — not a written
+    payment_method followed by a 404 pane."""
+    from app.services.stale_guard import stale_token
+
+    bp, _line, pp, _ar = _prepay_on_line(db_session, admin_user, pp_method="wire")
+    test_user.role = "sales"
+    test_user.can_approve_prepayments = True
+    db_session.commit()
+
+    token = stale_token(pp)
+    r = hub_client.post(
+        f"/v2/partials/approvals/prepayments/{pp.id}/method",
+        data={"payment_method": "ach", "expected_updated_at": token},
+    )
+    # The write succeeded AND the re-render agrees (no 404) — test_user is not the
+    # request's recipient here (admin_user is), so the "Awaiting your approval" card
+    # (which holds the method dropdown) doesn't render, but the pane itself must
+    # still come back as the prepayment pane, not a 404.
+    assert r.status_code == 200
+    assert 'id="aw-pane-body"' in r.text
+    db_session.expire_all()
+    assert pp.payment_method == "ach"
+
+
 def test_method_adjust_requires_approver_right(hub_client: TestClient, db_session: Session, test_user: User):
     _bp, _line, pp, _ar = _prepay_on_line(db_session, test_user)
     test_user.can_approve_prepayments = False
@@ -336,6 +365,31 @@ def test_approve_from_pane_rerenders_pane(hub_client: TestClient, db_session: Se
     db_session.expire_all()
     assert pp.status == PrepaymentStatus.APPROVED.value
     assert pp.pay_token  # the single-use pay link was minted (engine path untouched)
+
+
+def test_approve_from_pane_matches_write_for_restricted_non_owner_recipient(
+    hub_client: TestClient, db_session: Session, test_user: User, admin_user: User
+):
+    """Item 8: a restricted-role approver who is the request's PENDING recipient
+    (svc_decide's real eligibility check) but does NOT own the buy plan's
+    requisition must get the SAME outcome from the write and its re-render — the
+    decide must not 200 while the pane 404s underneath it."""
+    _bp, _line, pp, ar = _prepay_on_line(db_session, test_user, pp_method="wire")
+    # Reassign the requisition to a DIFFERENT owner so get_buyplan_for_user would
+    # 404 a restricted role, while test_user stays the request's PENDING recipient.
+    _bp.requisition.created_by = admin_user.id
+    test_user.role = "sales"
+    db_session.commit()
+
+    with patch("app.services.buyplan_notifications.run_notify_bg", new_callable=AsyncMock):
+        r = hub_client.post(
+            f"/v2/partials/approvals/prepay-requests/{ar.id}/decide",
+            data={"action": "approve", "origin": "approvals_workspace"},
+        )
+    assert r.status_code == 200
+    assert "OK to pay — WIRE" in r.text
+    db_session.expire_all()
+    assert pp.status == PrepaymentStatus.APPROVED.value
 
 
 def test_reject_from_pane_voids_and_rerenders(hub_client: TestClient, db_session: Session, test_user: User):

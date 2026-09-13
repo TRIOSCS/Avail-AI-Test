@@ -877,6 +877,8 @@ class TestQuotesPartials:
 
         resp = client.post(f"/v2/partials/quotes/{q.id}/add-offer/{offer.id}")
         assert resp.status_code == 403
+        # Item 10: a plain string error, not a stringified dict repr.
+        assert resp.json()["error"] == "offer does not belong to this quote's requisition"
 
         line = db_session.query(QuoteLine).filter_by(quote_id=q.id, offer_id=offer.id).first()
         assert line is None

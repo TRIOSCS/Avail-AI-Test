@@ -1179,13 +1179,13 @@ class TestRequisitionImport:
         assert "No data" in resp.text
 
     def test_import_parse_json_mode_no_data(self, client: TestClient):
+        """Item 11: JSON mode with no data is a real 400, not a 200 error envelope."""
         resp = client.post(
             "/v2/partials/requisitions/import-parse?format=json",
             data={"name": "Test", "raw_text": ""},
         )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["error"] == "No data provided"
+        assert resp.status_code == 400
+        assert resp.json()["error"] == "No data provided"
 
     def test_import_parse_with_text(self, client: TestClient):
         mock_result = {"requirements": [{"primary_mpn": "LM317T", "target_qty": 100}], "name": "AI Name"}

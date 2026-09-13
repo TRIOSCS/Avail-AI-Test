@@ -274,9 +274,9 @@ def test_non_recipient_forbidden(db_session, prepayment_request_with_two_recipie
 def test_revoked_eligibility_forbidden_despite_pending_recipient(
     db_session, prepayment_request_with_two_recipients, mike
 ):
-    """A user's PENDING recipient row is seeded at routing time and never revisited —
-    if their can_approve_prepayments right is revoked AFTER routing, decide() must
-    still refuse them at decision time, not just trust the stale PENDING row."""
+    """A user's PENDING recipient row is seeded at routing time and never revisited — if
+    their can_approve_prepayments right is revoked AFTER routing, decide() must still
+    refuse them at decision time, not just trust the stale PENDING row."""
     req = prepayment_request_with_two_recipients
     mike.can_approve_prepayments = False
     db_session.flush()
@@ -287,8 +287,8 @@ def test_revoked_eligibility_forbidden_despite_pending_recipient(
 
 
 def test_deactivated_user_forbidden_despite_pending_recipient(db_session, prepayment_request_with_two_recipients, mike):
-    """A deactivated user must not still be able to decide a request they were
-    routed to while active."""
+    """A deactivated user must not still be able to decide a request they were routed to
+    while active."""
     req = prepayment_request_with_two_recipients
     mike.is_active = False
     db_session.flush()

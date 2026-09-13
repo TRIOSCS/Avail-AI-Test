@@ -24,6 +24,9 @@ from app.models.approvals import ApprovalRequest, ApprovalStep, ApprovalStepReci
 
 
 def _seed_pending_buy_plan_approval(db, user):
+    # decide()/_actionable_request_ids re-check eligibility at decision time, so the
+    # seeded recipient must hold the right real routing would have required.
+    user.can_approve_buy_plans = True
     ar = ApprovalRequest(
         gate_type=ApprovalGateType.BUY_PLAN,
         status=ApprovalRequestStatus.REQUESTED,

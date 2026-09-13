@@ -483,6 +483,27 @@ def test_connectors_tab_not_empty_state_when_sources_exist(admin_client):
     assert "No connectors" not in html
 
 
+def test_credential_save_unknown_source_404_plain_string(admin_client):
+    """Unknown source name → 404 with a plain string error (item 10 — the handler
+    stringifies a dict detail into a Python repr, e.g. "{'error': '...'}")."""
+    r = admin_client.put(
+        "/api/sources/does-not-exist/credentials",
+        json={"credentials": {"SOME_KEY": "val"}},
+    )
+    assert r.status_code == 404
+    assert r.json()["error"] == "Source 'does-not-exist' not found"
+
+
+def test_credential_save_missing_credentials_400_plain_string(admin_client):
+    """Missing credentials field → 400 with a plain string error (item 10)."""
+    r = admin_client.put(
+        "/api/sources/lusha_enrichment/credentials",
+        json={},
+    )
+    assert r.status_code == 400
+    assert r.json()["error"] == "credentials field required"
+
+
 def test_save_credentials_emits_success_toast(admin_client):
     """PUT credentials carries a showToast HX-Trigger so the user sees confirmation."""
     r = admin_client.put(

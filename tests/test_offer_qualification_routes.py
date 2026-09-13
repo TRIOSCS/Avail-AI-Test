@@ -100,6 +100,7 @@ def test_request_rejects_invalid_kind(client, db_session, test_requisition, test
     db_session.commit()
     resp = client.post(f"/v2/partials/sightings/{rid}/offers/{o.id}/request", data={"kind": "bogus"})
     assert resp.status_code == 400
+    assert resp.json()["error"] == "invalid request kind"  # item 10: plain string, not a stringified dict
 
 
 def test_request_scoped_to_requirement_blocks_cross_requirement_offer(client, db_session, test_requisition, test_user):
@@ -124,6 +125,7 @@ def test_request_scoped_to_requirement_blocks_cross_requirement_offer(client, db
     db_session.commit()
     resp = client.post(f"/v2/partials/sightings/{rid}/offers/{o.id}/request", data={"kind": "images"})
     assert resp.status_code == 404
+    assert resp.json()["error"] == "offer not found for this requirement"  # item 10
     db_session.refresh(o)
     assert (o.qualification or {}).get("requests", []) == []  # not mutated
 
@@ -284,6 +286,7 @@ def test_request_send_out_of_range_index_is_404(client, db_session, test_requisi
     rid, o = _seed_offer_with_pending_request(db_session, test_requisition, test_user, test_vendor_card)
     resp = client.post(f"/v2/partials/sightings/{rid}/offers/{o.id}/request/9/send")
     assert resp.status_code == 404
+    assert resp.json()["error"] == "request not found"  # item 10: plain string, not a stringified dict
 
 
 def test_sightings_edit_merges_qualification_preserving_requests(client, db_session, test_requisition, test_user):

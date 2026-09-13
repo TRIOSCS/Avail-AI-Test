@@ -78,8 +78,8 @@ class TestProspectAccountModel:
         assert pa.status == "suggested"
 
     def test_status_column_default_derives_from_enum(self):
-        """The status Column default must be ProspectAccountStatus.SUGGESTED, not a
-        raw string literal, so it can never drift from the enum (P2 fix)."""
+        """The status Column default must be ProspectAccountStatus.SUGGESTED, not a raw
+        string literal, so it can never drift from the enum (P2 fix)."""
         default = ProspectAccount.__table__.columns["status"].default
         assert default.arg == ProspectAccountStatus.SUGGESTED.value
         assert default.arg == ProspectAccountStatus.SUGGESTED  # StrEnum compares equal to its value

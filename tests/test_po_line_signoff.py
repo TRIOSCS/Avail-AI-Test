@@ -251,8 +251,8 @@ def test_verify_po_respects_dollar_limit(db_session: Session) -> None:
 
 
 def test_verify_po_unknown_amount_fails_closed_for_limited_approver(db_session: Session) -> None:
-    """A line with no unit_cost yet must NOT price as a free $0 PO — a limited
-    approver is rejected (fail closed); an unlimited approver still passes."""
+    """A line with no unit_cost yet must NOT price as a free $0 PO — a limited approver
+    is rejected (fail closed); an unlimited approver still passes."""
     capped = _make_user(db_session, can_approve_purchase_orders=True, purchase_order_approval_limit=Decimal("500"))
     unlimited = _make_user(db_session, can_approve_purchase_orders=True)
     plan = _make_plan(db_session, capped, so_status=SOVerificationStatus.PENDING.value)

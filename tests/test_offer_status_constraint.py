@@ -59,14 +59,16 @@ def test_constraint_has_no_phantom_values():
 
 
 def test_downgrade_leaves_earlier_migrations_constraints_in_place():
-    """downgrade() must not blanket-drop the six ``_ENSURE`` constraints: each is
-    already owned by an earlier migration (023 -> ck_nc_worker_status_singleton,
-    031 -> ck_ics_worker_status_singleton, 8c22bd2f6837 -> the other four) — 212 only
-    self-heals them when the squash left them missing. Unconditionally dropping them
-    on downgrade would remove pre-212 state on whichever DB (fresh vs. pre-squash
-    production) already had them from that earlier migration. Only the two
-    enum-lagging constraints 212 unconditionally replaces every run
-    (ck_buy_plans_status, ck_offers_status) may be dropped+restored here."""
+    """Downgrade() must not blanket-drop the six ``_ENSURE`` constraints: each is
+    already owned by an earlier migration (023 -> ck_nc_worker_status_singleton, 031 ->
+    ck_ics_worker_status_singleton, 8c22bd2f6837 -> the other four) — 212 only self-
+    heals them when the squash left them missing.
+
+    Unconditionally dropping them on downgrade would remove pre-212 state on whichever
+    DB (fresh vs. pre-squash production) already had them from that earlier migration.
+    Only the two enum-lagging constraints 212 unconditionally replaces every run
+    (ck_buy_plans_status, ck_offers_status) may be dropped+restored here.
+    """
     import ast
 
     tree = ast.parse(_MIG.read_text(encoding="utf-8"))

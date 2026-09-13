@@ -81,9 +81,8 @@ def test_resume_returns_pending_plan_to_pending(db_session, test_user):
 
 def test_resume_pending_plan_reopens_engine_request(db_session, test_user):
     """A PENDING plan halted, then resumed, must have a live REQUESTED BUY_PLAN
-    ApprovalRequest again — halt_plan cancels the open request, so resume must
-    reopen it or the plan sits PENDING forever with nothing for an approver to
-    decide."""
+    ApprovalRequest again — halt_plan cancels the open request, so resume must reopen it
+    or the plan sits PENDING forever with nothing for an approver to decide."""
     from sqlalchemy import select
 
     from app.constants import (

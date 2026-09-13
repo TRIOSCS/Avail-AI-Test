@@ -269,11 +269,13 @@ class TestCSRFExemptions:
         assert mw._url_is_exempt(URL(path="/v2/partials/requisitions/import-form")) is True
 
     def test_customer_lookup_exempt_pattern_anchored_with_dollar(self):
-        """The AI company-lookup exemption is a single exact POST route with no
-        sub-path, so its pattern must end in ``$`` like every other exact-route
-        sibling — otherwise a same-prefix path (e.g. a future
-        /v2/partials/customers/lookup-something route) would be over-matched and
-        exempted from CSRF too. Regression for the missing trailing ``$``."""
+        """The AI company-lookup exemption is a single exact POST route with no sub-
+        path, so its pattern must end in ``$`` like every other exact-route sibling —
+        otherwise a same-prefix path (e.g. a future /v2/partials/customers/lookup-
+        something route) would be over-matched and exempted from CSRF too.
+
+        Regression for the missing trailing ``$``.
+        """
         from starlette.datastructures import URL
         from starlette_csrf import CSRFMiddleware
 
@@ -285,10 +287,12 @@ class TestCSRFExemptions:
 
     def test_exact_route_exemptions_all_end_with_dollar(self):
         """Every exempt pattern for a route with no variable sub-path/token must be
-        anchored with ``$`` (matched via re.Pattern.match, so only the START is
-        anchored by default). The two tokenized public-confirm routes are the sole,
-        deliberate exceptions — they must match a token appended after the trailing
-        slash."""
+        anchored with ``$`` (matched via re.Pattern.match, so only the START is anchored
+        by default).
+
+        The two tokenized public-confirm routes are the sole, deliberate exceptions —
+        they must match a token appended after the trailing slash.
+        """
         from app.main import CSRF_EXEMPT_URLS
 
         prefix_by_design = {"/p/confirm/", "/po/confirm/"}

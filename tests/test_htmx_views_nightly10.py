@@ -515,6 +515,10 @@ class TestReviseQuoteHtmx:
         test_user: User,
     ):
         quote = _draft_quote(db_session, test_requisition, test_customer_site, test_user)
+        _quote_line(db_session, quote, mpn="LM317T")
+        _quote_line(db_session, quote, mpn="NE555P")
+        db_session.commit()
+
         resp = client.post(f"/v2/partials/quotes/{quote.id}/revise")
         assert resp.status_code == 200
         # New revised quote should exist
@@ -524,6 +528,14 @@ class TestReviseQuoteHtmx:
         assert len(revisions) == 1
         assert revisions[0].status == "draft"
         assert "R" in revisions[0].quote_number
+
+        # item 4: the parent's QuoteLine rows are cloned onto the revision, and the
+        # parent itself is marked REVISED (single canonical builder, shared with the
+        # JSON reopen route's revise=true path).
+        new_lines = db_session.query(QuoteLine).filter(QuoteLine.quote_id == revisions[0].id).all()
+        assert len(new_lines) == 2
+        db_session.refresh(quote)
+        assert quote.status == "revised"
 
     def test_revise_not_found(self, client: TestClient):
         resp = client.post("/v2/partials/quotes/99999/revise")

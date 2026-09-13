@@ -117,8 +117,8 @@ def test_mark_paid_rejects_none_amount(db_session: Session, approved_prepay: Pre
 
 
 def test_mark_paid_logs_warning_when_amount_differs_from_total(db_session: Session, approved_prepay: Prepayment):
-    """A paid_amount that diverges from the authorised total_incl_fees is still
-    allowed (a partial/adjusted wire is a real thing) but must be logged."""
+    """A paid_amount that diverges from the authorised total_incl_fees is still allowed
+    (a partial/adjusted wire is a real thing) but must be logged."""
     with patch("app.services.prepayment_service.logger") as mock_logger:
         mark_prepayment_paid(
             db_session,
@@ -278,8 +278,8 @@ def test_unmark_paid_reverts_and_remints_token(db_session: Session):
 
 def test_unmark_paid_refuses_on_blocked_plan_status(db_session: Session):
     """A paid prepayment on a plan that has since gone terminal (cancelled/halted/
-    completed/inbound) must not be reversible — that would resurrect a live
-    'approved' wire authorisation on a plan that can no longer act on it."""
+    completed/inbound) must not be reversible — that would resurrect a live 'approved'
+    wire authorisation on a plan that can no longer act on it."""
     from app.constants import BuyPlanStatus
 
     manager = _make_user(db_session, role="manager")

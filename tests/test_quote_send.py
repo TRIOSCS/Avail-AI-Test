@@ -246,8 +246,8 @@ async def test_service_advances_requisition_via_transition_helper(
 async def test_service_ignores_illegal_transition_and_leaves_status(
     db_session, test_requisition, test_customer_site, test_user
 ):
-    """A requisition status with no legal path to QUOTED (e.g. CANCELLED, which may
-    only reopen) must be logged and skipped, not force-set by a raw assignment."""
+    """A requisition status with no legal path to QUOTED (e.g. CANCELLED, which may only
+    reopen) must be logged and skipped, not force-set by a raw assignment."""
     from app.services.quote_send import send_quote_email
 
     test_requisition.status = RequisitionStatus.CANCELLED

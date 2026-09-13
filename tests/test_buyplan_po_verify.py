@@ -251,8 +251,8 @@ def test_confirm_po_payment_method_invalid_rejected(db_session, test_user, test_
 
 
 def test_confirm_po_rejects_missing_unit_cost(db_session, test_user, test_quote, test_requisition):
-    """A NULL unit_cost prices the PO at $0 and would pass any approver's dollar
-    limit — confirm_po must fail closed instead of cutting a free-money PO."""
+    """A NULL unit_cost prices the PO at $0 and would pass any approver's dollar limit —
+    confirm_po must fail closed instead of cutting a free-money PO."""
     from app.services.buyplan_workflow import confirm_po
 
     plan = _make_plan(db_session, test_user, test_quote, test_requisition)

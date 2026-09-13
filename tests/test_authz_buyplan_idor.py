@@ -17,6 +17,7 @@ Depends on: conftest.py fixtures (client, db_session, test_user, sales_user,
 from __future__ import annotations
 
 import uuid
+from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
@@ -58,6 +59,9 @@ def _make_line(db: Session, *, plan_id: int, **kw) -> BuyPlanLine:
     defaults = dict(
         buy_plan_id=plan_id,
         quantity=10,
+        # confirm_po fails closed on a NULL unit_cost (a $0 PO would pass every
+        # approver's dollar limit), so the fixture prices the line.
+        unit_cost=Decimal("1.00"),
         status=BuyPlanLineStatus.AWAITING_PO.value,
     )
     defaults.update(kw)

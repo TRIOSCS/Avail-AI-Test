@@ -158,6 +158,7 @@ class TestSearchRun:
             data={"mpn": ""},
         )
         assert resp.status_code == 200
+        assert "LM317T" in resp.text
 
     def test_run_mpn_from_query_param(self, client: TestClient):
         resp = client.post("/v2/partials/search/run?mpn=TL071&requirement_id=0", data={})
@@ -193,6 +194,7 @@ class TestSearchRun:
             data={"mpn": ""},
         )
         assert resp.status_code == 200
+        assert "LM317T" in resp.text
 
 
 # ── Search Stream ownership (search_id must be bound to the launching user) ────
@@ -233,9 +235,7 @@ class TestSearchStreamOwnership:
             await search_stream(request=None, search_id=search_id, user=admin_user)
         assert exc_info.value.status_code == 404
 
-    async def test_launching_user_can_subscribe_to_own_search(
-        self, client: TestClient, db_session: Session, test_user
-    ):
+    async def test_launching_user_can_subscribe_to_own_search(self, client: TestClient, db_session: Session, test_user):
         from app.routers.htmx.search_views import search_stream
 
         run_resp = client.post("/v2/partials/search/run", data={"mpn": "NE555"})

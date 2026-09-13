@@ -85,6 +85,22 @@ class TestApprovalsRouterCoverage:
             resp = client.post(f"/v2/approvals/requests/{ar.id}/decision", data={"action": "approve"})
         assert resp.status_code == 403
 
+    def test_post_decision_value_error(self, db_session: Session):
+        """ValueError in svc_decide (e.g. already-decided request) → 400 via a real
+        HTTPException, not a bare JSONResponse (item 12)."""
+        user = _make_user(db_session)
+        ar = _make_approval_request(db_session, user)
+        db_session.commit()
+
+        client = _get_client(db_session, user)
+        with patch("app.routers.approvals.svc_decide", side_effect=ValueError("already decided")):
+            resp = client.post(f"/v2/approvals/requests/{ar.id}/decision", data={"action": "approve"})
+        assert resp.status_code == 400
+        body = resp.json()
+        assert body["error"] == "already decided"
+        assert body["status_code"] == 400
+        assert "request_id" in body
+
     def test_post_reassign_user_not_found(self, db_session: Session):
         """Reassigning to a nonexistent user → 404."""
         user = _make_user(db_session)
@@ -107,6 +123,12 @@ class TestApprovalsRouterCoverage:
         with patch("app.routers.approvals.svc_reassign", side_effect=ValueError("bad state")):
             resp = client.post(f"/v2/approvals/requests/{ar.id}/reassign", data={"to_user_id": target.id})
         assert resp.status_code == 400
+        # Item 12: a real HTTPException (with the standard error envelope), not a
+        # bare JSONResponse({"error": ...}) missing status_code/request_id.
+        body = resp.json()
+        assert body["error"] == "bad state"
+        assert body["status_code"] == 400
+        assert "request_id" in body
 
     def test_post_cancel_value_error(self, db_session: Session):
         """svc_cancel raises ValueError → 400."""
@@ -118,6 +140,11 @@ class TestApprovalsRouterCoverage:
         with patch("app.routers.approvals.svc_cancel", side_effect=ValueError("already resolved")):
             resp = client.post(f"/v2/approvals/requests/{ar.id}/cancel")
         assert resp.status_code == 400
+        # Item 12: standard error envelope, not a bare JSONResponse.
+        body = resp.json()
+        assert body["error"] == "already resolved"
+        assert body["status_code"] == 400
+        assert "request_id" in body
 
     def test_list_requests_status_filter(self, db_session: Session):
         """list_requests filters by status when provided."""

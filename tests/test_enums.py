@@ -102,8 +102,11 @@ def test_enum_is_str():
 def test_user_model_role_comment_lists_every_role():
     """app/models/auth.py User.role carries an inline `# buyer | sales | ...` comment
     documenting the allowed values — it must list every UserRole member (it silently
-    dropped AGENT/"agent" for months). Reads the source line rather than hardcoding
-    the list so the two can never drift apart again undetected."""
+    dropped AGENT/"agent" for months).
+
+    Reads the source line rather than hardcoding the list so the two can never drift
+    apart again undetected.
+    """
     import inspect
 
     from app.models import auth as auth_module

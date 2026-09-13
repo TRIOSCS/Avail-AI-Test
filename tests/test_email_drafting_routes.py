@@ -138,7 +138,10 @@ def test_send_reply_rejects_empty_body(client, db_session, test_requisition):
 def test_send_reply_graph_failure_returns_honest_failure_card(client, db_session, test_requisition, monkeypatch):
     """When the Graph sendMail call raises (swallowed), the route must NOT render the
     normal reviewed response card — the user would believe the vendor was emailed when
-    nothing went out. vr.status must stay unchanged (P1 fix)."""
+    nothing went out.
+
+    vr.status must stay unchanged (P1 fix).
+    """
     monkeypatch.setenv("TESTING", "0")
     vr = _make_response(db_session, test_requisition.id)
 
