@@ -1,7 +1,7 @@
 anyio==4.13.0
     # via
     #   -c requirements.txt
-    #   starlette
+    #   schemathesis
 ast-serialize==0.6.0
     # via mypy
 asttokens==3.0.1
@@ -78,7 +78,7 @@ hypothesis==6.155.2
     # via
     #   hypothesis-graphql
     #   schemathesis
-hypothesis-graphql==0.13.1
+hypothesis-graphql==0.13.2
     # via schemathesis
 identify==2.6.19
     # via pre-commit
@@ -101,7 +101,7 @@ itsdangerous==2.2.0
     #   -r requirements-dev.in
 jedi==0.20.0
     # via ipython
-jsonschema-rs==0.51.0
+jsonschema-rs==0.55.1
     # via schemathesis
 librt==0.13.0
     # via mypy
@@ -245,7 +245,6 @@ requests==2.34.2
     #   pytest-base-url
     #   responses
     #   schemathesis
-    #   starlette-testclient
 responses==0.26.3
     # via -r requirements-dev.in
 rich==15.0.0
@@ -253,9 +252,9 @@ rich==15.0.0
     #   bandit
     #   pip-audit
     #   schemathesis
-ruff==0.16.6
+ruff==0.16.7
     # via -r requirements-dev.in
-schemathesis==4.25.2
+schemathesis==4.26.1
     # via -r requirements-dev.in
 six==1.17.0
     # via python-dateutil
@@ -269,12 +268,6 @@ sqlalchemy[mypy]==2.0.52
     #   -r requirements-dev.in
 stack-data==0.6.3
     # via ipython
-starlette==1.6.0
-    # via
-    #   -c requirements.txt
-    #   starlette-testclient
-starlette-testclient==0.4.1
-    # via schemathesis
 stevedore==5.8.0
     # via bandit
 text-unidecode==1.3
