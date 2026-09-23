@@ -311,6 +311,39 @@ def test_incremental_dedup_existing_vendor():
     assert updated_cards[0]["offer_count"] == 2
 
 
+def test_hit_dedup_key_collapses_vendor_suffix_variants():
+    """One vendor under two spellings is ONE hit — the key the cards already use.
+
+    "Arrow Electronics" and "Arrow Electronics, Inc." normalize to the same vendor, so
+    _flatten_dedupe_filter_junk must emit a single hit. Under the old raw .lower() key
+    both survived: the board merged them into one card while the persistence path wrote
+    two Sighting rows carrying an identical vendor_name_normalized.
+    """
+    from app.search_service import _flatten_dedupe_filter_junk, _hit_dedup_key
+
+    a = {"vendor_name": "Arrow Electronics", "mpn_matched": "LM317T", "unit_price": 0.45, "qty_available": 1000}
+    b = {"vendor_name": "Arrow Electronics, Inc.", "mpn_matched": "LM317T", "unit_price": 0.48, "qty_available": 500}
+    c = {"vendor_name": "Mouser", "mpn_matched": "LM317T", "unit_price": 0.50, "qty_available": 2000}
+
+    assert _hit_dedup_key(a) == _hit_dedup_key(b)
+    assert _hit_dedup_key(a) != _hit_dedup_key(c)
+
+    out = _flatten_dedupe_filter_junk([a, b, c])
+    assert len(out) == 2
+    assert out[0]["vendor_name"] == "Arrow Electronics"  # first spelling wins
+
+
+def test_hit_dedup_key_keeps_distinct_skus_apart():
+    """Dedup is per (vendor, mpn, sku) — one vendor's two SKUs stay two hits."""
+    from app.search_service import _flatten_dedupe_filter_junk
+
+    rows = [
+        {"vendor_name": "Arrow Electronics", "mpn_matched": "LM317T", "vendor_sku": "SKU-1"},
+        {"vendor_name": "Arrow Electronics, Inc.", "mpn_matched": "LM317T", "vendor_sku": "SKU-2"},
+    ]
+    assert len(_flatten_dedupe_filter_junk(rows)) == 2
+
+
 # ── Streaming search tests ─────────────────────────────────────────────
 
 
@@ -1096,3 +1129,63 @@ class TestStreamSearchMpnNonOkChips:
         # connectors to run.
         status_events = [e for e in published_events if e["event"] == "source-status"]
         assert len(status_events) == 0
+
+
+@pytest.mark.asyncio
+async def test_stream_search_persists_one_sighting_per_rendered_card(db_session):
+    """A streaming run writes exactly the vendors it rendered — no suffix duplicates.
+
+    Regression: the card layer deduped on normalize_vendor_name while the persistence
+    path deduped on the raw lowercased name, so a vendor returned under two spellings
+    showed as one card but landed in the part dossier as two Sighting rows.
+    """
+    from app.models.sourcing import Sighting
+    from app.search_service import stream_search_mpn
+
+    published_events, mock_publish = _make_event_collector()
+
+    with (
+        patch("app.search_service.broker", create=True) as mock_broker,
+        patch("app.search_service._build_connectors") as mock_build,
+        patch("app.search_service.SessionLocal", lambda: db_session),
+        patch("app.search_service.engine", db_session.get_bind()),
+    ):
+        mock_broker.publish = mock_publish
+
+        fake_connector = MagicMock()
+        fake_connector.source_name = "nexar"
+        fake_connector.search = AsyncMock(
+            return_value=[
+                {
+                    "vendor_name": "Arrow Electronics",
+                    "mpn_matched": "LM317T",
+                    "unit_price": 0.45,
+                    "qty_available": 1000,
+                    "source_type": "nexar",
+                },
+                {
+                    "vendor_name": "Arrow Electronics, Inc.",
+                    "mpn_matched": "LM317T",
+                    "unit_price": 0.48,
+                    "qty_available": 500,
+                    "source_type": "nexar",
+                },
+                {
+                    "vendor_name": "Mouser",
+                    "mpn_matched": "LM317T",
+                    "unit_price": 0.50,
+                    "qty_available": 2000,
+                    "source_type": "nexar",
+                },
+            ]
+        )
+        mock_build.return_value = ([fake_connector], {}, set())
+
+        await stream_search_mpn("dedup-search-id", "LM317T")
+
+    cards_html = "".join(e["data"] for e in published_events if e["event"] == "results")
+    assert cards_html.count('id="vendor-card-') == 2
+
+    rows = db_session.query(Sighting).filter(Sighting.requirement_id.is_(None)).all()
+    assert len(rows) == 2
+    assert sorted(r.vendor_name_normalized for r in rows) == ["arrow electronics", "mouser"]

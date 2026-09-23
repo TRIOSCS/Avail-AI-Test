@@ -1706,9 +1706,16 @@ def _hit_dedup_key(r: dict) -> tuple[str, str, str]:
     The single definition shared by ``_flatten_dedupe_filter_junk``, the seen-set
     rebuild in ``_fetch_fresh``, and the AI-results merge — so cross-set dedup
     between those passes can never drift.
+
+    The vendor component uses ``normalize_vendor_name`` (suffix-stripped), the SAME
+    key the card layer's ``_incremental_dedup`` uses. A bare ``.lower()`` let one
+    vendor under two spellings ("Arrow Electronics" / "Arrow Electronics, Inc.")
+    survive as two hits: the board merged them into one card while
+    ``_persist_interactive_sightings`` wrote two Sighting rows with an identical
+    ``vendor_name_normalized``, so the part dossier listed the vendor twice per run.
     """
     return (
-        r.get("vendor_name", "").lower(),
+        normalize_vendor_name(r.get("vendor_name", "")),
         normalize_mpn_key(r.get("mpn_matched", "")),
         str(r.get("vendor_sku") or "").lower(),
     )
