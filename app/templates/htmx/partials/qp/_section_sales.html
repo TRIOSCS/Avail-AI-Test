@@ -13,6 +13,8 @@
               Swaps into its own #qp-section-sales wrapper.
 #}
 {% set locked = qp.sales_section_reviewed_at is not none %}
+{% set draft = draft|default({}) %}
+{% set src_labels = {'deal': 'from deal', 'prior': 'prior QP', 'ai': 'AI — verify'} %}
 
 {# One field roster drives BOTH branches (editable form + read-only grid).
    Each entry: (name, kind, label, ro_label) — kind picks the edit widget
@@ -74,31 +76,62 @@
   </div>
 
   {% else %}
-  {# ── Editable grid: one form PATCHes the whole section on any field change ── #}
-  <form hx-patch="/v2/qp/{{ qp.id }}/sales"
-        hx-target="#qp-section-sales"
-        hx-swap="outerHTML"
-        hx-trigger="change"
+  {# ── AI-draft toolbar ── #}
+  <div x-data="{ paste: false }" class="mb-2 flex flex-wrap items-center gap-2">
+    <button type="button"
+            hx-post="/v2/qp/{{ qp.id }}/draft/sales" hx-target="#qp-section-sales" hx-swap="outerHTML"
+            data-loading-disable class="btn btn-secondary btn-sm">✦ Draft with AI</button>
+    <button type="button" @click="paste = !paste" class="text-xs text-accent-600 hover:underline">from a pasted TSO/PO…</button>
+    <div x-show="paste" x-cloak class="w-full">
+      <form hx-post="/v2/qp/{{ qp.id }}/draft/sales" hx-target="#qp-section-sales" hx-swap="outerHTML">
+        <textarea name="pasted_text" rows="3" placeholder="Paste the customer TSO / PO / quote…"
+                  class="w-full rounded border-gray-300 text-xs"></textarea>
+        <button type="submit" data-loading-disable class="btn btn-secondary btn-sm mt-1">✦ Draft from paste</button>
+      </form>
+    </div>
+  </div>
+
+  {% if draft %}
+  {# Amber review banner — while a draft is shown the section form does NOT auto-save; the
+     only write path is Accept & save, so nothing persists until the human confirms. #}
+  <div class="mb-2 rounded border border-amber-300 bg-amber-50 p-2">
+    <p class="text-xs font-semibold text-amber-800">AI drafted {{ draft|length }} empty field{{ 's' if draft|length != 1 }} from the deal / prior QPs — verify each, then save. Nothing is written yet.</p>
+    <div class="mt-1 flex gap-2">
+      <button type="button"
+              hx-patch="/v2/qp/{{ qp.id }}/sales" hx-include="#qp-sales-form"
+              hx-target="#qp-section-sales" hx-swap="outerHTML"
+              data-loading-disable class="btn btn-primary btn-sm">Accept &amp; save</button>
+      <button type="button"
+              hx-get="/v2/qp/{{ qp.id }}/section/sales" hx-target="#qp-section-sales" hx-swap="outerHTML"
+              class="btn btn-secondary btn-sm">Discard</button>
+    </div>
+  </div>
+  {% endif %}
+
+  {# ── Editable grid: one form PATCHes the whole section on change — UNLESS a draft is under
+     review, when auto-save is suppressed (Accept & save is the only writer). ── #}
+  <form id="qp-sales-form"
+        {% if not draft %}hx-patch="/v2/qp/{{ qp.id }}/sales" hx-target="#qp-section-sales" hx-swap="outerHTML" hx-trigger="change"{% endif %}
         class="grid grid-cols-1 gap-3 md:grid-cols-2">
-    {% macro txt(name, label, value) %}
+    {% macro txt(name, label, value, src) %}
     <label class="block text-xs">
-      <span class="text-gray-600">{{ label }}</span>
+      <span class="text-gray-600">{{ label }}{% if src %} <span class="ml-1 rounded bg-amber-100 px-1 text-[11px] font-medium text-amber-700">{{ src }}</span>{% endif %}</span>
       <input type="text" name="{{ name }}" value="{{ value if value is not none else '' }}"
-             class="mt-0.5 w-full rounded border-gray-300 text-xs">
+             class="mt-0.5 w-full rounded text-xs {{ 'border-amber-300 bg-amber-50' if src else 'border-gray-300' }}">
     </label>
     {% endmacro %}
-    {% macro num(name, label, value) %}
+    {% macro num(name, label, value, src) %}
     <label class="block text-xs">
-      <span class="text-gray-600">{{ label }}</span>
+      <span class="text-gray-600">{{ label }}{% if src %} <span class="ml-1 rounded bg-amber-100 px-1 text-[11px] font-medium text-amber-700">{{ src }}</span>{% endif %}</span>
       <input type="number" name="{{ name }}" value="{{ value if value is not none else '' }}"
-             class="mt-0.5 w-full rounded border-gray-300 text-xs">
+             class="mt-0.5 w-full rounded text-xs {{ 'border-amber-300 bg-amber-50' if src else 'border-gray-300' }}">
     </label>
     {% endmacro %}
-    {% macro area(name, label, value) %}
+    {% macro area(name, label, value, src) %}
     <label class="block text-xs md:col-span-2">
-      <span class="text-gray-600">{{ label }}</span>
+      <span class="text-gray-600">{{ label }}{% if src %} <span class="ml-1 rounded bg-amber-100 px-1 text-[11px] font-medium text-amber-700">{{ src }}</span>{% endif %}</span>
       <textarea name="{{ name }}" rows="2"
-                class="mt-0.5 w-full rounded border-gray-300 text-xs">{{ value if value is not none else '' }}</textarea>
+                class="mt-0.5 w-full rounded text-xs {{ 'border-amber-300 bg-amber-50' if src else 'border-gray-300' }}">{{ value if value is not none else '' }}</textarea>
     </label>
     {% endmacro %}
     {% macro yn(name, label, value) %}
@@ -112,10 +145,13 @@
     </label>
     {% endmacro %}
     {% for name, kind, label, _ro_label in sales_fields %}
+    {% set d = draft.get(name) %}
+    {% set val = d.value if d else qp|attr(name) %}
+    {% set src = src_labels.get(d.source) if d else none %}
     {% if kind == 'yn' %}{{ yn(name, label, qp|attr(name)) }}
-    {% elif kind == 'num' %}{{ num(name, label, qp|attr(name)) }}
-    {% elif kind == 'area' %}{{ area(name, label, qp|attr(name)) }}
-    {% else %}{{ txt(name, label, qp|attr(name)) }}{% endif %}
+    {% elif kind == 'num' %}{{ num(name, label, val, src) }}
+    {% elif kind == 'area' %}{{ area(name, label, val, src) }}
+    {% else %}{{ txt(name, label, val, src) }}{% endif %}
     {% endfor %}
   </form>
 

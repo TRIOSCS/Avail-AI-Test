@@ -413,8 +413,14 @@ def _section_approved(qp: QualityPlan, gate_type: str) -> bool:
     return qp.purchasing_section_reviewed_at is not None
 
 
-def _render_sales_section(request: Request, db: Session, qp: QualityPlan, user) -> HTMLResponse:
-    """Render the refreshed Sales section partial."""
+def _render_sales_section(
+    request: Request, db: Session, qp: QualityPlan, user, *, draft: dict | None = None
+) -> HTMLResponse:
+    """Render the refreshed Sales section partial.
+
+    *draft* (optional) carries AI-suggested values for empty fields — prefilled behind
+    an amber banner, never written until accepted.
+    """
     return template_response(
         "htmx/partials/qp/_section_sales.html",
         {
@@ -422,12 +428,18 @@ def _render_sales_section(request: Request, db: Session, qp: QualityPlan, user) 
             "user": user,
             "qp": qp,
             "sales_errors": validate_section(qp, ApprovalGateType.QP_SALES),
+            "draft": draft or {},
         },
     )
 
 
-def _render_purchasing_section(request: Request, db: Session, qp: QualityPlan, user) -> HTMLResponse:
-    """Render the refreshed Purchasing section partial."""
+def _render_purchasing_section(
+    request: Request, db: Session, qp: QualityPlan, user, *, draft: dict | None = None
+) -> HTMLResponse:
+    """Render the refreshed Purchasing section partial (see _render_sales_section re:
+
+    draft).
+    """
     return template_response(
         "htmx/partials/qp/_section_purchasing.html",
         {
@@ -435,6 +447,7 @@ def _render_purchasing_section(request: Request, db: Session, qp: QualityPlan, u
             "user": user,
             "qp": qp,
             "purchasing_errors": validate_section(qp, ApprovalGateType.QP_PURCHASING),
+            "draft": draft or {},
         },
     )
 
@@ -504,6 +517,59 @@ async def qp_patch_purchasing(
                 setattr(qp, field, _coerce(kind, form.get(field)))
         db.commit()
     qp = _load_qp_for_edit(db, qp_id, user)
+    return _render_purchasing_section(request, db, qp, user)
+
+
+@router.post("/v2/qp/{qp_id}/draft/{section}", response_class=HTMLResponse)
+async def qp_draft_section(
+    request: Request,
+    qp_id: int,
+    section: str,
+    pasted_text: str = Form(""),
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+) -> HTMLResponse:
+    """Draft the empty free-text fields of a QP section from the deal (+ optional pasted
+    customer TSO/PO), for HUMAN review.
+
+    Suggest-only: re-renders the section with the suggestions prefilled behind an amber
+    "AI — verify" banner; nothing is written until the human clicks Accept (the existing
+    section PATCH). A no-op on an already-reviewed (locked) section. A pasted-text AI call
+    is per-user rate-limited and falls through to deterministic-only on limit/failure.
+    """
+    if section not in ("sales", "purchasing"):
+        raise HTTPException(status_code=404, detail="Unknown QP section")
+    qp = _load_qp_for_edit(db, qp_id, user)
+    gate = ApprovalGateType.QP_SALES if section == "sales" else ApprovalGateType.QP_PURCHASING
+    draft: dict = {}
+    if not _section_approved(qp, gate):
+        from ..rate_limit import check_rate_limit
+        from ..services.qp_draft_service import build_section_draft, extract_qp_fields_from_paste
+
+        paste_values = None
+        if pasted_text.strip() and check_rate_limit(user.id, "qp_draft_paste", limit=10, window_seconds=60):
+            paste_values = await extract_qp_fields_from_paste(pasted_text, section)
+        draft = build_section_draft(db, qp, section, paste_values=paste_values)
+    if section == "sales":
+        return _render_sales_section(request, db, qp, user, draft=draft)
+    return _render_purchasing_section(request, db, qp, user, draft=draft)
+
+
+@router.get("/v2/qp/{qp_id}/section/{section}", response_class=HTMLResponse)
+async def qp_section(
+    request: Request,
+    qp_id: int,
+    section: str,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+) -> HTMLResponse:
+    """Render one QP section partial CLEAN (no draft) — used to Discard a draft without
+    writing anything."""
+    if section not in ("sales", "purchasing"):
+        raise HTTPException(status_code=404, detail="Unknown QP section")
+    qp = _load_qp_for_edit(db, qp_id, user)
+    if section == "sales":
+        return _render_sales_section(request, db, qp, user)
     return _render_purchasing_section(request, db, qp, user)
 
 

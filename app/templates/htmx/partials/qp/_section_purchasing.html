@@ -13,6 +13,8 @@
               Swaps into its own #qp-section-purchasing wrapper.
 #}
 {% set locked = qp.purchasing_section_reviewed_at is not none %}
+{% set draft = draft|default({}) %}
+{% set src_labels = {'deal': 'from deal', 'prior': 'prior QP', 'ai': 'AI — verify'} %}
 
 <div id="qp-section-purchasing">
   {% if locked %}
@@ -54,23 +56,51 @@
   </div>
 
   {% else %}
-  <form hx-patch="/v2/qp/{{ qp.id }}/purchasing"
-        hx-target="#qp-section-purchasing"
-        hx-swap="outerHTML"
-        hx-trigger="change"
+  {# ── AI-draft toolbar ── #}
+  <div x-data="{ paste: false }" class="mb-2 flex flex-wrap items-center gap-2">
+    <button type="button"
+            hx-post="/v2/qp/{{ qp.id }}/draft/purchasing" hx-target="#qp-section-purchasing" hx-swap="outerHTML"
+            data-loading-disable class="btn btn-secondary btn-sm">✦ Draft with AI</button>
+    <button type="button" @click="paste = !paste" class="text-xs text-accent-600 hover:underline">from a pasted TSO/PO…</button>
+    <div x-show="paste" x-cloak class="w-full">
+      <form hx-post="/v2/qp/{{ qp.id }}/draft/purchasing" hx-target="#qp-section-purchasing" hx-swap="outerHTML">
+        <textarea name="pasted_text" rows="3" placeholder="Paste the customer TSO / PO / quote…"
+                  class="w-full rounded border-gray-300 text-xs"></textarea>
+        <button type="submit" data-loading-disable class="btn btn-secondary btn-sm mt-1">✦ Draft from paste</button>
+      </form>
+    </div>
+  </div>
+
+  {% if draft %}
+  <div class="mb-2 rounded border border-amber-300 bg-amber-50 p-2">
+    <p class="text-xs font-semibold text-amber-800">AI drafted {{ draft|length }} empty field{{ 's' if draft|length != 1 }} from the deal / prior QPs — verify each, then save. Nothing is written yet.</p>
+    <div class="mt-1 flex gap-2">
+      <button type="button"
+              hx-patch="/v2/qp/{{ qp.id }}/purchasing" hx-include="#qp-purchasing-form"
+              hx-target="#qp-section-purchasing" hx-swap="outerHTML"
+              data-loading-disable class="btn btn-primary btn-sm">Accept &amp; save</button>
+      <button type="button"
+              hx-get="/v2/qp/{{ qp.id }}/section/purchasing" hx-target="#qp-section-purchasing" hx-swap="outerHTML"
+              class="btn btn-secondary btn-sm">Discard</button>
+    </div>
+  </div>
+  {% endif %}
+
+  <form id="qp-purchasing-form"
+        {% if not draft %}hx-patch="/v2/qp/{{ qp.id }}/purchasing" hx-target="#qp-section-purchasing" hx-swap="outerHTML" hx-trigger="change"{% endif %}
         class="grid grid-cols-1 gap-3 md:grid-cols-2">
-    {% macro txt(name, label, value) %}
+    {% macro txt(name, label, value, src) %}
     <label class="block text-xs">
-      <span class="text-gray-600">{{ label }}</span>
+      <span class="text-gray-600">{{ label }}{% if src %} <span class="ml-1 rounded bg-amber-100 px-1 text-[11px] font-medium text-amber-700">{{ src }}</span>{% endif %}</span>
       <input type="text" name="{{ name }}" value="{{ value if value is not none else '' }}"
-             class="mt-0.5 w-full rounded border-gray-300 text-xs">
+             class="mt-0.5 w-full rounded text-xs {{ 'border-amber-300 bg-amber-50' if src else 'border-gray-300' }}">
     </label>
     {% endmacro %}
-    {% macro area(name, label, value) %}
+    {% macro area(name, label, value, src) %}
     <label class="block text-xs md:col-span-2">
-      <span class="text-gray-600">{{ label }}</span>
+      <span class="text-gray-600">{{ label }}{% if src %} <span class="ml-1 rounded bg-amber-100 px-1 text-[11px] font-medium text-amber-700">{{ src }}</span>{% endif %}</span>
       <textarea name="{{ name }}" rows="2"
-                class="mt-0.5 w-full rounded border-gray-300 text-xs">{{ value if value is not none else '' }}</textarea>
+                class="mt-0.5 w-full rounded text-xs {{ 'border-amber-300 bg-amber-50' if src else 'border-gray-300' }}">{{ value if value is not none else '' }}</textarea>
     </label>
     {% endmacro %}
     {% macro yn(name, label, value) %}
@@ -83,16 +113,22 @@
       </select>
     </label>
     {% endmacro %}
-    {{ txt('purchasing_po_number', 'Purchase Order #', qp.purchasing_po_number) }}
-    {{ txt('purchasing_condition', 'Condition', qp.purchasing_condition) }}
-    {{ txt('purchasing_product_commodity', 'Product Commodity', qp.purchasing_product_commodity) }}
-    {{ area('purchasing_fw_hw_rev', 'FW / HW / REV / Date & Week Codes', qp.purchasing_fw_hw_rev) }}
+    {% macro fld(name, kind, label) %}
+      {% set d = draft.get(name) %}
+      {% set val = d.value if d else qp|attr(name) %}
+      {% set src = src_labels.get(d.source) if d else none %}
+      {% if kind == 'area' %}{{ area(name, label, val, src) }}{% else %}{{ txt(name, label, val, src) }}{% endif %}
+    {% endmacro %}
+    {{ fld('purchasing_po_number', 'txt', 'Purchase Order #') }}
+    {{ fld('purchasing_condition', 'txt', 'Condition') }}
+    {{ fld('purchasing_product_commodity', 'txt', 'Product Commodity') }}
+    {{ fld('purchasing_fw_hw_rev', 'area', 'FW / HW / REV / Date & Week Codes') }}
     {{ yn('purchasing_testing_required', 'Testing Required', qp.purchasing_testing_required) }}
-    {{ txt('purchasing_testing_option', 'Testing Option', qp.purchasing_testing_option) }}
-    {{ txt('purchasing_routing_prescreening_whs', 'Routing / Prescreening WHS', qp.purchasing_routing_prescreening_whs) }}
-    {{ area('purchasing_packaging', 'Packaging', qp.purchasing_packaging) }}
+    {{ fld('purchasing_testing_option', 'txt', 'Testing Option') }}
+    {{ fld('purchasing_routing_prescreening_whs', 'txt', 'Routing / Prescreening WHS') }}
+    {{ fld('purchasing_packaging', 'area', 'Packaging') }}
     {{ yn('purchasing_tpo_ship_complete', 'Will TPO Ship Complete', qp.purchasing_tpo_ship_complete) }}
-    {{ area('purchasing_tpo_notes', 'TPO Notes / Shipping Schedule', qp.purchasing_tpo_notes) }}
+    {{ fld('purchasing_tpo_notes', 'area', 'TPO Notes / Shipping Schedule') }}
   </form>
 
   {% if purchasing_errors %}
