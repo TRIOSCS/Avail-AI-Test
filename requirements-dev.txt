@@ -71,7 +71,6 @@ greenlet==3.5.1
     # via
     #   -c requirements.txt
     #   playwright
-    #   sqlalchemy
 harfile==0.5.0
     # via schemathesis
 hypothesis==6.155.2
@@ -263,13 +262,13 @@ sortedcontainers==2.4.0
     # via
     #   cyclonedx-python-lib
     #   hypothesis
-sqlalchemy[mypy]==2.0.52
+sqlalchemy[mypy]==2.1.0
     # via
     #   -c requirements.txt
     #   -r requirements-dev.in
 stack-data==0.6.3
     # via ipython
-starlette==1.6.0
+starlette==1.7.0
     # via
     #   -c requirements.txt
     #   starlette-testclient
@@ -289,6 +288,8 @@ traitlets==5.15.1
     #   matplotlib-inline
 types-cffi==2.0.0.20260518
     # via types-pyopenssl
+types-greenlet==3.5.0.20260518
+    # via sqlalchemy
 types-pyopenssl==24.1.0.20240722
     # via types-redis
 types-redis==4.6.0.20241004
