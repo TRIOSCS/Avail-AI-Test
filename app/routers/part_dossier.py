@@ -222,7 +222,12 @@ async def dossier_market(
     900s). ``refresh=1`` (the "↻ Refresh market" button) skips the cache so the
     connector sweep re-runs.
     """
-    from ..search_service import _get_search_redis, compute_market_baseline, get_market_source_health
+    from ..search_service import (
+        _get_search_redis,
+        compute_market_baseline,
+        compute_market_summary,
+        get_market_source_health,
+    )
 
     display_mpn = mpn.strip().upper()
     key = normalize_mpn_key(mpn)
@@ -255,6 +260,7 @@ async def dossier_market(
         market_health = None
 
     market_baseline = compute_market_baseline(cached_rows) if cached_rows else None
+    market_summary = compute_market_summary(cached_rows) if cached_rows else None
 
     ctx = _ctx(request, user)
     ctx.update(
@@ -264,6 +270,7 @@ async def dossier_market(
             "cached_rows": cached_rows,
             "market_health": market_health,
             "market_baseline": market_baseline,
+            "market_summary": market_summary,
         }
     )
     return template_response("htmx/partials/search/dossier_market.html", ctx)

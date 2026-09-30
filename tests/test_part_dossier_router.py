@@ -10,6 +10,7 @@ Depends on: app/routers/part_dossier.py, app/routers/htmx_views.py, MaterialCard
 """
 
 import json
+import re
 from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
@@ -620,3 +621,492 @@ class TestMarketBaselineStripRender:
         assert resp.status_code == 200
         assert "Franchise baseline" not in resp.text
         assert "/v2/partials/search/run" in resp.text  # SSE frame fires instead
+
+
+# ── Market-summary KPI tile strip — helper unit tests + endpoint render ───
+
+
+def _production_shaped_rows(raw_hits: list[dict]) -> list[dict]:
+    """Build market rows exactly the way stream_search_mpn builds ``accumulated``.
+
+    Each raw connector hit goes through the REAL ``_score_raw_hit`` (which stamps
+    confidence_pct / confidence_color / score / lead_quality ...) and then the REAL
+    ``_incremental_dedup`` (which adds sub_offers / offer_count / sources_found and
+    merges a repeat vendor+MPN into one row). No hand-built keys, so a change to the
+    real row shape surfaces here instead of hiding behind a fixture.
+    """
+    from app.search_service import _incremental_dedup, _score_raw_hit
+
+    accumulated: list[dict] = []
+    for hit in raw_hits:
+        _incremental_dedup([_score_raw_hit(hit, {})], accumulated)
+    return accumulated
+
+
+def _tile_values(html: str) -> dict[str, str]:
+    """Map each KPI tile label to its rendered value (``{"Vendors": "2", ...}``).
+
+    market_summary.html emits, per tile, a ``<span class="block ...">value</span>``
+    immediately followed by a ``<span class="block ...">label</span>``; matching on the
+    six known labels keeps this robust to other ``block`` spans elsewhere in the body.
+    """
+    pairs = re.findall(
+        r'<span class="block[^"]*">\s*([^<]*?)\s*</span>\s*'
+        r'<span class="block[^"]*">\s*(Vendors|Offers|Authorized|High confidence|Best price|Total stock)\s*</span>',
+        html,
+    )
+    return {label: value for value, label in pairs}
+
+
+class TestComputeMarketSummary:
+    """Unit tests for compute_market_summary — no DB, no HTTP, no SSE.
+
+    Whole-result-set KPI counts for the tile strip (market_summary.html), on plain dicts
+    (same schema as cached_rows / vendor_card.html) plus rows built by the real
+    streaming pipeline (_score_raw_hit -> _incremental_dedup).
+    """
+
+    def test_empty_input_returns_zeros(self):
+        from app.search_service import compute_market_summary
+
+        result = compute_market_summary([])
+        assert result == {
+            "vendors": 0,
+            "offers": 0,
+            "authorized": 0,
+            "high_confidence": 0,
+            "best_price": None,
+            "total_stock": None,
+        }
+
+    def test_counts_vendors_authorized_and_high_confidence(self):
+        from app.search_service import compute_market_summary
+
+        rows = [
+            {"is_authorized": True, "confidence_color": "green", "unit_price": 2.0, "qty_available": 100},
+            {"is_authorized": False, "confidence_color": "green", "unit_price": 1.5, "qty_available": 50},
+            {"is_authorized": False, "confidence_color": "amber", "unit_price": None, "qty_available": None},
+        ]
+        result = compute_market_summary(rows)
+        assert result["vendors"] == 3
+        assert result["authorized"] == 1
+        assert result["high_confidence"] == 2
+        assert result["best_price"] == 1.5
+        assert result["total_stock"] == 150
+
+    def test_offers_use_offer_count_then_sub_offers_then_one(self):
+        from app.search_service import compute_market_summary
+
+        rows = [
+            {"offer_count": 4},  # explicit count wins
+            {"sub_offers": [{}, {}]},  # falls back to len(sub_offers)
+            {},  # bare row still counts as one offer
+        ]
+        assert compute_market_summary(rows)["offers"] == 7
+
+    def test_best_price_ignores_zero_and_none(self):
+        from app.search_service import compute_market_summary
+
+        rows = [{"unit_price": 0}, {"unit_price": None}, {"unit_price": 3.25}]
+        assert compute_market_summary(rows)["best_price"] == 3.25
+
+    def test_no_known_qty_total_stock_none(self):
+        from app.search_service import compute_market_summary
+
+        rows = [{"unit_price": 1.0}, {"unit_price": 2.0}]
+        assert compute_market_summary(rows)["total_stock"] is None
+
+    def test_best_price_found_inside_sub_offers_when_head_is_pricier(self):
+        """Dedup keeps the best-SCORED offer at the row head, not the cheapest, so the
+        lowest price can sit only in sub_offers."""
+        from app.search_service import compute_market_summary
+
+        rows = [
+            {"unit_price": 2.0, "sub_offers": [{"unit_price": 1.25}, {"unit_price": 3.0}]},
+            {"unit_price": 1.5},
+        ]
+        assert compute_market_summary(rows)["best_price"] == 1.25
+
+    def test_best_price_found_in_sub_offers_when_head_has_no_price(self):
+        from app.search_service import compute_market_summary
+
+        rows = [{"unit_price": None, "sub_offers": [{"unit_price": 4.5}, {"unit_price": 2.75}]}]
+        assert compute_market_summary(rows)["best_price"] == 2.75
+
+    def test_sub_offer_prices_of_zero_none_or_negative_are_ignored(self):
+        from app.search_service import compute_market_summary
+
+        rows = [{"unit_price": 2.0, "sub_offers": [{"unit_price": 0}, {"unit_price": None}, {}, {"unit_price": -1.0}]}]
+        assert compute_market_summary(rows)["best_price"] == 2.0
+
+    def test_best_price_none_when_no_head_or_sub_offer_has_a_positive_price(self):
+        from app.search_service import compute_market_summary
+
+        rows = [{"unit_price": None, "sub_offers": [{"unit_price": 0}, {"unit_price": None}]}]
+        assert compute_market_summary(rows)["best_price"] is None
+
+    def test_production_shaped_rows_count_green_rows_as_high_confidence(self):
+        """Rows built by the real _score_raw_hit -> _incremental_dedup carry
+        confidence_pct (int) + confidence_color, so high_confidence counts exactly the
+        green (>=75%) rows — the streaming path used to emit neither, pinning the KPI at
+        0."""
+        from app.search_service import compute_market_summary
+
+        def hit(vendor, confidence, **extra):
+            return {
+                "vendor_name": vendor,
+                "mpn_matched": "LM317T",
+                "unit_price": 1.0,
+                "qty_available": 100,
+                "source_type": "brokerbin",
+                "confidence": confidence,
+                **extra,
+            }
+
+        rows = _production_shaped_rows(
+            [
+                hit("Green Auth Co", 4, is_authorized=True, source_type="digikey"),  # 4/5 -> 80% green
+                hit("Green Edge Co", 0.75),  # exactly 75% -> green
+                hit("Amber Top Co", 0.74),  # 74% -> amber
+                hit("Amber Edge Co", 0.5),  # exactly 50% -> amber
+                hit("Red Top Co", 0.49),  # 49% -> red
+                hit("Red Blank Co", 0),  # no confidence -> red
+                # A second offer from an already-seen green vendor merges into its row
+                # (offers +1) without adding a vendor or a second high-confidence count.
+                hit("Green Auth Co", 4, is_authorized=True, source_type="mouser", unit_price=2.0),
+            ]
+        )
+
+        # Real row shape, not a hand-built one.
+        for row in rows:
+            assert isinstance(row["confidence_pct"], int)
+            assert row["confidence_color"] in {"green", "amber", "red"}
+        assert {r["vendor_name"]: r["confidence_color"] for r in rows} == {
+            "Green Auth Co": "green",
+            "Green Edge Co": "green",
+            "Amber Top Co": "amber",
+            "Amber Edge Co": "amber",
+            "Red Top Co": "red",
+            "Red Blank Co": "red",
+        }
+
+        result = compute_market_summary(rows)
+        assert result["vendors"] == 6
+        assert result["offers"] == 7
+        assert result["authorized"] == 1
+        assert result["high_confidence"] == 2
+        assert result["best_price"] == 1.0
+        assert result["total_stock"] == 700  # 6 vendors x 100 + the merged 100
+
+    def test_production_shaped_merge_keeps_cheaper_offer_in_sub_offers_for_best_price(self):
+        """An authorized (score 100) offer stays the row head over a cheaper
+        unauthorized one, so the cheaper price lives only in sub_offers — best_price
+        must still find it."""
+        from app.search_service import compute_market_summary
+
+        rows = _production_shaped_rows(
+            [
+                {
+                    "vendor_name": "Split Offer Co",
+                    "mpn_matched": "LM317T",
+                    "unit_price": 2.0,
+                    "qty_available": 500,
+                    "is_authorized": True,
+                    "confidence": 0.9,
+                    "source_type": "digikey",
+                },
+                {
+                    "vendor_name": "Split Offer Co",
+                    "mpn_matched": "LM317T",
+                    "unit_price": 1.1,
+                    "qty_available": 300,
+                    "is_authorized": False,
+                    "confidence": 0.9,
+                    "source_type": "brokerbin",
+                },
+            ]
+        )
+
+        assert len(rows) == 1
+        assert rows[0]["unit_price"] == 2.0  # head = best-scored, not cheapest
+        assert [o["unit_price"] for o in rows[0]["sub_offers"]] == [1.1]
+        result = compute_market_summary(rows)
+        assert result["best_price"] == 1.1
+        assert result["offers"] == 2
+        assert result["total_stock"] == 800
+
+
+class TestMarketSummaryStrip:
+    """The KPI tile strip renders on the dossier cache-hit path and via the SSE
+    "summary" event renderer, and stays absent on a cache miss.
+
+    Rows come from the real streaming pipeline (_production_shaped_rows), not hand-built
+    dicts, so the confidence_color / sub_offers / offer_count keys are the production
+    ones.
+    """
+
+    def _rows(self):
+        return _production_shaped_rows(
+            [
+                {
+                    "vendor_name": "Tile Vendor A",
+                    "mpn_matched": "LM317T",
+                    "unit_price": 0.84,
+                    "qty_available": 1000,
+                    "is_authorized": True,
+                    "confidence": 0.91,  # 91% -> green
+                    "source_type": "digikey",
+                },
+                {
+                    "vendor_name": "Tile Vendor B",
+                    "mpn_matched": "LM317T",
+                    "unit_price": 1.10,
+                    "qty_available": 250,
+                    "is_authorized": False,
+                    "confidence": 0.6,  # 60% -> amber
+                    "source_type": "brokerbin",
+                },
+            ]
+        )
+
+    def _rows_without_price_or_stock(self):
+        return _production_shaped_rows(
+            [
+                {
+                    "vendor_name": "Quote Only A",
+                    "mpn_matched": "LM317T",
+                    "unit_price": None,
+                    "qty_available": None,
+                    "confidence": 0.9,
+                    "source_type": "brokerbin",
+                },
+                {
+                    "vendor_name": "Quote Only B",
+                    "mpn_matched": "LM317T",
+                    "unit_price": None,
+                    "qty_available": None,
+                    "confidence": 0.8,
+                    "source_type": "nexar",
+                },
+            ]
+        )
+
+    def _patch_redis(self, rows):
+        # Serialize exactly as stream_search_mpn's cache writer does (default=str):
+        # production rows are JSON-native (sources_found is a sorted list), so the
+        # cached payload must round-trip without any set-to-repr corruption.
+        rc = MagicMock()
+        rc.get.side_effect = lambda k: (
+            "sid-summary-test"
+            if k.endswith(":latest")
+            else (json.dumps(rows, default=str) if k.endswith(":results") else None)
+        )
+        return rc
+
+    def test_cache_hit_renders_kpi_tiles(self, client):
+        """Cache hit → the six tiles render with whole-set counts (2 vendors, 1
+        authorized, 1 high confidence, best price $0.8400, stock 1,250)."""
+        rc = self._patch_redis(self._rows())
+        with patch("app.search_service._get_search_redis", return_value=rc):
+            resp = client.get("/v2/partials/search/dossier/market", params={"mpn": "LM317T"})
+        assert resp.status_code == 200
+        body = resp.text
+        for label in ("Vendors", "Offers", "Authorized", "High confidence", "Best price", "Total stock"):
+            assert label in body
+        assert "$0.8400" in body
+        assert "1,250" in body
+        assert _tile_values(body) == {
+            "Vendors": "2",
+            "Offers": "2",
+            "Authorized": "1",
+            "High confidence": "1",
+            "Best price": "$0.8400",
+            "Total stock": "1,250",
+        }
+
+    def test_cache_hit_header_counts_vendors_not_offers(self, client):
+        """The cached freshness header counts vendor rows ("2 vendors"); the Offers tile
+        owns the offer count."""
+        rc = self._patch_redis(self._rows())
+        with patch("app.search_service._get_search_redis", return_value=rc):
+            resp = client.get("/v2/partials/search/dossier/market", params={"mpn": "LM317T"})
+        assert resp.status_code == 200
+        assert "2 vendors" in resp.text
+        assert "2 offers" not in resp.text
+
+    def test_cache_hit_strip_renders_above_cards_container(self, client):
+        """Structural invariant: the strip sits ABOVE #search-results-cards (the
+        filter/sort swap target), so re-filtering the cards never wipes it, and nothing
+        of it renders inside or after the cards container."""
+        rc = self._patch_redis(self._rows())
+        with patch("app.search_service._get_search_redis", return_value=rc):
+            resp = client.get("/v2/partials/search/dossier/market", params={"mpn": "LM317T"})
+        assert resp.status_code == 200
+        body = resp.text
+        cards_at = body.index('id="search-results-cards"')
+        assert body.index('role="group"') < cards_at
+        assert body.index("High confidence") < cards_at
+        assert "High confidence" not in body[cards_at:]
+        assert 'role="group"' not in body[cards_at:]
+
+    def test_cache_miss_has_no_tiles_server_side(self, client):
+        """Cache miss → no server-rendered tiles; the SSE frame fills #market-summary at
+        stream end instead."""
+        resp = client.get("/v2/partials/search/dossier/market", params={"mpn": "LM317T"})
+        assert resp.status_code == 200
+        assert "High confidence" not in resp.text
+
+    def test_sse_renderer_produces_tile_strip(self):
+        """_render_market_summary_html (the "summary" SSE event body) renders the same
+        tile strip from raw rows, and renders empty for an empty set."""
+        from app.search_service import _render_market_summary_html
+
+        html = _render_market_summary_html(self._rows())
+        assert "Vendors" in html
+        assert "High confidence" in html
+        assert "$0.8400" in html
+        assert _tile_values(html)["High confidence"] == "1"
+        assert _render_market_summary_html([]).strip() == ""
+
+    def test_sse_renderer_fallback_tiles_when_no_price_or_stock(self):
+        """Rows with unit_price None and qty_available None render the "RFQ" / "—"
+        fallback tiles (still labelled "Best price" / "Total stock").
+
+        Guards the ``is not none`` Jinja conditionals: losing them would format None
+        with %.4f / {:,} and raise inside the SSE renderer, silently killing the strip
+        (stream_search_mpn swallows the error) or 500ing the dossier.
+        """
+        from app.search_service import _render_market_summary_html
+
+        html = _render_market_summary_html(self._rows_without_price_or_stock())
+        assert "Best price" in html
+        assert "Total stock" in html
+        assert "RFQ" in html
+        assert "—" in html
+        assert "$None" not in html
+        tiles = _tile_values(html)
+        assert tiles["Best price"] == "RFQ"
+        assert tiles["Total stock"] == "—"
+        # The rest of the strip is unaffected by the missing price/stock.
+        assert tiles["Vendors"] == "2"
+        assert tiles["High confidence"] == "2"
+
+    def test_sse_renderer_price_and_stock_fallbacks_are_independent(self):
+        """Missing price does not blank the stock tile, and missing stock does not blank
+        the price tile."""
+        from app.search_service import _render_market_summary_html
+
+        price_only = _tile_values(
+            _render_market_summary_html(
+                _production_shaped_rows(
+                    [{"vendor_name": "P", "mpn_matched": "LM317T", "unit_price": 0.5, "qty_available": None}]
+                )
+            )
+        )
+        assert price_only["Best price"] == "$0.5000"
+        assert price_only["Total stock"] == "—"
+
+        stock_only = _tile_values(
+            _render_market_summary_html(
+                _production_shaped_rows(
+                    [{"vendor_name": "S", "mpn_matched": "LM317T", "unit_price": None, "qty_available": 1200}]
+                )
+            )
+        )
+        assert stock_only["Best price"] == "RFQ"
+        assert stock_only["Total stock"] == "1,200"
+
+    def test_sse_renderer_known_zero_stock_renders_zero_not_dash(self):
+        """A known total of 0 is data ("0"), not missing ("—") — the conditional is ``is
+        not none``, not truthiness."""
+        from app.search_service import _render_market_summary_html
+
+        # _incremental_dedup drops qty == 0 offers, so feed the renderer a row directly.
+        rows = [{"vendor_name": "Zero Co", "unit_price": 1.0, "qty_available": 0, "confidence_color": "green"}]
+        assert _tile_values(_render_market_summary_html(rows))["Total stock"] == "0"
+
+    def test_cache_hit_fallback_tiles_do_not_break_dossier(self, client):
+        """Cached rows without price/qty still render the dossier market (200) with the
+        fallback tiles."""
+        rc = self._patch_redis(self._rows_without_price_or_stock())
+        with patch("app.search_service._get_search_redis", return_value=rc):
+            resp = client.get("/v2/partials/search/dossier/market", params={"mpn": "LM317T"})
+        assert resp.status_code == 200
+        body = resp.text
+        assert "Best price" in body
+        assert "Total stock" in body
+        tiles = _tile_values(body)
+        assert tiles["Best price"] == "RFQ"
+        assert tiles["Total stock"] == "—"
+        assert "Quote Only A" in body
+
+
+# ── Cache round-trip — sources_found must survive json.dumps(default=str) ──
+
+
+class TestCachedRowsJsonRoundTrip:
+    """Real pipeline rows must survive the Redis cache write verbatim.
+
+    stream_search_mpn caches ``accumulated`` with ``json.dumps(..., default=str)``.
+    A set-valued ``sources_found`` would serialize to its repr string, which 500s
+    dossier_market.html's ``sum(start=[])`` source collector and corrupts the
+    vendor-card source badges on read-back — so the dedup paths must keep it a
+    JSON-native (sorted list) value end to end.
+    """
+
+    def test_pipeline_rows_are_json_native_and_render_after_round_trip(self, client):
+        rows = _production_shaped_rows(
+            [
+                {
+                    "vendor_name": "Multi Source",
+                    "mpn": "LM317T",
+                    "source_type": "digikey",
+                    "unit_price": 1.0,
+                    "qty_available": 10,
+                    "confidence": 4,
+                },
+                {
+                    "vendor_name": "Multi Source",
+                    "mpn": "LM317T",
+                    "source_type": "nexar",
+                    "unit_price": 0.9,
+                    "qty_available": 5,
+                    "confidence": 4,
+                },
+                {
+                    "vendor_name": "Solo Source",
+                    "mpn": "LM317T",
+                    "source_type": "brokerbin",
+                    "unit_price": 2.0,
+                    "qty_available": 7,
+                    "confidence": 2,
+                },
+            ]
+        )
+        # Merged and solo rows both carry a sorted-list sources_found
+        by_vendor = {r["vendor_name"]: r for r in rows}
+        assert by_vendor["Multi Source"]["sources_found"] == ["digikey", "nexar"]
+        assert by_vendor["Solo Source"]["sources_found"] == ["brokerbin"]
+
+        # Plain json round-trip (no default needed) — the writer's default=str must
+        # have nothing left to mangle
+        restored = json.loads(json.dumps(rows, default=str))
+        assert restored == json.loads(json.dumps(rows))
+
+        # And the dossier cache-hit endpoint renders the round-tripped payload whole:
+        # source <select> options, no set-repr leakage, KPI strip present
+        rc = MagicMock()
+        rc.get.side_effect = lambda k: (
+            "sid-roundtrip"
+            if k.endswith(":latest")
+            else (json.dumps(rows, default=str) if k.endswith(":results") else None)
+        )
+        with patch("app.search_service._get_search_redis", return_value=rc):
+            resp = client.get("/v2/partials/search/dossier/market", params={"mpn": "LM317T"})
+        assert resp.status_code == 200
+        body = resp.text
+        assert "{'" not in body  # no set-repr string anywhere
+        assert '<option value="digikey">' in body
+        assert '<option value="nexar">' in body
+        assert '<option value="brokerbin">' in body
+        assert "High confidence" in body

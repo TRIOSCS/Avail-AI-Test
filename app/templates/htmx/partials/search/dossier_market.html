@@ -12,6 +12,7 @@
    Called by: part_dossier.dossier_market (GET /v2/partials/search/dossier/market).
    Depends on: mpn (display), cached_search_id (str|None), cached_rows (list[dict]|None),
                market_health (dict|None), market_baseline (dict|None),
+               market_summary (dict|None — KPI tile strip, market_summary.html),
                dossier_market_banner.html, results_shell.html / vendor_card.html,
                $store.shortlist + lead-detail drawer (reused). #}
 
@@ -19,6 +20,9 @@
 
 {% if cached_rows %}
 {# ── CACHE HIT — cached rows in the light market card ── #}
+
+{# ── KPI tile strip (whole result set) — same partial the SSE "summary" event renders ── #}
+{% include "htmx/partials/search/market_summary.html" %}
 
 {# ── Market-baseline strip (read-only, authorized rows only) ── #}
 {% if market_baseline %}
@@ -57,7 +61,7 @@
   <span class="inline-flex items-center gap-1.5 text-gray-600">
     <span class="h-1.5 w-1.5 rounded-full bg-gray-400"></span>cached
   </span>
-  <span class="text-gray-400">{{ cached_rows|length }} offer{{ '' if cached_rows|length == 1 else 's' }}</span>
+  <span class="text-gray-400">{{ cached_rows|length }} vendor{{ '' if cached_rows|length == 1 else 's' }}</span>
   <button type="button"
           hx-get="/v2/partials/search/dossier/market?mpn={{ mpn|urlencode }}&amp;refresh=1"
           hx-target="#dossier-market" hx-swap="innerHTML"
