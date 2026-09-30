@@ -208,7 +208,7 @@ class TestIncrementalDedupBetterScore:
                 "unit_price": 0.50,
                 "sub_offers": [],
                 "offer_count": 1,
-                "sources_found": {"nexar"},
+                "sources_found": ["nexar"],
             }
         ]
         incoming = [
@@ -241,7 +241,7 @@ class TestIncrementalDedupBetterScore:
                 "unit_price": 0.50,
                 "sub_offers": [],
                 "offer_count": 1,
-                "sources_found": {"nexar"},
+                "sources_found": ["nexar"],
             }
         ]
         incoming = [

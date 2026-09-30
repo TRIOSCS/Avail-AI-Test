@@ -612,6 +612,69 @@ class TestStreamSearchMpnSharedCache:
         assert "results" in event_types
         assert "done" in event_types
 
+    async def test_cache_hit_publishes_summary_before_done(self, db_session: Session):
+        """The shared-cache-hit branch shares the terminal block, so it also publishes
+        the market-summary strip ("summary") after the result cards and before "done" —
+        built from cached rows scored by the real _score_raw_hit (raw connector
+        confidence 5 -> 100% green, 3 -> 60% amber)."""
+        from tests.test_search_streaming import _tile_values
+
+        mock_broker = MagicMock()
+        mock_broker.publish = AsyncMock()
+
+        mock_conn = MagicMock()
+        mock_conn.__class__.__name__ = "NexarConnector"
+        mock_conn.source_name = "nexar"
+        mock_conn.search = AsyncMock(return_value=[])
+
+        cached_results = [
+            {
+                "vendor_name": "CachedGreen",
+                "mpn_matched": "LM317T",
+                "qty_available": 10,
+                "unit_price": 1.0,
+                "source_type": "nexar",
+                "is_authorized": True,
+                "confidence": 5,
+            },
+            {
+                "vendor_name": "CachedAmber",
+                "mpn_matched": "LM317T",
+                "qty_available": 20,
+                "unit_price": 2.0,
+                "source_type": "nexar",
+                "confidence": 3,
+            },
+        ]
+        cached_stats = [{"source": "nexar", "results": 2, "ms": 50, "error": None, "status": "ok"}]
+
+        with (
+            patch("app.search_service._build_connectors", return_value=([mock_conn], {}, set())),
+            patch("app.services.sse_broker.broker", mock_broker),
+            patch(
+                "app.search_service._get_search_cache",
+                return_value=(cached_results, cached_stats, "2026-01-01T00:00:00+00:00"),
+            ),
+            patch("app.search_service._render_search_vendor_cards_html", return_value="<div></div>"),
+        ):
+            await stream_search_mpn("test-cache-hit-summary", "LM317T")
+
+        mock_conn.search.assert_not_called()
+        events = [(call[0][1], call[0][2]) for call in mock_broker.publish.call_args_list]
+        event_types = [name for name, _data in events]
+        assert event_types.count("summary") == 1
+        assert event_types.index("results") < event_types.index("summary") < event_types.index("done")
+        assert event_types[-1] == "done"
+
+        summary_html = next(data for name, data in events if name == "summary")
+        assert "Vendors" in summary_html
+        tiles = _tile_values(summary_html)
+        assert tiles["Vendors"] == "2"
+        assert tiles["Authorized"] == "1"
+        assert tiles["High confidence"] == "1"
+        assert tiles["Best price"] == "$1.0000"
+        assert tiles["Total stock"] == "30"
+
     async def test_cache_miss_writes_shared_cache(self, db_session: Session):
         """A cache MISS runs the live fan-out AND writes the shared cache in the same
         flat/unscored shape _fetch_fresh's cache-miss path writes, so a later

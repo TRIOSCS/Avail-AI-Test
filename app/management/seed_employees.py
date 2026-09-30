@@ -12,12 +12,20 @@ Behavior (idempotent, additive, never destructive):
     8x8 flag) and an INVITE audit row is written with actor NULL ("system").
   * An EXISTING user is never modified except: an empty eight_by_eight_extension
     is filled from the sheet, and eight_by_eight_enabled is switched on only in
-    that same first-fill moment for Trading-desk rows. Role, name, active state,
-    and any admin-edited phone mapping are left untouched.
+    that same first-fill moment for Trading-desk rows of ACTIVE users (a
+    deactivated employee gets the extension but never re-enters the poller).
+    Role, name, active state, and any admin-edited phone mapping are left
+    untouched.
   * eight_by_eight_enabled is seeded True ONLY for the Trading department, whose
     extensions are unique. Warehouse/Operations share lines (e.g. x1022), which
     would misattribute CDRs, so their extensions are stored for reference but the
     poller flag stays False.
+  * The poller builds one extension -> user dict, so two enabled users on one
+    extension silently misattribute calls. Before enabling (create or first-fill),
+    the seeder checks the database for a DIFFERENT user already enabled on the
+    same extension; if one exists the user and extension are still written, the
+    flag stays False, and a warning names both emails and the extension. The
+    pre-existing user is never touched.
 
 Role mapping (all interactive roles share the same ROLE_ACCESS_DEFAULTS, so this
 is labeling + manager-assignability, not access): Trading titles map to
@@ -35,9 +43,11 @@ import argparse
 from typing import TypedDict
 
 from loguru import logger
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.constants import UserAuditAction, UserRole
+from app.models import User
 from app.services.user_admin import record_user_audit
 
 
@@ -195,6 +205,35 @@ EMPLOYEES: list[_Employee] = [
 ]
 
 
+def _extension_is_free(db: Session, email: str, extension: str) -> bool:
+    """True when no OTHER user is already 8x8-enabled on `extension`.
+
+    The CDR poller maps extension -> user in one dict, so a second enabled user on the
+    same extension would silently misattribute calls. Logs a warning naming both emails
+    and the extension when a conflict exists.
+    """
+    owner = (
+        db.execute(
+            select(User).where(
+                User.eight_by_eight_enabled.is_(True),
+                User.eight_by_eight_extension == extension,
+                User.email != email,
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if owner is None:
+        return True
+    logger.warning(
+        "8x8 CONFLICT: {} is already enabled on ext={}; leaving 8x8 disabled for {}",
+        owner.email,
+        extension,
+        email,
+    )
+    return False
+
+
 def seed(db: Session, *, apply: bool = False) -> dict[str, int]:
     """Upsert EMPLOYEES into users; returns {created, extension_filled, skipped}.
 
@@ -202,20 +241,19 @@ def seed(db: Session, *, apply: bool = False) -> dict[str, int]:
     committing. Existing users are never modified beyond first-fill of an empty
     eight_by_eight_extension (see module docstring).
     """
-    from app.models import User  # local import keeps module importable without app init
-
     created = extension_filled = skipped = 0
     for emp in EMPLOYEES:
         email = emp["email"].strip().lower()
         user = db.query(User).filter(User.email == email).first()
         if user is None:
+            enable_8x8 = emp["enable_8x8"] and _extension_is_free(db, email, emp["extension"])
             user = User(
                 email=email,
                 name=emp["name"],
                 role=str(emp["role"]),
                 is_active=True,
                 eight_by_eight_extension=emp["extension"],
-                eight_by_eight_enabled=emp["enable_8x8"],
+                eight_by_eight_enabled=enable_8x8,
             )
             db.add(user)
             db.flush()  # assign user.id for the audit row
@@ -227,13 +265,18 @@ def seed(db: Session, *, apply: bool = False) -> dict[str, int]:
                 detail={"email": email, "role": str(emp["role"]), "source": "seed_employees"},
             )
             created += 1
-            logger.info("CREATE {} role={} ext={} 8x8={}", email, emp["role"], emp["extension"], emp["enable_8x8"])
+            logger.info("CREATE {} role={} ext={} 8x8={}", email, emp["role"], emp["extension"], enable_8x8)
         elif not user.eight_by_eight_extension:
             user.eight_by_eight_extension = emp["extension"]  # type: ignore[assignment]  # legacy Column-model ORM noise
-            if emp["enable_8x8"] and not user.eight_by_eight_enabled:
+            if (
+                emp["enable_8x8"]
+                and user.is_active
+                and not user.eight_by_eight_enabled
+                and _extension_is_free(db, email, emp["extension"])
+            ):
                 user.eight_by_eight_enabled = True  # type: ignore[assignment]  # legacy Column-model ORM noise
             extension_filled += 1
-            logger.info("FILL-EXT {} ext={} 8x8={}", email, emp["extension"], emp["enable_8x8"])
+            logger.info("FILL-EXT {} ext={} 8x8={}", email, emp["extension"], bool(user.eight_by_eight_enabled))
         else:
             skipped += 1
             logger.info("SKIP {} (exists, extension already set)", email)

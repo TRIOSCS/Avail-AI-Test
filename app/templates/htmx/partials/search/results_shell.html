@@ -5,7 +5,9 @@
    dossier section. SSE wiring, source-progress chips, $store.shortlist, and the
    lead-detail Details trigger are all kept intact.
    Called by: htmx_views.search_run.
-   Depends on: SSE stream at /v2/partials/search/stream, vendor_card.html (market rows). #}
+   Depends on: SSE stream at /v2/partials/search/stream, vendor_card.html (market rows),
+   and the fallback endpoint /v2/partials/search/summary (htmx:sseClose refills #market-summary
+   from the Redis results cache when the SSE "summary" event was lost to the subscribe race). #}
 
 <div id="search-results-wrapper" data-search-id="{{ search_id }}">
   {# header: freshness + refresh #}
@@ -144,6 +146,20 @@
       var empty = document.getElementById('search-empty-state');
       if (cards && empty && cards.children.length === 0) {
         empty.classList.remove('hidden');
+      }
+
+      // Lost-summary race: the SSE broker has no replay, so on the fast shared-cache-hit
+      // branch the "summary" event can be published before this page subscribes and
+      // #market-summary stays empty. The results cache was still written, so ask the
+      // server to render the tile strip from it (empty body when there is nothing to show).
+      var summary = document.getElementById('market-summary');
+      if (summary && summary.children.length === 0) {
+        var summaryUrl = '/v2/partials/search/summary?search_id=' + encodeURIComponent(wrapper.dataset.searchId);
+        htmx.ajax('GET', summaryUrl, {
+          target: '#market-summary',
+          swap: 'innerHTML',
+          indicator: '#market-summary'
+        });
       }
     });
   })();

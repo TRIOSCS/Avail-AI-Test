@@ -164,7 +164,8 @@ def compute_market_summary(rows: list[dict]) -> dict:
         rows: List of market-row dicts (same schema as cached_rows / vendor_card.html).
               Each may carry ``unit_price`` (float|None), ``qty_available`` (int|None),
               ``is_authorized`` (bool), ``confidence_color`` (str), ``offer_count``
-              (int|None) and ``sub_offers`` (list|None).
+              (int|None) and ``sub_offers`` (list|None; each entry may carry its own
+              ``unit_price``).
 
     Returns:
         A dict with keys:
@@ -173,7 +174,9 @@ def compute_market_summary(rows: list[dict]) -> dict:
                                  minimum 1 per row — mirrors vendor_card.html's count).
           - ``authorized``:      int — rows flagged franchise/authorized.
           - ``high_confidence``: int — rows whose confidence_color is "green".
-          - ``best_price``:      float|None — lowest positive unit_price, any row.
+          - ``best_price``:      float|None — lowest positive unit_price across every
+                                 row AND each row's sub_offers (the row head is the
+                                 best-scored offer, not necessarily the cheapest).
           - ``total_stock``:     int|None — sum of known qty_available values; None
                                  when no row has a known qty.
 
@@ -184,7 +187,14 @@ def compute_market_summary(rows: list[dict]) -> dict:
         count = r.get("offer_count") or len(r.get("sub_offers") or [])
         offers += count if count else 1
 
-    prices = [r["unit_price"] for r in rows if r.get("unit_price") and r["unit_price"] > 0]
+    # Dedup keeps the best-SCORED offer at the row head, not the cheapest, so the
+    # cheaper prices can sit in sub_offers — scan the head and every sub-offer.
+    prices = []
+    for r in rows:
+        for offer in [r, *(r.get("sub_offers") or [])]:
+            price = offer.get("unit_price")
+            if price and price > 0:
+                prices.append(price)
     known_qtys = [r["qty_available"] for r in rows if r.get("qty_available") is not None]
 
     return {
@@ -1358,9 +1368,11 @@ def _deduplicate_sightings_aggressive(sighting_dicts: list[dict]) -> list[dict]:
         if moqs:
             best["moq"] = min(moqs)
 
-        # Collect sources
-        best["sources_found"] = {g.get("source_type", "") for g in group}
-        best["sources_found"].discard("")
+        # Collect sources — a sorted LIST, never a set: these rows are cached with
+        # json.dumps(..., default=str), and a set would serialize to its repr string
+        # ("{'nexar'}"), 500ing the dossier cache-hit template (sum(start=[]) over a
+        # str) and corrupting vendor_card's source badges on read-back.
+        best["sources_found"] = sorted({g.get("source_type", "") for g in group} - {""})
 
         # Sub-offers (everything except the best)
         best["sub_offers"] = group[1:] if len(group) > 1 else []
@@ -1404,22 +1416,36 @@ def _incremental_dedup(incoming: list[dict], existing: list[dict]) -> tuple[list
 
         if key in existing_map:
             card = existing_map[key]
+            # card["qty_available"] is the running total over every merged offer. Keep the
+            # head's OWN qty aside (on the first merge it is still its own) so each re-sum
+            # adds every offer exactly once instead of re-adding the previous total.
+            card.setdefault("own_qty_available", card.get("qty_available"))
             card.setdefault("sub_offers", []).append(item)
             card["offer_count"] = card.get("offer_count", 1) + 1
-            card.setdefault("sources_found", set()).add(item.get("source_type", ""))
+            # sources_found stays a sorted LIST (JSON-safe for the Redis cache — see
+            # _deduplicate_sightings_aggressive); dedupe on append instead of via set.
+            src = item.get("source_type", "")
+            sources = card.setdefault("sources_found", [])
+            if src and src not in sources:
+                sources.append(src)
+                sources.sort()
 
             # Update best offer if incoming is better
             if item.get("score", 0) > card.get("score", 0):
-                old_best = {k: v for k, v in card.items() if k not in ("sub_offers", "offer_count", "sources_found")}
+                head_only_keys = ("sub_offers", "offer_count", "sources_found", "own_qty_available")
+                old_best = {k: v for k, v in card.items() if k not in head_only_keys}
+                # Demote the old head with its own qty, not the running total
+                old_best["qty_available"] = card["own_qty_available"]
                 card["sub_offers"].append(old_best)
                 card["sub_offers"].remove(item)
                 for k, v in item.items():
-                    if k not in ("sub_offers", "offer_count", "sources_found"):
+                    if k not in head_only_keys:
                         card[k] = v
+                card["own_qty_available"] = item.get("qty_available")
 
-            # Re-sum quantities
-            all_offers = [card] + card.get("sub_offers", [])
-            known_qtys = [o["qty_available"] for o in all_offers if o.get("qty_available") is not None]
+            # Re-sum quantities from each offer's own qty
+            own_qtys = [card["own_qty_available"]] + [o.get("qty_available") for o in card["sub_offers"]]
+            known_qtys = [q for q in own_qtys if q is not None]
             card["qty_available"] = sum(known_qtys) if known_qtys else None
 
             updated_cards.append(card)
@@ -1427,8 +1453,8 @@ def _incremental_dedup(incoming: list[dict], existing: list[dict]) -> tuple[list
             new_card = dict(item)
             new_card["sub_offers"] = []
             new_card["offer_count"] = 1
-            new_card["sources_found"] = {item.get("source_type", "")}
-            new_card["sources_found"].discard("")
+            new_src = item.get("source_type", "")
+            new_card["sources_found"] = [new_src] if new_src else []
             existing.append(new_card)
             existing_map[key] = new_card
             new_cards.append(new_card)
@@ -3173,6 +3199,11 @@ def _score_raw_hit(r: dict, vendor_score_map: dict) -> dict:
     clean_currency = detect_currency(raw_currency) if raw_currency else "USD"
     raw_conf = r.get("confidence", 0) or 0
     norm_conf = raw_conf / 5.0 if raw_conf > 1 else raw_conf
+    # Percent + traffic-light color so the market-summary "High confidence" KPI,
+    # vendor_card.html and the search_filter confidence filter see the same fields the
+    # other row builders emit. Thresholds (>=75 green, >=50 amber) live in
+    # scoring.confidence_color; same conf*100 mapping as _affinity_match_to_result.
+    conf_pct = max(0, min(100, round(norm_conf * 100)))
     is_auth = r.get("is_authorized", False)
     norm_name = normalize_vendor_name(clean_vendor)
     base_score = score_sighting(vendor_score_map.get(norm_name), is_auth)
@@ -3191,6 +3222,8 @@ def _score_raw_hit(r: dict, vendor_score_map: dict) -> dict:
         "source_type": r.get("source_type"),
         "is_authorized": is_auth,
         "confidence": norm_conf,
+        "confidence_pct": conf_pct,
+        "confidence_color": confidence_color(conf_pct),
         "score": base_score,
         "evidence_tier": tier,
         "octopart_url": r.get("octopart_url"),

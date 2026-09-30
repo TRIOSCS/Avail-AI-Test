@@ -61,7 +61,7 @@
   <span class="inline-flex items-center gap-1.5 text-gray-600">
     <span class="h-1.5 w-1.5 rounded-full bg-gray-400"></span>cached
   </span>
-  <span class="text-gray-400">{{ cached_rows|length }} offer{{ '' if cached_rows|length == 1 else 's' }}</span>
+  <span class="text-gray-400">{{ cached_rows|length }} vendor{{ '' if cached_rows|length == 1 else 's' }}</span>
   <button type="button"
           hx-get="/v2/partials/search/dossier/market?mpn={{ mpn|urlencode }}&amp;refresh=1"
           hx-target="#dossier-market" hx-swap="innerHTML"

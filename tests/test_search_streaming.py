@@ -5,6 +5,8 @@ Depends on: app/search_service.py, app/connectors/sources.py
 """
 
 import json
+import re
+from itertools import permutations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -39,6 +41,20 @@ def _make_event_collector():
         published_events.append({"channel": channel, "event": event, "data": data})
 
     return published_events, mock_publish
+
+
+def _tile_values(html):
+    """Map each market-summary KPI tile label to its rendered value.
+
+    market_summary.html emits, per tile, a ``<span class="block ...">value</span>``
+    immediately followed by a ``<span class="block ...">label</span>``.
+    """
+    pairs = re.findall(
+        r'<span class="block[^"]*">\s*([^<]*?)\s*</span>\s*'
+        r'<span class="block[^"]*">\s*(Vendors|Offers|Authorized|High confidence|Best price|Total stock)\s*</span>',
+        html,
+    )
+    return {label: value for value, label in pairs}
 
 
 def test_base_connector_has_source_name():
@@ -292,7 +308,7 @@ def test_incremental_dedup_existing_vendor():
             "source_type": "nexar",
             "sub_offers": [],
             "offer_count": 1,
-            "sources_found": {"nexar"},
+            "sources_found": ["nexar"],
         },
     ]
     incoming = [
@@ -309,6 +325,151 @@ def test_incremental_dedup_existing_vendor():
     assert len(new_cards) == 0
     assert len(updated_cards) == 1
     assert updated_cards[0]["offer_count"] == 2
+
+
+def _dedup_offer(score, qty, price, source):
+    """One scored offer for the same vendor + MPN, as _score_raw_hit would emit."""
+    return {
+        "vendor_name": "Arrow",
+        "mpn_matched": "LM317T",
+        "unit_price": price,
+        "qty_available": qty,
+        "score": score,
+        "source_type": source,
+    }
+
+
+def test_incremental_dedup_three_offers_sum_each_qty_once():
+    """Three offers for one vendor+MPN merged across successive calls (as connectors
+    complete) sum each offer's qty exactly once: q0 + q1 + q2.
+
+    The pre-fix re-sum re-added the previous running total on every merge past the
+    second, yielding q0 + 2*q1 + q2 (1000 + 2*500 + 250 = 2250 instead of 1750).
+    """
+    from app.search_service import _incremental_dedup
+
+    q0, q1, q2 = 1000, 500, 250
+    existing: list[dict] = []
+
+    new_cards, _ = _incremental_dedup([_dedup_offer(80, q0, 0.45, "nexar")], existing)
+    assert len(new_cards) == 1
+    assert existing[0]["qty_available"] == q0
+
+    _, updated = _incremental_dedup([_dedup_offer(70, q1, 0.48, "digikey")], existing)
+    assert updated == [existing[0]]
+    assert existing[0]["qty_available"] == q0 + q1
+
+    _, updated = _incremental_dedup([_dedup_offer(60, q2, 0.50, "mouser")], existing)
+    assert updated == [existing[0]]
+
+    assert len(existing) == 1
+    card = existing[0]
+    assert card["qty_available"] == q0 + q1 + q2
+    assert card["offer_count"] == 3
+    assert card["sources_found"] == ["digikey", "mouser", "nexar"]  # sorted list, JSON-safe for the Redis cache
+    # No head swap: the first (best-scored) offer stays the head, each sub-offer keeps its own qty.
+    assert card["unit_price"] == 0.45
+    assert sorted(o["qty_available"] for o in card["sub_offers"]) == sorted([q1, q2])
+
+
+def test_incremental_dedup_three_offers_head_swap_on_third_keeps_own_quantities():
+    """When the THIRD offer has a better score it becomes the head; the old head is
+    demoted to sub_offers with its OWN qty (not the running total) and the final qty is
+    still q0 + q1 + q2."""
+    from app.search_service import _incremental_dedup
+
+    q0, q1, q2 = 1000, 500, 250
+    existing: list[dict] = []
+
+    _incremental_dedup([_dedup_offer(70, q0, 0.45, "nexar")], existing)
+    _incremental_dedup([_dedup_offer(60, q1, 0.48, "digikey")], existing)
+    assert existing[0]["qty_available"] == q0 + q1
+
+    _, updated = _incremental_dedup([_dedup_offer(90, q2, 0.40, "mouser")], existing)
+    assert updated == [existing[0]]
+
+    card = existing[0]
+    assert card["qty_available"] == q0 + q1 + q2  # pre-fix: 250 + 500 + 1500 = 2250
+    assert card["offer_count"] == 3
+    # Head is now the third (best-scored) offer ...
+    assert card["score"] == 90
+    assert card["unit_price"] == 0.40
+    assert card["source_type"] == "mouser"
+    # ... and the demoted old head carries its own qty, not the running total.
+    assert sorted(o["qty_available"] for o in card["sub_offers"]) == sorted([q0, q1])
+    assert {o["source_type"] for o in card["sub_offers"]} == {"nexar", "digikey"}
+    # Head-only bookkeeping never leaks into the sub-offer dicts.
+    for sub in card["sub_offers"]:
+        assert "sub_offers" not in sub
+        assert "offer_count" not in sub
+        assert "sources_found" not in sub
+        assert "own_qty_available" not in sub
+
+
+def test_incremental_dedup_three_offers_head_swap_on_second_then_plain_merge():
+    """Head swap on the 2nd offer followed by a non-swapping 3rd merge still sums each
+    qty once."""
+    from app.search_service import _incremental_dedup
+
+    q0, q1, q2 = 1000, 500, 250
+    existing: list[dict] = []
+
+    _incremental_dedup([_dedup_offer(60, q0, 0.45, "nexar")], existing)
+    _incremental_dedup([_dedup_offer(80, q1, 0.48, "digikey")], existing)
+    card = existing[0]
+    assert card["source_type"] == "digikey"  # swapped head
+    assert card["qty_available"] == q0 + q1
+
+    _incremental_dedup([_dedup_offer(70, q2, 0.50, "mouser")], existing)
+    assert card["qty_available"] == q0 + q1 + q2  # pre-fix: 1500 + 1000 + 250 = 2750
+    assert card["source_type"] == "digikey"
+    assert sorted(o["qty_available"] for o in card["sub_offers"]) == sorted([q0, q2])
+
+
+@pytest.mark.parametrize("scores", list(permutations([10, 20, 30])))
+def test_incremental_dedup_three_offers_every_score_order_sums_quantities_once(scores):
+    """Whatever order the scores arrive in (head swap on any merge, or none), every
+    intermediate and final qty_available is the plain sum of the offers merged so
+    far."""
+    from app.search_service import _incremental_dedup
+
+    qtys = [1000, 500, 250]
+    existing: list[dict] = []
+
+    for i, (score, qty) in enumerate(zip(scores, qtys, strict=True)):
+        _incremental_dedup([_dedup_offer(score, qty, 0.40 + i / 100, f"src{i}")], existing)
+        assert len(existing) == 1
+        assert existing[0]["qty_available"] == sum(qtys[: i + 1])
+
+    card = existing[0]
+    assert card["offer_count"] == 3
+    assert card["score"] == max(scores)  # best-scored offer is the head
+    head_qty = qtys[scores.index(max(scores))]
+    assert sorted(o["qty_available"] for o in card["sub_offers"]) == sorted(q for q in qtys if q != head_qty)
+
+
+def test_incremental_dedup_unknown_quantities_are_skipped_in_the_sum():
+    """None quantities contribute nothing; all-None stays None; a 0-qty offer is dropped
+    outright."""
+    from app.search_service import _incremental_dedup
+
+    existing: list[dict] = []
+    _incremental_dedup([_dedup_offer(80, None, 0.45, "nexar")], existing)
+    _incremental_dedup([_dedup_offer(70, None, 0.48, "digikey")], existing)
+    assert existing[0]["qty_available"] is None
+
+    _incremental_dedup([_dedup_offer(60, 100, 0.50, "mouser")], existing)
+    assert existing[0]["qty_available"] == 100
+
+    # A better-scored offer with a known qty takes the head; 100 + 50, the Nones add nothing.
+    _incremental_dedup([_dedup_offer(90, 50, 0.40, "octopart")], existing)
+    assert existing[0]["qty_available"] == 150
+    assert existing[0]["offer_count"] == 4
+
+    new_cards, updated = _incremental_dedup([_dedup_offer(95, 0, 0.10, "brokerbin")], existing)
+    assert (new_cards, updated) == ([], [])
+    assert existing[0]["qty_available"] == 150
+    assert existing[0]["offer_count"] == 4
 
 
 # ── Streaming search tests ─────────────────────────────────────────────
@@ -372,6 +533,138 @@ async def test_stream_search_publishes_events(db_session):
     for e in published_events:
         if e["event"] == "card-update" and e["data"]:
             assert "hx-swap-oob" in e["data"]
+
+
+@pytest.mark.asyncio
+async def test_stream_search_publishes_summary_before_done(db_session):
+    """A live run publishes the market-summary KPI strip as a "summary" event AFTER the
+    result cards and BEFORE the terminal "done" event.
+
+    "done" closes the SSE connection (sse-close), so a summary published after it never
+    reaches the browser. The payload is the rendered market_summary.html HTML, built
+    from rows scored by the real _score_raw_hit (so its confidence_color drives the
+    "High confidence" tile).
+    """
+    from app.search_service import stream_search_mpn
+
+    published_events, mock_publish = _make_event_collector()
+
+    with (
+        patch("app.search_service.broker", create=True) as mock_broker,
+        patch("app.search_service._build_connectors") as mock_build,
+        patch("app.search_service.SessionLocal", lambda: db_session),
+    ):
+        mock_broker.publish = mock_publish
+
+        fake_connector = MagicMock()
+        fake_connector.source_name = "nexar"
+        fake_connector.search = AsyncMock(
+            return_value=[
+                {
+                    "vendor_name": "Arrow",
+                    "mpn_matched": "LM317T",
+                    "unit_price": 0.45,
+                    "qty_available": 1000,
+                    "source_type": "nexar",
+                    "is_authorized": True,
+                    "confidence": 4,  # 4/5 -> 80% -> green
+                },
+                {
+                    "vendor_name": "Shady Broker",
+                    "mpn_matched": "LM317T",
+                    "unit_price": 0.20,
+                    "qty_available": 10,
+                    "source_type": "nexar",
+                    "is_authorized": False,
+                    "confidence": 0.2,  # 20% -> red
+                },
+            ]
+        )
+        mock_build.return_value = ([fake_connector], {}, set())
+
+        await stream_search_mpn("test-summary-id", "LM317T")
+
+    event_types = [e["event"] for e in published_events]
+    assert event_types.count("summary") == 1
+    assert event_types.count("done") == 1
+    assert event_types.index("results") < event_types.index("summary") < event_types.index("done")
+    assert event_types[-1] == "done"  # nothing is published after the terminal event
+
+    summary = next(e for e in published_events if e["event"] == "summary")
+    assert summary["channel"] == "search:test-summary-id"
+    assert "Vendors" in summary["data"]
+    assert "High confidence" in summary["data"]
+    tiles = _tile_values(summary["data"])
+    assert tiles["Vendors"] == "2"
+    assert tiles["Authorized"] == "1"
+    assert tiles["High confidence"] == "1"  # only Arrow is green
+    assert tiles["Best price"] == "$0.2000"
+    assert tiles["Total stock"] == "1,010"
+
+
+@pytest.mark.asyncio
+async def test_stream_search_no_hits_publishes_no_summary(db_session):
+    """No accumulated rows → no "summary" event (the empty state owns that case); "done"
+    still fires."""
+    from app.search_service import stream_search_mpn
+
+    published_events, mock_publish = _make_event_collector()
+
+    with (
+        patch("app.search_service.broker", create=True) as mock_broker,
+        patch("app.search_service._build_connectors") as mock_build,
+        patch("app.search_service.SessionLocal", lambda: db_session),
+    ):
+        mock_broker.publish = mock_publish
+        fake_connector = MagicMock()
+        fake_connector.source_name = "nexar"
+        fake_connector.search = AsyncMock(return_value=[])
+        mock_build.return_value = ([fake_connector], {}, set())
+
+        await stream_search_mpn("test-no-hits-id", "LM317T")
+
+    event_types = [e["event"] for e in published_events]
+    assert "summary" not in event_types
+    assert event_types[-1] == "done"
+
+
+@pytest.mark.asyncio
+async def test_stream_search_summary_render_failure_never_blocks_done(db_session):
+    """The summary strip is best-effort: a render failure is swallowed, no "summary" is
+    published, and the terminal "done" event still fires."""
+    from app.search_service import stream_search_mpn
+
+    published_events, mock_publish = _make_event_collector()
+
+    with (
+        patch("app.search_service.broker", create=True) as mock_broker,
+        patch("app.search_service._build_connectors") as mock_build,
+        patch("app.search_service.SessionLocal", lambda: db_session),
+        patch("app.search_service._render_market_summary_html", side_effect=RuntimeError("template boom")),
+    ):
+        mock_broker.publish = mock_publish
+        fake_connector = MagicMock()
+        fake_connector.source_name = "nexar"
+        fake_connector.search = AsyncMock(
+            return_value=[
+                {
+                    "vendor_name": "Arrow",
+                    "mpn_matched": "LM317T",
+                    "unit_price": 0.45,
+                    "qty_available": 1000,
+                    "source_type": "nexar",
+                    "is_authorized": True,
+                }
+            ]
+        )
+        mock_build.return_value = ([fake_connector], {}, set())
+
+        await stream_search_mpn("test-summary-boom-id", "LM317T")
+
+    event_types = [e["event"] for e in published_events]
+    assert "results" in event_types
+    assert "summary" not in event_types
+    assert event_types[-1] == "done"
 
 
 # ── Route tests ───────────────────────────────────────────────────────
@@ -442,7 +735,7 @@ def test_render_search_vendor_cards_html_for_streaming():
         "source_type": "nexar",
         "sub_offers": [],
         "offer_count": 1,
-        "sources_found": {"nexar"},
+        "sources_found": ["nexar"],
         "reason": "ok",
     }
     html = _render_search_vendor_cards_html([card], search_id="sid-1", start_index=3, swap_oob=False)
@@ -533,6 +826,17 @@ def test_search_run_empty_mpn_returns_error(client):
     assert "Please enter a part number" in resp.text
 
 
+def _assert_no_market_summary_strip(html):
+    """The KPI tile strip lives ABOVE #search-results-cards, outside the filter swap
+    target, so /v2/partials/search/filter (which swaps INTO that container) must return
+    vendor cards only — never the strip, or a filter change would nest a second strip
+    inside the card list."""
+    assert "High confidence" not in html
+    assert "Market summary" not in html
+    assert 'role="group"' not in html
+    assert _tile_values(html) == {}
+
+
 def test_search_filter_reads_from_cache(client, db_session):
     """GET /v2/partials/search/filter returns re-rendered cards from cached results."""
     cached_results = [
@@ -562,6 +866,7 @@ def test_search_filter_reads_from_cache(client, db_session):
         )
     assert resp.status_code == 200
     assert "Arrow" in resp.text
+    _assert_no_market_summary_strip(resp.text)
 
 
 def test_lead_detail_matches_vendor_with_suffix(client, db_session):
@@ -673,6 +978,7 @@ def test_search_filter_confidence_filters(client, db_session):
     assert resp.status_code == 200
     assert "Arrow" in resp.text
     assert "Shady Broker" not in resp.text
+    _assert_no_market_summary_strip(resp.text)
 
 
 # ── Add to Requisition tests ────────────────────────────────────────────

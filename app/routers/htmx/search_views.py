@@ -2,7 +2,7 @@
 
 Covers global type-ahead search, the AI search box, the full search-results page,
 the search form (Part Dossier entry point + history panel), the streaming
-MPN search (search/run + SSE stream + filter + lead-detail), and the
+MPN search (search/run + SSE stream + summary fallback + filter + lead-detail), and the
 requisition-picker "add shortlisted results to a requisition" flow. Extracted
 verbatim from htmx_views.py (same `/v2/partials/search/...` paths, same
 `htmx-views` tag).
@@ -401,6 +401,33 @@ def _get_cached_search_results(search_id: str) -> list[dict] | None:
     except Exception:
         logger.warning("Redis cache lookup failed for search", exc_info=True)
     return None
+
+
+@router.get("/v2/partials/search/summary", response_class=HTMLResponse)
+async def search_summary(
+    request: Request,
+    search_id: str = Query(...),
+    user: User = Depends(require_user),
+):
+    """Render the market-summary KPI tile strip for a finished search, from the Redis
+    cache.
+
+    Fallback for the lost-"summary"-event race: stream_search_mpn publishes the SSE
+    "summary" event just before "done", and the SSE broker has no replay, so on the fast
+    shared-cache-hit branch the whole stream can finish before the browser subscribes.
+    results_shell.html calls this on htmx:sseClose when #market-summary is still empty.
+    A cache miss, an expired search_id, or a zero-vendor result set renders an empty body
+    (market_summary.html renders nothing for a falsy summary) — the desired empty answer.
+
+    Called by: results_shell.html (htmx.ajax on htmx:sseClose when #market-summary is empty)
+    Depends on: _get_cached_search_results, search_service.compute_market_summary,
+        market_summary.html template
+    """
+    from ...search_service import compute_market_summary
+
+    rows = _get_cached_search_results(search_id)
+    ctx = {"request": request, "market_summary": compute_market_summary(rows) if rows else None}
+    return template_response("htmx/partials/search/market_summary.html", ctx)
 
 
 @router.get("/v2/partials/search/filter", response_class=HTMLResponse)
