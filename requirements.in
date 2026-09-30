@@ -60,3 +60,15 @@ defusedxml>=0.7.1,<1.0
 # Azure Communication Services (click-to-call)
 azure-communication-callautomation>=1.6.0,<2.0
 azure-communication-identity>=1.5.0,<2.0
+# Transitive security floors — pip-audit findings, 2026-09. Each package is a
+# transitive dep whose compiled pin carried known CVEs; the floor forces the
+# resolver past the fixed release.
+# anyio (via httpx/fastapi): CVE-2026-63374, CVE-2026-64847
+anyio>=4.14.2
+# urllib3 (via requests, sentry-sdk): CVE-2026-97687/97688/97689
+urllib3>=2.8.0
+# soupsieve (via beautifulsoup4): CVE-2026-85999, CVE-2026-86000
+soupsieve>=2.9.0
+# oauthlib (via requests-oauthlib/msrest): CVE-2026-49265 (PKCE timing
+# side-channel). Major bump 3.x -> 4.0.
+oauthlib>=4.0.0

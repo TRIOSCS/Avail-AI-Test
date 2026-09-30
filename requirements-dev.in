@@ -45,3 +45,7 @@ ipdb>=0.13.13
 # Lockfile management — compiles requirements*.in -> requirements*.txt.
 # Pinned in the lock so CI's drift-gate uses the same compiler version we do.
 pip-tools>=7.6.1
+
+# Transitive security floor — pip-audit findings, 2026-09.
+# virtualenv (via pre-commit): PYSEC-2026-4011/4012/4013/4014
+virtualenv>=21.7.13
