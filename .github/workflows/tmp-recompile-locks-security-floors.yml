@@ -1,0 +1,67 @@
+# TEMPORARY — recompiles the pip-tools lockfiles on Linux for the security-floor
+# branch and pushes the result back, because pip-compile resolves platform markers
+# for the host it runs on and no Linux host is available locally. Mirrors
+# dependabot-lockfile-sync.yml (same toolchain as ci.yml's drift gate). This file
+# is removed from the branch in a follow-up commit once the recompile has run;
+# it must never reach main.
+name: Temp lockfile recompile (security floors)
+
+on:
+  push:
+    branches: [claude/wizardly-keller-ced241]
+
+permissions:
+  contents: write
+
+jobs:
+  recompile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Recompile pip-tools lockfiles
+        # Identical toolchain + flags to ci.yml's "Verify requirements lockfiles
+        # are in sync" step: pip<26.2 (26.2 breaks pip-tools' import), pip-tools
+        # 7.6.1 (the version pinned in requirements-dev.txt).
+        run: |
+          python -m pip install --quiet "pip<26.2" "pip-tools==7.6.1"
+          pip-compile --no-header --no-strip-extras --quiet requirements.in
+          pip-compile --no-header --no-strip-extras --quiet requirements-dev.in
+          echo "=== lockfile diff ==="
+          git diff --stat requirements.txt requirements-dev.txt
+          git diff requirements.txt requirements-dev.txt
+
+      - name: Commit & push recompiled locks (only if they changed)
+        run: |
+          if git diff --quiet -- requirements.txt requirements-dev.txt; then
+            echo "Lockfiles already in sync — nothing to recompile."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add requirements.txt requirements-dev.txt
+          git commit -F- <<'MSG'
+          chore(deps): recompile lockfiles on Linux for the security floors
+
+          pip-compile resolves platform markers for the host it runs on; the
+          committed locks are Linux-resolved, so the recompile for the new
+          security floors in requirements*.in must run on Linux (ubuntu +
+          Python 3.13 + pip-tools 7.6.1, matching ci.yml's drift gate).
+          Compiled by the temporary tmp-recompile-locks-security-floors
+          workflow, which is removed from the branch right after this commit.
+
+          Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+          MSG
+          git push
+
+      - name: pip-audit report (after push, informational gate)
+        # Runs AFTER the push so a brand-new advisory in an unrelated pin can't
+        # strand the recompiled locks. Same invocation as security.yml.
+        run: |
+          python -m pip install --quiet pip-audit
+          pip-audit --desc --requirement requirements.txt --requirement requirements-dev.txt
