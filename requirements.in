@@ -60,3 +60,18 @@ defusedxml>=0.7.1,<1.0
 # Azure Communication Services (click-to-call)
 azure-communication-callautomation>=1.6.0,<2.0
 azure-communication-identity>=1.5.0,<2.0
+
+# ── Security floors (pip-audit, QC 2026-09-30) ─────────────────────────────
+# Transitive deps pinned below their CVE-fix releases by the resolver; floor
+# them here so pip-compile picks patched versions. Each is otherwise pulled in
+# via the package noted. Remove a floor once the pulling package requires the
+# fixed version on its own.
+# CVE-2026-63374 / CVE-2026-64847 (via httpx/anthropic/sse-starlette)
+anyio>=4.14.2
+# CVE-2026-97687/97688/97689 (via requests, sentry-sdk)
+urllib3>=2.8.0
+# CVE-2026-85999 / CVE-2026-86000 ReDoS (via beautifulsoup4)
+soupsieve>=2.9.0
+# CVE-2026-49265 PKCE timing side-channel (via requests-oauthlib/msrest) —
+# major bump 3.x→4.0; app code never imports oauthlib directly.
+oauthlib>=4.0.0
