@@ -628,8 +628,8 @@ class TestMarketBaselineStripRender:
 class TestComputeMarketSummary:
     """Unit tests for compute_market_summary — no DB, no HTTP, no SSE.
 
-    Whole-result-set KPI counts for the tile strip (market_summary.html), on plain
-    dicts (same schema as cached_rows / vendor_card.html).
+    Whole-result-set KPI counts for the tile strip (market_summary.html), on plain dicts
+    (same schema as cached_rows / vendor_card.html).
     """
 
     def test_empty_input_returns_zeros(self):
@@ -721,8 +721,8 @@ class TestMarketSummaryStrip:
         return rc
 
     def test_cache_hit_renders_kpi_tiles(self, client):
-        """Cache hit → the six tiles render with whole-set counts (2 vendors,
-        1 authorized, 1 high confidence, best price $0.8400, stock 1,250)."""
+        """Cache hit → the six tiles render with whole-set counts (2 vendors, 1
+        authorized, 1 high confidence, best price $0.8400, stock 1,250)."""
         rc = self._patch_redis(self._rows())
         with patch("app.search_service._get_search_redis", return_value=rc):
             resp = client.get("/v2/partials/search/dossier/market", params={"mpn": "LM317T"})
@@ -734,8 +734,8 @@ class TestMarketSummaryStrip:
         assert "1,250" in body
 
     def test_cache_miss_has_no_tiles_server_side(self, client):
-        """Cache miss → no server-rendered tiles; the SSE frame fills #market-summary
-        at stream end instead."""
+        """Cache miss → no server-rendered tiles; the SSE frame fills #market-summary at
+        stream end instead."""
         resp = client.get("/v2/partials/search/dossier/market", params={"mpn": "LM317T"})
         assert resp.status_code == 200
         assert "High confidence" not in resp.text

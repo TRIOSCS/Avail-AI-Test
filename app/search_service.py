@@ -1475,7 +1475,10 @@ def _render_market_summary_html(rows: list[dict]) -> str:
     from .template_env import templates
 
     tmpl = templates.get_template("htmx/partials/search/market_summary.html")
-    return tmpl.render(market_summary=compute_market_summary(rows))
+    # str() wrapper: the pre-commit mypy env has no jinja2 stubs, so render() is Any
+    # there (no-any-return); under the repo config it is already str, and str(str) is
+    # a no-op, so both environments type-check clean.
+    return str(tmpl.render(market_summary=compute_market_summary(rows)))
 
 
 # ── Smart AI trigger ─────────────────────────────────────────────────────
