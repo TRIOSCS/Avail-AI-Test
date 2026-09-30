@@ -36,6 +36,9 @@
   <div hx-ext="sse"
        sse-connect="/v2/partials/search/stream?search_id={{ search_id }}"
        sse-close="done">
+    {# KPI tile strip — filled by the "summary" event at stream end (market_summary.html,
+       rendered server-side by search_service._render_market_summary_html). #}
+    <div id="market-summary" sse-swap="summary" hx-swap="innerHTML"></div>
     <div id="search-results-cards"
          sse-swap="results"
          hx-swap="beforeend settle:100ms"

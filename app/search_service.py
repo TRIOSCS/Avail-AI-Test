@@ -153,6 +153,50 @@ def compute_market_baseline(rows: list[dict]) -> dict:
     }
 
 
+def compute_market_summary(rows: list[dict]) -> dict:
+    """Compute the KPI-tile counts for the market-summary strip (market_summary.html).
+
+    Unlike ``compute_market_baseline`` (authorized rows only), this summarizes the
+    WHOLE result set — one tile row across the top of the Live market section, so a
+    buyer reads the market's shape before scanning rows.
+
+    Args:
+        rows: List of market-row dicts (same schema as cached_rows / vendor_card.html).
+              Each may carry ``unit_price`` (float|None), ``qty_available`` (int|None),
+              ``is_authorized`` (bool), ``confidence_color`` (str), ``offer_count``
+              (int|None) and ``sub_offers`` (list|None).
+
+    Returns:
+        A dict with keys:
+          - ``vendors``:         int — number of market rows (one row per vendor).
+          - ``offers``:          int — total offers (a row's offer_count / sub_offers,
+                                 minimum 1 per row — mirrors vendor_card.html's count).
+          - ``authorized``:      int — rows flagged franchise/authorized.
+          - ``high_confidence``: int — rows whose confidence_color is "green".
+          - ``best_price``:      float|None — lowest positive unit_price, any row.
+          - ``total_stock``:     int|None — sum of known qty_available values; None
+                                 when no row has a known qty.
+
+    No DB access, no side-effects. Safe to call with an empty list.
+    """
+    offers = 0
+    for r in rows:
+        count = r.get("offer_count") or len(r.get("sub_offers") or [])
+        offers += count if count else 1
+
+    prices = [r["unit_price"] for r in rows if r.get("unit_price") and r["unit_price"] > 0]
+    known_qtys = [r["qty_available"] for r in rows if r.get("qty_available") is not None]
+
+    return {
+        "vendors": len(rows),
+        "offers": offers,
+        "authorized": sum(1 for r in rows if r.get("is_authorized")),
+        "high_confidence": sum(1 for r in rows if r.get("confidence_color") == "green"),
+        "best_price": min(prices) if prices else None,
+        "total_stock": sum(known_qtys) if known_qtys else None,
+    }
+
+
 # ── Search result cache (Redis, 15-min TTL) ─────────────────────────────
 
 _SEARCH_CACHE_TTL = 900  # 15 minutes
@@ -1418,6 +1462,20 @@ def _render_search_vendor_cards_html(
             )
         )
     return "".join(parts)
+
+
+def _render_market_summary_html(rows: list[dict]) -> str:
+    """Render the market-summary KPI tile strip for HTMX SSE (must be HTML, not JSON).
+
+    Called by: stream_search_mpn (the "summary" event, published just before "done" —
+    results_shell.html swaps it into #market-summary).
+    Depends on: app.template_env.templates, htmx/partials/search/market_summary.html,
+                compute_market_summary.
+    """
+    from .template_env import templates
+
+    tmpl = templates.get_template("htmx/partials/search/market_summary.html")
+    return tmpl.render(market_summary=compute_market_summary(rows))
 
 
 # ── Smart AI trigger ─────────────────────────────────────────────────────
@@ -3507,6 +3565,16 @@ async def stream_search_mpn(search_id: str, mpn: str) -> None:
                     search_id,
                     len(accumulated),
                 )
+
+            # KPI tile strip over the finished result set — published BEFORE the
+            # terminal "done" event ("done" closes the SSE connection via sse-close,
+            # so anything after it never reaches the browser). Best-effort: a render
+            # failure must never block the terminal event.
+            if accumulated:
+                try:
+                    await active_broker.publish(channel, "summary", _render_market_summary_html(accumulated))
+                except Exception:
+                    logger.exception("Failed to publish market-summary event: search_id={}", search_id)
 
             # All connectors done
             elapsed_total = round(time.time() - t_start, 1)

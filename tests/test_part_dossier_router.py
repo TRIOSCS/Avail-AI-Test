@@ -620,3 +620,133 @@ class TestMarketBaselineStripRender:
         assert resp.status_code == 200
         assert "Franchise baseline" not in resp.text
         assert "/v2/partials/search/run" in resp.text  # SSE frame fires instead
+
+
+# ── Market-summary KPI tile strip — helper unit tests + endpoint render ───
+
+
+class TestComputeMarketSummary:
+    """Unit tests for compute_market_summary — no DB, no HTTP, no SSE.
+
+    Whole-result-set KPI counts for the tile strip (market_summary.html), on plain
+    dicts (same schema as cached_rows / vendor_card.html).
+    """
+
+    def test_empty_input_returns_zeros(self):
+        from app.search_service import compute_market_summary
+
+        result = compute_market_summary([])
+        assert result == {
+            "vendors": 0,
+            "offers": 0,
+            "authorized": 0,
+            "high_confidence": 0,
+            "best_price": None,
+            "total_stock": None,
+        }
+
+    def test_counts_vendors_authorized_and_high_confidence(self):
+        from app.search_service import compute_market_summary
+
+        rows = [
+            {"is_authorized": True, "confidence_color": "green", "unit_price": 2.0, "qty_available": 100},
+            {"is_authorized": False, "confidence_color": "green", "unit_price": 1.5, "qty_available": 50},
+            {"is_authorized": False, "confidence_color": "amber", "unit_price": None, "qty_available": None},
+        ]
+        result = compute_market_summary(rows)
+        assert result["vendors"] == 3
+        assert result["authorized"] == 1
+        assert result["high_confidence"] == 2
+        assert result["best_price"] == 1.5
+        assert result["total_stock"] == 150
+
+    def test_offers_use_offer_count_then_sub_offers_then_one(self):
+        from app.search_service import compute_market_summary
+
+        rows = [
+            {"offer_count": 4},  # explicit count wins
+            {"sub_offers": [{}, {}]},  # falls back to len(sub_offers)
+            {},  # bare row still counts as one offer
+        ]
+        assert compute_market_summary(rows)["offers"] == 7
+
+    def test_best_price_ignores_zero_and_none(self):
+        from app.search_service import compute_market_summary
+
+        rows = [{"unit_price": 0}, {"unit_price": None}, {"unit_price": 3.25}]
+        assert compute_market_summary(rows)["best_price"] == 3.25
+
+    def test_no_known_qty_total_stock_none(self):
+        from app.search_service import compute_market_summary
+
+        rows = [{"unit_price": 1.0}, {"unit_price": 2.0}]
+        assert compute_market_summary(rows)["total_stock"] is None
+
+
+class TestMarketSummaryStrip:
+    """The KPI tile strip renders on the dossier cache-hit path and via the SSE
+    "summary" event renderer, and stays absent on a cache miss."""
+
+    def _rows(self):
+        return [
+            {
+                "vendor_name": "Tile Vendor A",
+                "mpn_matched": "LM317T",
+                "unit_price": 0.84,
+                "qty_available": 1000,
+                "is_authorized": True,
+                "confidence_color": "green",
+                "confidence_pct": 91,
+                "source_type": "digikey",
+                "sources_found": ["digikey"],
+            },
+            {
+                "vendor_name": "Tile Vendor B",
+                "mpn_matched": "LM317T",
+                "unit_price": 1.10,
+                "qty_available": 250,
+                "is_authorized": False,
+                "confidence_color": "amber",
+                "confidence_pct": 60,
+                "source_type": "brokerbin",
+                "sources_found": ["brokerbin"],
+            },
+        ]
+
+    def _patch_redis(self, rows):
+        rc = MagicMock()
+        rc.get.side_effect = lambda k: (
+            "sid-summary-test" if k.endswith(":latest") else (json.dumps(rows) if k.endswith(":results") else None)
+        )
+        return rc
+
+    def test_cache_hit_renders_kpi_tiles(self, client):
+        """Cache hit → the six tiles render with whole-set counts (2 vendors,
+        1 authorized, 1 high confidence, best price $0.8400, stock 1,250)."""
+        rc = self._patch_redis(self._rows())
+        with patch("app.search_service._get_search_redis", return_value=rc):
+            resp = client.get("/v2/partials/search/dossier/market", params={"mpn": "LM317T"})
+        assert resp.status_code == 200
+        body = resp.text
+        for label in ("Vendors", "Offers", "Authorized", "High confidence", "Best price", "Total stock"):
+            assert label in body
+        assert "$0.8400" in body
+        assert "1,250" in body
+
+    def test_cache_miss_has_no_tiles_server_side(self, client):
+        """Cache miss → no server-rendered tiles; the SSE frame fills #market-summary
+        at stream end instead."""
+        resp = client.get("/v2/partials/search/dossier/market", params={"mpn": "LM317T"})
+        assert resp.status_code == 200
+        assert "High confidence" not in resp.text
+
+    def test_sse_renderer_produces_tile_strip(self):
+        """_render_market_summary_html (the "summary" SSE event body) renders the same
+        tile strip from raw rows, and renders empty for an empty set."""
+        from app.search_service import _render_market_summary_html
+
+        html = _render_market_summary_html(self._rows())
+        assert "Vendors" in html
+        assert "High confidence" in html
+        assert "$0.8400" in html
+        assert _render_market_summary_html([]).strip() == ""
