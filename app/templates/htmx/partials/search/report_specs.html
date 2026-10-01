@@ -1,0 +1,51 @@
+{# search/report_specs.html — specs & datasheet block for the report header (lazy, on the
+   first "Specs & datasheet" toggle). Structured specs with their evidence tags, then
+   package / pins / RoHS / lifecycle / condition, cross references, and the datasheet pills.
+   Called by: part_dossier.dossier_specs (GET /v2/partials/search/dossier/specs).
+   Depends on: card (MaterialCard | None), specs_display (list[{label, value, source,
+               confidence}] from spec_format.format_specs_for_display), mpn,
+               search/_datasheet_block.html. #}
+{% set unenriched = (card is none) or (card.enrichment_status in (none, 'unenriched')) %}
+
+{% if card is none %}
+<p class="text-sm text-gray-600">New to us — no enrichment yet. The first sourcing action queues this part for enrichment.</p>
+{% else %}
+
+{% if specs_display or card.package_type or card.rohs_status or card.lifecycle_status or card.pin_count or card.specs_summary %}
+<dl class="grid grid-cols-2 gap-x-6 gap-y-3 text-sm lg:grid-cols-4">
+  {% for item in specs_display %}
+  <div>
+    <dt class="text-[11px] uppercase tracking-wide text-gray-600">{{ item.label }}</dt>
+    <dd class="text-gray-900">
+      <span class="font-mono">{{ item.value }}</span>
+      {% if item.source %}
+      {% set conf = (item.confidence or 0)|float %}
+      <span class="badge-mini ml-1 align-middle {{ 'bg-brand-50 text-brand-600' if conf >= 0.9 else 'bg-gray-50 text-gray-600' }}"
+            title="source: {{ item.source }}{% if item.confidence is not none %} · conf {{ item.confidence }}{% endif %}">{{ 'Direct' if conf >= 0.9 else 'Sourced' }}</span>
+      {% endif %}
+    </dd>
+  </div>
+  {% endfor %}
+  {% if card.package_type %}<div><dt class="text-[11px] uppercase tracking-wide text-gray-600">Package</dt><dd class="font-mono text-gray-900">{{ card.package_type }}</dd></div>{% endif %}
+  {% if card.pin_count %}<div><dt class="text-[11px] uppercase tracking-wide text-gray-600">Pins</dt><dd class="font-mono text-gray-900">{{ card.pin_count }}</dd></div>{% endif %}
+  {% if card.rohs_status %}<div><dt class="text-[11px] uppercase tracking-wide text-gray-600">RoHS</dt><dd class="text-gray-900">{{ card.rohs_status|title }}</dd></div>{% endif %}
+  {% if card.lifecycle_status %}<div><dt class="text-[11px] uppercase tracking-wide text-gray-600">Lifecycle</dt><dd class="text-gray-900">{{ card.lifecycle_status|title }}</dd></div>{% endif %}
+  {% if card.condition %}<div><dt class="text-[11px] uppercase tracking-wide text-gray-600">Condition</dt><dd class="text-gray-900">{{ card.condition }}</dd></div>{% endif %}
+</dl>
+{% if card.specs_summary %}<p class="mt-3 text-xs leading-relaxed text-gray-600">{{ card.specs_summary }}</p>{% endif %}
+{% if card.cross_references %}
+<div class="mt-3">
+  <p class="mb-1.5 text-[11px] uppercase tracking-wide text-gray-600">Cross references</p>
+  <div class="flex flex-wrap gap-1.5">
+    {% for x in card.cross_references %}
+    <span class="chip font-mono">{{ x.mpn if x is mapping else x }}{% if x is mapping and x.manufacturer %} · {{ x.manufacturer }}{% endif %}</span>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+{% else %}
+<p class="text-sm text-gray-600">{% if unenriched %}Unenriched — enriching. We know this part, but its specs haven't been filled in yet.{% else %}No specs on record.{% endif %}</p>
+{% endif %}
+
+{% include "htmx/partials/search/_datasheet_block.html" %}
+{% endif %}

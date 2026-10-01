@@ -1,0 +1,58 @@
+{# search/_live_row.html — one vendor posting (table row) in "Posting now".
+   Rendered per SSE results event (beforeend into #live-rows), for cached runs
+   (report_live.html include), and by the sort endpoint (search_views.search_filter).
+   Row click opens the detail drawer; the checkbox selects the vendor for Send RFQ / Add
+   offer ($store.shortlist); RFQ sends this vendor alone (quick-source).
+   Called by: search_service._render_search_vendor_cards_html, search_views.search_filter,
+              search/report_live.html.
+   Depends on: Alpine.js $store.shortlist, #lead-drawer-content (report.html), |slug, |unitprice.
+   Context: card (dict — one scored market row), search_id (str), swap_oob (bool, optional):
+            when true HTMX replaces the row with the same id (card-update SSE event). #}
+{% set conf = card.confidence_color|default('red') %}
+{% set srcs = card.sources_found|default([])|list %}
+<tr id="live-{{ search_id|slug }}-{{ card.vendor_name|slug }}"
+    {% if swap_oob %}hx-swap-oob="true"{% endif %}
+    data-live-row data-auth="{{ 1 if card.is_authorized else 0 }}"
+    class="live-row cursor-pointer"
+    hx-get="/v2/partials/search/lead-detail?search_id={{ search_id|urlencode }}&amp;vendor_key={{ card.vendor_name|urlencode }}"
+    hx-target="#lead-drawer-content" hx-swap="innerHTML" hx-trigger="click">
+  <td class="w-8">
+    {# External vendor_name / mpn / source_type ride data-* attributes (HTML-escaped, never
+       evaluated) and are read back through $el.dataset. #}
+    <input type="checkbox" class="accent-brand-500" aria-label="Select {{ card.vendor_name }}"
+           data-vn="{{ card.vendor_name }}" data-mpn="{{ card.mpn_matched or '' }}" data-st="{{ card.source_type or '' }}"
+           @click.stop @keyup.stop
+           :checked="$store.shortlist.has($el.dataset.vn, $el.dataset.mpn)"
+           @change="$store.shortlist.toggle({vendor_name: $el.dataset.vn, mpn: $el.dataset.mpn, unit_price: {{ card.unit_price or 0 }}, qty_available: {{ card.qty_available or 0 }}, source_type: $el.dataset.st})">
+  </td>
+  <td>
+    <span class="font-medium text-gray-900">{{ card.vendor_name }}</span>
+    {% if card.is_authorized %}<span class="badge-mini ml-1.5 bg-emerald-50 text-emerald-700">Auth</span>{% endif %}
+  </td>
+  <td class="font-data">{{ card.mpn_matched or '—' }}</td>
+  <td class="text-gray-600">{{ card.manufacturer or '—' }}</td>
+  <td class="font-data text-right">
+    {%- if card.qty_available %}{{ "{:,}".format(card.qty_available) }}{% else %}<span class="text-gray-400">—</span>{% endif -%}
+    {%- if card.moq %}<span class="text-gray-400" title="MOQ {{ card.moq }}"> / {{ "{:,}".format(card.moq) }}</span>{% endif -%}
+  </td>
+  <td class="font-data text-right">{% if card.unit_price %}${{ card.unit_price|unitprice }}{% else %}<span class="text-gray-400">RFQ</span>{% endif %}</td>
+  <td class="text-gray-600">
+    {%- if card.condition or card.date_code -%}
+      {{ card.condition or '' }}{% if card.condition and card.date_code %} · {% endif %}{{ card.date_code or '' }}
+    {%- else %}—{% endif -%}
+  </td>
+  <td class="text-gray-600">{{ card.lead_time or '—' }}</td>
+  <td>
+    <span class="chip">{{ card.source_type or '—' }}</span>
+    {%- if srcs|length > 1 %} <span class="text-tertiary" title="{{ srcs|join(', ') }}">+{{ srcs|length - 1 }}</span>{% endif %}
+  </td>
+  <td class="font-data text-right whitespace-nowrap">
+    <span class="mr-1.5 inline-block h-2 w-2 rounded-full {% if conf == 'green' %}bg-emerald-500{% elif conf == 'amber' %}bg-amber-500{% else %}bg-rose-500{% endif %}"></span>{{ card.confidence_pct|default(0) }}%
+  </td>
+  <td class="text-right whitespace-nowrap">
+    <button type="button" class="btn-ghost btn-sm" title="Send RFQ to {{ card.vendor_name }}"
+            @click.stop @keyup.stop
+            hx-post="/v2/partials/search/quick-source/rfq"
+            hx-vals='{{ {"mpn": card.mpn_matched or "", "vendor_name": card.vendor_name}|tojson }}'>RFQ</button>
+  </td>
+</tr>

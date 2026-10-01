@@ -14,21 +14,17 @@ from app.connectors.sources import NexarConnector
 
 
 def _render_template(name, **context):
-    """Render a Jinja2 template from app/templates with the given context."""
-    from jinja2 import Environment, FileSystemLoader
+    """Render a template through the app's configured Jinja env (custom filters
+    included)."""
+    from app.template_env import templates
 
-    env = Environment(loader=FileSystemLoader("app/templates"))
-    return env.get_template(name).render(**context)
+    return templates.env.get_template(name).render(**context)
 
 
-def _render_vendor_card(card, card_index, search_id):
-    """Render the vendor_card.html partial for a single card."""
-    return _render_template(
-        "htmx/partials/search/vendor_card.html",
-        card=card,
-        card_index=card_index,
-        search_id=search_id,
-    )
+def _render_live_row(card, search_id):
+    """Render the _live_row.html partial (one "Posting now" table row) for a single
+    card."""
+    return _render_template("htmx/partials/search/_live_row.html", card=card, search_id=search_id)
 
 
 def _make_event_collector():
@@ -364,10 +360,10 @@ async def test_stream_search_publishes_events(db_session):
     assert "total_results" in done_data
     assert "elapsed_seconds" in done_data
 
-    # SSE sse-swap="results" expects HTML vendor cards, not raw JSON
+    # SSE sse-swap="results" expects HTML table rows, not raw JSON
     for e in published_events:
         if e["event"] == "results":
-            assert "vendor-card" in e["data"]
+            assert "data-live-row" in e["data"]
             assert '"cards"' not in e["data"]
     for e in published_events:
         if e["event"] == "card-update" and e["data"]:
@@ -378,7 +374,8 @@ async def test_stream_search_publishes_events(db_session):
 
 
 def test_search_run_returns_shell_html(client, db_session):
-    """POST /v2/partials/search/run should return results shell with SSE connection."""
+    """POST /v2/partials/search/run returns the live-run fragment: source chips + the
+    SSE connection streaming rows into the report's #live-rows tbody."""
     with patch("app.search_service.stream_search_mpn", new_callable=AsyncMock):
         resp = client.post(
             "/v2/partials/search/run",
@@ -388,12 +385,14 @@ def test_search_run_returns_shell_html(client, db_session):
     assert resp.status_code == 200
     html = resp.text
     assert "sse-connect" in html
-    assert "source-chip" in html or "source-progress" in html
+    assert 'sse-swap="results"' in html and 'hx-target="#live-rows"' in html
+    assert "live-run-done" in html  # relays the SSE done event to the section counter
 
 
-def test_vendor_card_template_renders():
-    """vendor_card.html renders without errors with sample data."""
-    html = _render_vendor_card(
+def test_live_row_template_renders():
+    """_live_row.html renders the posting's vendor / part / qty / price / source /
+    match."""
+    html = _render_live_row(
         card={
             "vendor_name": "Arrow Electronics",
             "mpn_matched": "LM317T",
@@ -412,21 +411,26 @@ def test_vendor_card_template_renders():
             "sources_found": ["nexar"],
             "reason": "Authorized distributor with confirmed stock",
         },
-        card_index=0,
         search_id="test-123",
     )
+    assert 'id="live-test-123-arrow-electronics"' in html
+    assert 'data-auth="1"' in html
     assert "Arrow Electronics" in html
     assert "LM317T" in html
-    assert "0.4500" in html
+    assert "$0.45" in html
     assert "12,450" in html
-    assert "AUTH" in html
+    assert "Auth" in html
     assert "85%" in html
     assert "nexar" in html
     assert "Texas Instruments" in html
+    # Row click → detail drawer; checkbox → selection store.
+    assert "/v2/partials/search/lead-detail?search_id=test-123" in html
+    assert "$store.shortlist.toggle(" in html
 
 
 def test_render_search_vendor_cards_html_for_streaming():
-    """_render_search_vendor_cards_html produces HTMX-safe HTML for SSE (not JSON)."""
+    """_render_search_vendor_cards_html produces HTMX-safe <tr> HTML for SSE (not
+    JSON)."""
     from app.search_service import _render_search_vendor_cards_html
 
     card = {
@@ -446,7 +450,7 @@ def test_render_search_vendor_cards_html_for_streaming():
         "reason": "ok",
     }
     html = _render_search_vendor_cards_html([card], search_id="sid-1", start_index=3, swap_oob=False)
-    assert "vendor-card" in html
+    assert 'id="live-sid-1-arrow"' in html
     assert "Arrow" in html
     assert "hx-swap-oob" not in html
 
@@ -454,9 +458,16 @@ def test_render_search_vendor_cards_html_for_streaming():
     assert 'hx-swap-oob="true"' in html_oob
 
 
-def test_vendor_card_template_renders_no_price():
-    """vendor_card.html renders gracefully when unit_price is None."""
-    html = _render_vendor_card(
+def test_live_row_id_is_selector_safe_for_suffixed_vendor():
+    """A vendor name carrying ', Inc.' must yield an id HTMX can look up for the out-of-
+    band card-update swap (no comma / dot / space in the id)."""
+    html = _render_live_row(card={"vendor_name": "Mouser Electronics, Inc.", "mpn_matched": "LM317T"}, search_id="s1")
+    assert 'id="live-s1-mouser-electronics-inc"' in html
+
+
+def test_live_row_template_renders_no_price():
+    """_live_row.html renders gracefully when unit_price is None."""
+    html = _render_live_row(
         card={
             "vendor_name": "Unknown Vendor",
             "mpn_matched": "ABC123",
@@ -474,52 +485,55 @@ def test_vendor_card_template_renders_no_price():
             "sources_found": ["brokerbin"],
             "reason": "",
         },
-        card_index=3,
         search_id="test-456",
     )
     assert "Unknown Vendor" in html
-    # Re-skinned terminal row shows "RFQ" (not "No price") when unit_price is None.
+    # No price → the row says RFQ in the price cell.
     assert "RFQ" in html
-    assert "AUTH" not in html
+    assert "Auth" not in html
+    assert 'data-auth="0"' in html
 
 
-def test_vendor_card_template_renders_sub_offers():
-    """vendor_card.html renders expandable sub-offers table."""
-    html = _render_vendor_card(
-        card={
-            "vendor_name": "Mouser",
-            "mpn_matched": "LM317T",
-            "manufacturer": "TI",
-            "unit_price": 0.50,
-            "qty_available": 3000,
-            "moq": 10,
-            "confidence_color": "amber",
-            "confidence_pct": 60,
-            "lead_quality": "fair",
-            "is_authorized": True,
-            "source_type": "mouser",
-            "sub_offers": [
-                {"source_type": "digikey", "unit_price": 0.55, "qty_available": 1000},
-                {"source_type": "nexar", "unit_price": 0.48, "qty_available": 2000},
-            ],
-            "offer_count": 3,
-            "sources_found": ["mouser", "digikey", "nexar"],
-            "reason": "Multiple sources",
-        },
-        card_index=1,
-        search_id="test-789",
-    )
-    assert "3 offers" in html
-    assert "digikey" in html
-    assert "0.5500" in html
-    assert "2,000" in html
+def test_live_row_summarises_extra_sources_and_drawer_lists_them():
+    """A vendor listed by several sources shows +N on the row (names in the tooltip);
+    the detail drawer lists every listing with its price and qty."""
+    card = {
+        "vendor_name": "Mouser",
+        "mpn_matched": "LM317T",
+        "manufacturer": "TI",
+        "unit_price": 0.50,
+        "qty_available": 3000,
+        "moq": 10,
+        "confidence_color": "amber",
+        "confidence_pct": 60,
+        "lead_quality": "fair",
+        "is_authorized": True,
+        "source_type": "mouser",
+        "sub_offers": [
+            {"source_type": "digikey", "unit_price": 0.55, "qty_available": 1000},
+            {"source_type": "nexar", "unit_price": 0.48, "qty_available": 2000},
+        ],
+        "offer_count": 3,
+        "sources_found": ["mouser", "digikey", "nexar"],
+        "reason": "Multiple sources",
+    }
+    row = _render_live_row(card=card, search_id="test-789")
+    assert "+2" in row
+    assert 'title="mouser, digikey, nexar"' in row
+
+    drawer = _render_template("htmx/partials/search/lead_detail.html", lead=card, mpn="LM317T")
+    assert "Other listings (2)" in drawer
+    assert "digikey" in drawer
+    assert "$0.55" in drawer
+    assert "2,000" in drawer
 
 
-def test_shortlist_bar_template_renders():
-    """shortlist_bar.html renders with Alpine.js directives."""
-    html = _render_template("htmx/partials/search/shortlist_bar.html")
+def test_selection_bar_template_renders():
+    """_selection_bar.html renders with Alpine.js directives and the report actions."""
+    html = _render_template("htmx/partials/search/_selection_bar.html")
     assert "$store.shortlist" in html
-    assert "Add to Requisition" in html
+    assert "Send RFQ" in html
+    assert "Add to requisition" in html
 
 
 def test_search_run_empty_mpn_returns_error(client):

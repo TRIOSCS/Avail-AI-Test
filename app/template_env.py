@@ -4,6 +4,7 @@ Called by: all router files that render templates
 Depends on: Jinja2
 """
 
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -219,6 +220,41 @@ def _pricefmt_filter(value, default: str = "—") -> str:
 templates.env.filters["pricefmt"] = _pricefmt_filter
 
 
+def _unitprice_filter(value, default: str = "—") -> str:
+    """Format a unit price for a trading table: at least 2 decimals, up to 4.
+
+    0.5 -> 0.50, 1.1 -> 1.10, 0.0084 -> 0.0084, 12.345 -> 12.345. Companion to |pricefmt
+    (which strips to the bare "0.5"): price columns read as money, so the cents stay.
+    """
+    if value is None or value == "":
+        return default
+    try:
+        s = f"{float(value):.4f}"
+    except (ValueError, TypeError):
+        return default
+    whole, _, frac = s.partition(".")
+    frac = frac.rstrip("0")
+    if len(frac) < 2:
+        frac = (frac + "00")[:2]
+    return f"{whole}.{frac}"
+
+
+templates.env.filters["unitprice"] = _unitprice_filter
+
+
+def _commodity_label_filter(value) -> str:
+    """Human display name for a canonical commodity key ('analog_ic' -> 'Analog
+    ICs')."""
+    if not value:
+        return ""
+    from .services.commodity_registry import get_display_name
+
+    return get_display_name(str(value))
+
+
+templates.env.filters["commodity_label"] = _commodity_label_filter
+
+
 def _money_filter(value, default: str = "—") -> str:
     """Format a monetary amount: comma-grouped, always 2 decimals (1234.5 -> 1,234.50).
 
@@ -379,6 +415,21 @@ def _safe_url_filter(value: str | None, fallback: str = "#") -> str:
 
 
 templates.env.filters["safe_url"] = _safe_url_filter
+
+
+_SLUG_RE = re.compile(r"[^a-z0-9]+")
+
+
+def _slug_filter(value) -> str:
+    """Lowercase, runs of non-alphanumerics collapsed to '-', ends trimmed.
+
+    Safe for an HTML id and for the CSS #selector HTMX builds from it (out-of-band row
+    updates), where a comma or dot in a vendor name would otherwise break the lookup.
+    """
+    return _SLUG_RE.sub("-", str(value or "").lower()).strip("-")
+
+
+templates.env.filters["slug"] = _slug_filter
 
 
 # ── Jinja2 Globals ──────────────────────────────────────────────────

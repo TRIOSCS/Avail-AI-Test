@@ -1,0 +1,28 @@
+{# search/recent.html — recent searches for the landing; each row opens that part's report.
+   Called by: part_dossier.search_recent (GET /v2/partials/search/recent).
+   Depends on: recent (list[MaterialCard]) — display_mpn, manufacturer, category,
+               last_searched_at. #}
+{% from "htmx/partials/search/_macros.html" import section_header %}
+
+{% if recent %}
+<div class="report-section">
+  {{ section_header('Recent searches') }}
+  <table class="data-table w-full whitespace-nowrap">
+    <tbody>
+    {% for c in recent %}
+    {% set url = '/v2/search?mpn=' ~ (c.display_mpn|urlencode) %}
+    <tr class="cursor-pointer"
+        hx-get="/v2/partials/search?mpn={{ c.display_mpn|urlencode }}" hx-target="#main-content"
+        hx-push-url="{{ url }}" hx-trigger="click">
+      <td class="font-data"><span class="font-semibold text-gray-900">{{ c.display_mpn }}</span></td>
+      <td class="text-gray-600">{{ c.manufacturer or '—' }}</td>
+      <td class="text-gray-600 max-sm:hidden">{{ c.category|commodity_label }}</td>
+      <td class="text-right text-tertiary whitespace-nowrap">{{ c.last_searched_at|timeago }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p class="text-center text-secondary">No recent searches yet.</p>
+{% endif %}

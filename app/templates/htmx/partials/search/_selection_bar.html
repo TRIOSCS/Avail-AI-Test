@@ -1,0 +1,24 @@
+{# search/_selection_bar.html — fixed bar above the bottom nav while "Posting now" rows are
+   selected: Send RFQ / Add offer / Add to requisition over the selection, or Clear.
+   Called by: search/report.html (include — inside the searchReport Alpine scope).
+   Depends on: Alpine.js $store.shortlist, searchReport (sendRfq / addOffer / addToReq),
+               shared/_macros.html (spinner). #}
+{% from "htmx/partials/shared/_macros.html" import spinner %}
+<div x-show="$store.shortlist.count > 0" x-cloak
+     x-transition:enter="transition ease-out duration-200 transform" x-transition:enter-start="translate-y-full" x-transition:enter-end="translate-y-0"
+     x-transition:leave="transition ease-in duration-150 transform" x-transition:leave-start="translate-y-0" x-transition:leave-end="translate-y-full"
+     class="fixed inset-x-0 bottom-[52px] z-30 border-t border-brand-200 bg-white px-4 py-2.5 shadow-float">
+  <div class="mx-auto flex max-w-7xl flex-wrap items-center gap-2">
+    <span class="text-sm font-medium text-gray-900">
+      <span class="font-data" x-text="$store.shortlist.count"></span> selected
+    </span>
+    <div class="ml-auto flex flex-wrap items-center gap-2">
+      <button type="button" class="btn-primary btn-sm" @click="sendRfq('#sel-rfq-spin')">
+        <span id="sel-rfq-spin" class="htmx-indicator">{{ spinner('h-3.5 w-3.5 animate-spin') }}</span>Send RFQ
+      </button>
+      <button type="button" class="btn-secondary btn-sm" @click="addOffer('#sel-rfq-spin')">Add offer</button>
+      <button type="button" class="btn-ghost btn-sm" @click="addToReq()">Add to requisition</button>
+      <button type="button" class="btn-ghost btn-sm" @click="$store.shortlist.clear()">Clear</button>
+    </div>
+  </div>
+</div>

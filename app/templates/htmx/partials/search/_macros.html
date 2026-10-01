@@ -1,0 +1,48 @@
+{# search/_macros.html — shared macros for the Search surface.
+   search_bar(mpn, subs_text, large): the one search control — part number plus an optional
+     substitutes field — used by the landing page and the report. Submits through htmx.ajax
+     into #main-content and pushes the canonical /v2/search?mpn=…[&subs=…] URL.
+   section_header(title, summary): the uniform header row of every report section; the
+     {% call %} body (if any) renders right-aligned as the section's tools.
+   Called by: search/index.html, search/report.html, search/report_*.html.
+   Depends on: Alpine.js, HTMX (htmx.ajax), shared/_macros.html (spinner),
+               .input / .btn-* / .h4 component classes. #}
+{% from "htmx/partials/shared/_macros.html" import spinner %}
+
+{% macro search_bar(mpn='', subs_text='', large=False, indicator='search-bar-spin') -%}
+<form class="w-full"
+      x-data='{ q: {{ mpn|tojson }}, subs: {{ subs_text|tojson }}, showSubs: {{ (subs_text|length > 0)|tojson }} }'
+      @submit.prevent="const v = q.trim(); if (!v) return; const s = showSubs ? subs.trim() : ''; const qs = 'mpn=' + encodeURIComponent(v) + (s ? '&subs=' + encodeURIComponent(s) : ''); htmx.ajax('GET', '/v2/partials/search?' + qs, {target: '#main-content', indicator: '#{{ indicator }}', push: '/v2/search?' + qs})">
+  <div class="flex items-stretch gap-2">
+    <div class="relative flex-1 min-w-0">
+      <svg class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 {{ 'h-5 w-5' if large else 'h-4 w-4' }} text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+      <input type="text" name="mpn" x-model="q" aria-label="Part number" autocomplete="off" spellcheck="false" required
+             placeholder="Part number"
+             class="input font-mono tracking-tight {{ 'pl-10 py-2.5 text-base' if large else 'pl-9' }}">
+    </div>
+    <button type="button" class="btn-secondary{{ '' if large else ' btn-sm' }}" :class="showSubs && 'text-accent-600 border-accent-200'"
+            @click="showSubs = !showSubs; if (showSubs) $nextTick(() => $refs.subs.focus())">Substitutes</button>
+    <button type="submit" class="btn-primary{{ '' if large else ' btn-sm' }}" :disabled="!q.trim()">
+      <span id="{{ indicator }}" class="htmx-indicator">{{ spinner('h-4 w-4 animate-spin') }}</span>Search
+    </button>
+  </div>
+  <div x-show="showSubs" x-cloak x-transition.opacity class="mt-2">
+    <input type="text" name="subs" x-model="subs" x-ref="subs" aria-label="Substitute part numbers" autocomplete="off" spellcheck="false"
+           placeholder="Substitutes — comma-separated, up to 3"
+           @keydown.enter.prevent="$el.form.requestSubmit()"
+           class="input font-mono tracking-tight {{ '' if large else 'input-sm' }}">
+  </div>
+</form>
+{%- endmacro %}
+
+{% macro section_header(title, summary=None) -%}
+<header class="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 border-b border-line-subtle">
+  <h2 class="h4">{{ title }}</h2>
+  {%- if summary %}<span class="text-secondary">{{ summary }}</span>{% endif %}
+  {%- if caller %}<div class="ml-auto flex items-center gap-2">{{ caller() }}</div>{% endif %}
+</header>
+{%- endmacro %}
+
+{% macro empty_note(text) -%}
+<p class="px-4 py-5 text-sm text-gray-600">{{ text }}</p>
+{%- endmacro %}

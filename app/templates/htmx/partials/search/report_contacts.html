@@ -1,0 +1,53 @@
+{# search/report_contacts.html — "Who to call": the people to phone or email for every vendor
+   in the part's posting and offer history (vendor-card contacts first, posting contacts
+   as the fallback).
+   Called by: part_dossier.dossier_contacts (GET /v2/partials/search/dossier/contacts).
+   Depends on: targets (list[part_report_service.CallTarget]), |timeago, search/_macros.html,
+               GET /v2/partials/vendors/{id} (vendor card page). #}
+{% from "htmx/partials/search/_macros.html" import section_header, empty_note %}
+<div class="report-section">
+  {{ section_header('Who to call', (targets|length ~ ' vendor' ~ ('' if targets|length == 1 else 's')) if targets else none) }}
+  {% if targets %}
+  <div class="overflow-x-auto">
+    <table class="data-table w-full whitespace-nowrap">
+      <thead>
+        <tr>
+          <th>Vendor</th>
+          <th>Contact</th>
+          <th>Email</th>
+          <th>Phone</th>
+          <th>Last contact</th>
+          <th class="text-right">History</th>
+          <th>Known from</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in targets %}
+        <tr>
+          <td>
+            {% if t.vendor_card_id %}
+            <a href="/v2/vendors/{{ t.vendor_card_id }}" hx-get="/v2/partials/vendors/{{ t.vendor_card_id }}"
+               hx-target="#main-content" hx-push-url="/v2/vendors/{{ t.vendor_card_id }}"
+               class="font-medium text-gray-900 hover:text-accent-600">{{ t.vendor_name }}</a>
+            {% else %}
+            <span class="font-medium text-gray-900">{{ t.vendor_name }}</span>
+            {% endif %}
+            {% if t.is_blacklisted %}<span class="badge-danger ml-1.5">Blacklisted</span>{% endif %}
+          </td>
+          <td>{{ t.contact_name or '—' }}{% if t.contact_title %}<span class="text-gray-600"> · {{ t.contact_title }}</span>{% endif %}</td>
+          <td>{% if t.email %}<a href="mailto:{{ t.email }}" class="text-accent-600 hover:underline">{{ t.email }}</a>{% else %}<span class="text-gray-400">—</span>{% endif %}</td>
+          <td class="whitespace-nowrap">{% if t.phone %}<a href="tel:{{ t.phone }}" class="text-accent-600 hover:underline">{{ t.phone }}</a>{% else %}<span class="text-gray-400">—</span>{% endif %}</td>
+          <td class="whitespace-nowrap">{% if t.last_contact_at %}{{ t.last_contact_at|timeago }}{% else %}<span class="text-gray-400">—</span>{% endif %}</td>
+          <td class="font-data text-right whitespace-nowrap">{% if t.vendor_card_id %}{{ t.total_wins }} won · {{ t.total_outreach }} reached{% else %}<span class="text-gray-400">—</span>{% endif %}</td>
+          <td class="text-gray-600">{{ t.basis }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% elif error %}
+  {{ empty_note('This section could not be loaded. Try again.') }}
+  {% else %}
+  {{ empty_note('No one to call yet — vendors appear here once we have an email or phone for them.') }}
+  {% endif %}
+</div>

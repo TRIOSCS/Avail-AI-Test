@@ -1,13 +1,13 @@
 """test_dossier_sort_and_hub_title.py — two small audit fixes.
 
-Fix 1 (MEDIUM): the Part-Dossier "Live market" cached vendor list now carries a
-sort/filter bar wired to the previously-orphaned GET /v2/partials/search/filter
-endpoint, so buyers can reorder / filter the cached offers. Covers:
-  - the cache-hit market body renders the bar (form → /v2/partials/search/filter,
-    targeting #search-results-cards) exposing the endpoint's REAL options:
-    sort (best|cheapest|stock), confidence (all|high|medium|low), source (per-row);
-  - hitting the endpoint with a sort param reorders the re-rendered vendor cards;
-  - a confidence / source filter param drops the non-matching cards.
+Fix 1 (MEDIUM): the Search report's "Posting now" section carries a sort control wired to
+GET /v2/partials/search/filter, so buyers can reorder the cached postings. Covers:
+  - the live section renders the control (form → /v2/partials/search/filter, targeting
+    #live-rows) seeded with the cached search id and the endpoint's REAL sort options
+    (best|cheapest|stock);
+  - hitting the endpoint with a sort param reorders the re-rendered rows;
+  - a confidence / source filter param drops the non-matching rows;
+  - several comma-separated search ids (one per part number) merge into one row set.
 
 Fix 2 (LOW, post-retirement): the old personal Buy Plans hub URL now 308s to the
 Approvals Workspace, so its retired "Buy Plans — AvailAI" <title> never renders — the
@@ -15,8 +15,8 @@ workspace's own title takes over after the redirect.
 
 Called by: pytest
 Depends on: conftest (client fixture, authed as test_user with BUY_PLANS access),
-            app.routers.part_dossier.dossier_market, app.routers.htmx_views.search_filter,
-            app.templates/htmx/partials/search/dossier_market.html,
+            app.routers.part_dossier.dossier_market, app.routers.htmx.search_views.search_filter,
+            app.templates/htmx/partials/search/report_live.html,
             app.routers.htmx.buy_plans (retired-hub redirect).
 """
 
@@ -72,34 +72,47 @@ def _redis_with_rows(rows: list[dict], sid: str = _SID) -> MagicMock:
 # ══════════════════════════════════════════════════════════════════════════
 
 
-def test_dossier_market_renders_sort_filter_bar(client: TestClient):
-    """Cache-hit market body renders a bar wired to /v2/partials/search/filter,
-    targeting #search-results-cards, exposing the endpoint's real options."""
+def test_dossier_market_renders_sort_control(client: TestClient):
+    """Cache-hit live section renders the sort control wired to
+    /v2/partials/search/filter, targeting #live-rows, seeded with the cached search
+    id."""
     rc = _redis_with_rows(_ROWS)
     with patch("app.search_service._get_search_redis", return_value=rc):
         resp = client.get("/v2/partials/search/dossier/market", params={"mpn": "LM317T"})
     assert resp.status_code == 200
     body = resp.text
 
-    # The bar is a form driving the filter endpoint into the cards container.
+    # The control is a form driving the filter endpoint into the rows container.
     assert 'hx-get="/v2/partials/search/filter"' in body
-    assert 'hx-target="#search-results-cards"' in body
-    assert 'name="search_id"' in body and _SID in body
+    assert 'hx-target="#live-rows"' in body
+    assert 'name="search_id"' in body
+    # The cached run's id seeds the section state the hidden input is bound to.
+    assert f'liveSection(0, ["{_SID}"])' in body
 
     # Real sort options (best|cheapest|stock).
     assert 'name="sort"' in body
+    assert 'value="best"' in body
     assert 'value="cheapest"' in body
     assert 'value="stock"' in body
 
-    # Real confidence options (all|high|medium|low).
-    assert 'name="confidence"' in body
-    for level in ("high", "medium", "low"):
-        assert f'value="{level}"' in body
+    # Both cached rows render in the table.
+    assert "Expensive Co" in body and "Cheap Co" in body
 
-    # Source options are derived from the cached rows' sources_found.
-    assert 'name="source"' in body
-    assert 'value="brokerbin"' in body
-    assert 'value="nexar"' in body
+
+def test_filter_endpoint_merges_several_search_ids(client: TestClient):
+    """One id per part number: the endpoint merges their cached rows (sorted together)."""
+    rows_by_id = {"sid-a": [_EXPENSIVE], "sid-b": [_CHEAP]}
+
+    def _lookup(sid):
+        return rows_by_id.get(sid)
+
+    with patch("app.routers.htmx.search_views._get_cached_search_results", side_effect=_lookup):
+        resp = client.get("/v2/partials/search/filter", params={"search_id": "sid-a,sid-b", "sort": "cheapest"})
+    assert resp.status_code == 200
+    assert resp.text.index("Cheap Co") < resp.text.index("Expensive Co")
+    # Each row keeps the id of the run it came from (its detail lookup needs it).
+    assert 'id="live-sid-b-cheap-co"' in resp.text
+    assert 'id="live-sid-a-expensive-co"' in resp.text
 
 
 def test_filter_endpoint_sort_cheapest_reorders_cards(client: TestClient):

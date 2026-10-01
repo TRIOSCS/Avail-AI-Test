@@ -1,0 +1,134 @@
+{# search/report_part.html — the report's part header: identity, tags, substitutes,
+   also-known-as spellings, FRU crosswalk context, recorded price range, and the page
+   actions (Specs & datasheet · Part page · Add offer · Send RFQ). Instant DB read.
+   Called by: part_dossier.dossier_hero (GET /v2/partials/search/dossier/hero).
+   Depends on: card (MaterialCard | None), mpn (display), subs (list[str]),
+               price_trend (PriceTrend | None), fru_view (FruView | None),
+               fru_reverse (ReverseContext | None), equivalence ({variants} | None),
+               can_verdict (bool); the searchReport Alpine scope (sendRfq / addOffer) on
+               report.html; GET /v2/partials/search/dossier/specs (lazy, on first toggle). #}
+{% from "htmx/partials/shared/_macros.html" import spinner %}
+{% set known = card is not none %}
+{% set fru_hit = fru_view or (fru_reverse and fru_reverse.distinct_frus > 0) %}
+
+<div x-data="{ specsOpen: false }">
+  <div class="flex flex-col gap-3 lg:flex-row lg:items-start">
+    <div class="min-w-0 flex-1">
+      <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <h1 class="font-mono text-2xl font-semibold tracking-tight text-brand-900 break-all">{{ mpn }}</h1>
+        {% if known and card.manufacturer %}<span class="text-sm font-medium text-gray-700">{{ card.manufacturer }}</span>{% endif %}
+        {% if known and card.lifecycle_status %}
+          {% set lc = card.lifecycle_status|lower %}
+          <span class="{% if lc == 'active' %}badge-success{% elif lc in ('nrnd', 'nrfnd', 'ltb') %}badge-warning{% elif lc in ('eol', 'obsolete') %}badge-danger{% else %}badge-neutral{% endif %}">{{ card.lifecycle_status|title }}</span>
+        {% elif not known and fru_hit %}
+          <span class="badge-info">Known via FRU crosswalk</span>
+        {% elif not known %}
+          <span class="badge-warning">New to us</span>
+        {% endif %}
+      </div>
+
+      {% if known and card.description %}
+      <p class="mt-1 max-w-3xl text-sm text-gray-700">{{ card.description }}</p>
+      {% endif %}
+
+      {% if known %}
+        {% set facts = [] %}
+        {% if card.category %}{% set _ = facts.append(card.category|commodity_label) %}{% endif %}
+        {% if card.brand %}{% set _ = facts.append(card.brand) %}{% endif %}
+        {% if card.package_type %}{% set _ = facts.append(card.package_type) %}{% endif %}
+        {% if card.pin_count %}{% set _ = facts.append(card.pin_count ~ ' pins') %}{% endif %}
+        {% if card.rohs_status %}{% set _ = facts.append('RoHS ' ~ card.rohs_status|lower) %}{% endif %}
+        {% if card.condition %}{% set _ = facts.append(card.condition) %}{% endif %}
+        {% if facts %}<p class="mt-1 text-secondary">{{ facts|join(' · ') }}</p>{% endif %}
+      {% else %}
+      <p class="mt-1 text-secondary">No history on this part yet — live postings load below.</p>
+      {% endif %}
+
+      {% if subs %}
+      <p class="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-gray-600">
+        <span class="font-medium">Substitutes:</span>
+        {% for s in subs %}
+        <a href="/v2/search?mpn={{ s|urlencode }}" hx-get="/v2/partials/search?mpn={{ s|urlencode }}"
+           hx-target="#main-content" hx-push-url="/v2/search?mpn={{ s|urlencode }}"
+           class="chip font-mono hover:bg-brand-50" title="Search {{ s }} on its own">{{ s }}</a>
+        {% endfor %}
+      </p>
+      {% endif %}
+
+      {% if equivalence %}
+      {# Stored equivalence verdicts (other spellings of this part). AI-pooled spellings
+         carry a verify note and, for users with PROACTIVE access, a one-tap demote. #}
+      <p class="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-gray-600">
+        <span class="font-medium">Also known as:</span>
+        {% for v in equivalence.variants %}
+        <span class="chip font-mono {{ 'border-amber-300 bg-amber-50 text-amber-800' if v.kind == 'ai' else '' }}">
+          {{ v.spelling }}
+          {% if v.kind == 'ai' %}
+          <span class="text-[11px] uppercase tracking-wide text-amber-600" title="{{ v.reason }}">AI — verify</span>
+          {% if can_verdict %}
+          <button type="button"
+                  hx-post="/v2/partials/proactive/equivalence/verdict"
+                  hx-vals='{{ {"part_a": mpn, "part_b": v.spelling, "verdict": "different", "origin": "search"}|tojson }}'
+                  hx-target="closest span" hx-swap="outerHTML"
+                  hx-confirm="Mark {{ v.spelling }} as NOT the same part as {{ mpn }}? This removes it from pooled results permanently."
+                  class="text-amber-500 hover:text-rose-600" title="Not the same part">&#10005;</button>
+          {% endif %}
+          {% endif %}
+        </span>
+        {% endfor %}
+      </p>
+      {% endif %}
+
+      {% if fru_hit %}
+      {# Compact FRU crosswalk context — forward (this part is a FRU) and reverse (it
+         appears under FRUs). The full matrix lives on the materials surface. #}
+      <div class="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-600">
+        <span class="font-medium text-gray-700">FRU crosswalk</span>
+        {% if fru_view %}
+        <span>· <span class="font-mono text-gray-800">{{ fru_view.fru_raw }}</span> is a FRU · {{ fru_view.summary }}</span>
+        {% for m in fru_view.top_models %}
+        <span class="chip"><span class="font-mono">{{ m.related_raw }}</span>{% if m.manufacturer %} · {{ m.manufacturer }}{% endif %}</span>
+        {% endfor %}
+        {% endif %}
+        {% if fru_reverse and fru_reverse.distinct_frus > 0 %}
+        <span>· Used in <span class="font-semibold text-gray-900">{{ fru_reverse.distinct_frus }}</span> FRU{{ '' if fru_reverse.distinct_frus == 1 else 's' }}</span>
+        {% for f in fru_reverse.top_frus %}<span class="chip font-mono">{{ f }}</span>{% endfor %}
+        {% endif %}
+        <a href="/v2/materials?q={{ mpn|urlencode }}" hx-get="/v2/partials/materials?q={{ mpn|urlencode }}"
+           hx-target="#main-content" hx-push-url="/v2/materials?q={{ mpn|urlencode }}"
+           class="font-medium text-accent-600 hover:text-accent-700">View full FRU matrix →</a>
+      </div>
+      {% endif %}
+
+      {% if price_trend %}
+      <p class="mt-2 text-xs text-gray-600">
+        Recorded price
+        <span class="font-data text-gray-900">${{ price_trend.min_price|unitprice }} – ${{ price_trend.max_price|unitprice }}</span>
+        {% if price_trend.last_price is not none %} · last <span class="font-data text-gray-900">${{ price_trend.last_price|unitprice }}</span>{% endif %}
+        <span class="text-tertiary">{{ price_trend.currency }}</span>
+      </p>
+      {% endif %}
+    </div>
+
+    <div class="flex flex-wrap items-center gap-2 lg:shrink-0">
+      {% if known %}
+      <button type="button" class="btn-secondary btn-sm" :class="specsOpen && 'bg-brand-50'"
+              @click="specsOpen = !specsOpen"
+              hx-get="/v2/partials/search/dossier/specs?mpn={{ mpn|urlencode }}"
+              hx-trigger="click once" hx-target="#report-specs" hx-swap="innerHTML">Specs &amp; datasheet</button>
+      <a href="/v2/materials/{{ card.id }}" hx-get="/v2/partials/materials/{{ card.id }}"
+         hx-target="#main-content" hx-push-url="/v2/materials/{{ card.id }}" class="btn-secondary btn-sm">Part page</a>
+      {% endif %}
+      <button type="button" class="btn-secondary btn-sm" @click="addOffer('#rfq-spin')">Add offer</button>
+      <button type="button" class="btn-primary btn-sm" @click="sendRfq('#rfq-spin')">
+        <span id="rfq-spin" class="htmx-indicator">{{ spinner('h-3.5 w-3.5 animate-spin') }}</span>Send RFQ
+      </button>
+    </div>
+  </div>
+
+  {% if known %}
+  <div id="report-specs" x-show="specsOpen" x-cloak class="mt-4 rounded-lg border border-line-subtle bg-brand-50/50 px-4 py-3">
+    <div class="h-3 w-24 rounded bg-brand-100 animate-pulse"></div>
+  </div>
+  {% endif %}
+</div>

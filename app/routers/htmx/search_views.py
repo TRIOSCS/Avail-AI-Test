@@ -1,15 +1,15 @@
-"""routers/htmx/search_views.py — Global + part-dossier search partials (HTMX).
+"""routers/htmx/search_views.py — Global search + the Search report entry point (HTMX).
 
 Covers global type-ahead search, the AI search box, the full search-results page,
-the search form (Part Dossier entry point + history panel), the streaming
-MPN search (search/run + SSE stream + filter + lead-detail), and the
-requisition-picker "add shortlisted results to a requisition" flow. Extracted
-verbatim from htmx_views.py (same `/v2/partials/search/...` paths, same
-`htmx-views` tag).
+the Search surface entry point (landing vs. the one-page part report), the streaming
+MPN search behind the report's "Posting now" section (search/run + SSE stream + the
+sort/filter re-render + the row detail drawer), and the requisition-picker "add
+selected results to a requisition" flow. Extracted from htmx_views.py (same
+`/v2/partials/search/...` paths, same `htmx-views` tag).
 
 Called by: app/routers/htmx_views.py (aggregated into the single exported router).
 Depends on: app.search_service, app.services.global_search_service,
-    app.services.part_history_service, app.services.fru_matrix_service,
+    app.services.part_report_service, app.routers.part_dossier (section routes),
     app.services.sse_broker, app.scoring, app.vendor_utils
 """
 
@@ -213,96 +213,57 @@ async def search_results_page(
 async def search_form_partial(
     request: Request,
     mpn: str = "",
+    subs: str = "",
     user: User = Depends(require_access(AccessKey.SEARCH)),
     db: Session = Depends(get_db),
 ):
     """Search surface entry point.
 
-    With ``mpn`` → render the Part Dossier shell ("The Bench") whose sections lazy-load
-    from part_dossier.py. Without ``mpn`` → the recent-searches landing (search box that
-    deep-links the dossier + a lazy-loaded recent list). The new routes live in
-    routers/part_dossier.py; this stays the single /v2/partials/search entry point.
+    With ``mpn`` → the one-page part report (search/report.html) whose sections lazy-load
+    from routers/part_dossier.py; ``subs`` (comma-separated, up to 3) rides along as the
+    substitutes. Without ``mpn`` → the landing (search box + recent searches).
     """
     # NOTE: no set_canonical_url stamp here — an HX-Replace-Url response header would
-    # override the caller's push (search form / dossier bar push /v2/search?mpn=…
-    # explicitly) and collapse back-through-parts into one entry. Dossiers are detail
-    # pages: pushes stay caller-owned; stale partial URLs survive via /v2/shell.
-    ctx = _base_ctx(request, user, "search")
-    if mpn.strip():
-        ctx["mpn"] = mpn.strip().upper()
-        return template_response("htmx/partials/search/dossier_shell.html", ctx)
-    return template_response("htmx/partials/search/form.html", ctx)
-
-
-@router.get("/v2/partials/search/history", response_class=HTMLResponse)
-async def search_history_panel(
-    request: Request,
-    mpn: str = "",
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Render the 'What we know' history panel for the searched MPN.
-
-    Called by: results_shell.html right column (hx-get).
-    Depends on: part_history_service.get_part_history, normalize_mpn_key,
-                fru_matrix_service.get_fru_view/get_reverse_context (compact FRU
-                crosswalk context — both are capped/cheap reads).
-    """
-    from ...services.fru_matrix_service import get_fru_view, get_reverse_context
-    from ...services.part_history_service import PartHistory, get_part_history
-    from ...utils.normalization import normalize_mpn_key
-
-    key = normalize_mpn_key(mpn)  # pure/cheap; outside try so it can be logged on failure
-    try:
-        history = get_part_history(db, key)
-        error = False
-    except Exception:
-        logger.exception("search_history_panel failed mpn={} key={} user={}", mpn, key, user.id)
-        history = PartHistory(found=False)
-        error = True
-
-    # FRU crosswalk context, only for a concrete searched MPN: forward (the MPN is a
-    # FRU) and reverse (the MPN appears under FRUs). The card is ADDITIVE, so its
-    # lookups get their own scoped try/except — a crosswalk failure degrades to "no
-    # crosswalk card" and must never discard a successfully loaded history or flip
-    # the panel into the history-error state. (A history failure already suppresses
-    # the card via the template's `not error` guard, so the lookups are skipped.)
-    fru_view = None
-    fru_reverse = None
-    if key and not error:
-        try:
-            fru_view = get_fru_view(db, mpn)
-            fru_reverse = get_reverse_context(db, mpn)
-        except Exception:
-            logger.exception("search_history_panel FRU context failed mpn={} key={} user={}", mpn, key, user.id)
-            fru_view = None
-            fru_reverse = None
+    # override the caller's push (the search bar pushes /v2/search?mpn=… explicitly) and
+    # collapse back-through-parts into one entry. Reports are detail pages: pushes stay
+    # caller-owned; stale partial URLs survive via /v2/shell.
+    from ...routers.part_dossier import report_query
+    from ...services.part_report_service import parse_substitutes
 
     ctx = _base_ctx(request, user, "search")
-    ctx.update(
-        {
-            "history": history,
-            "error": error,
-            "fru_view": fru_view,
-            "fru_reverse": fru_reverse,
-            "fru_query": mpn,
-        }
-    )
-    return template_response("htmx/partials/search/history_panel.html", ctx)
+    display = mpn.strip().upper()
+    if display:
+        sub_list = parse_substitutes(subs, display)
+        ctx.update(
+            {
+                "mpn": display,
+                "subs": sub_list,
+                "subs_text": ", ".join(sub_list),
+                "qs": report_query(display, sub_list),
+            }
+        )
+        return template_response("htmx/partials/search/report.html", ctx)
+    # The landing lists the live SEARCH sources by display name (enrichment sources are
+    # not part of a part search).
+    ctx["sources"] = [s["display_name"] for s in _get_enabled_sources(db) if s["source_type"] == "search"]
+    return template_response("htmx/partials/search/index.html", ctx)
 
 
 @router.post("/v2/partials/search/run", response_class=HTMLResponse)
 async def search_run(
     request: Request,
     mpn: str = Form(default=""),
+    label: str = Form(default=""),
     requirement_id: int = Query(default=0),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Launch a streaming part search and return the results shell HTML.
+    """Launch a streaming part search and return its live-run fragment.
 
     Generates a search_id, launches stream_search_mpn as a background task, and returns
-    the results_shell.html template with SSE connection details.
+    live_run.html — the run's source chips + the SSE connection that streams rows into
+    the report's "Posting now" table. ``label`` (truthy) prints the part number on the
+    run line when several part numbers share the table.
 
     If requirement_id is provided, searches for that requirement's MPN. Otherwise uses
     the mpn form field.
@@ -340,9 +301,11 @@ async def search_run(
             "search_id": search_id,
             "mpn": search_mpn,
             "enabled_sources": enabled_sources,
+            # isinstance guard: direct (non-HTTP) callers can pass the Form default.
+            "show_label": isinstance(label, str) and bool(label.strip()),
         }
     )
-    return template_response("htmx/partials/search/results_shell.html", ctx)
+    return template_response("htmx/partials/search/live_run.html", ctx)
 
 
 @router.get("/v2/partials/search/stream")
@@ -373,14 +336,18 @@ async def search_stream(
 
 
 def _get_enabled_sources(db: Session) -> list[dict]:
-    """Return list of enabled API sources for the source progress chips.
+    """Return the enabled API sources for the live-run chips and the landing's source
+    line.
 
-    Called by: search_run
+    Called by: search_run, search_form_partial
     Depends on: ApiSource model
     """
 
     sources = db.query(ApiSource).filter(ApiSource.status != ApiSourceStatus.DISABLED).all()
-    return [{"name": s.name, "status": s.status} for s in sources]
+    return [
+        {"name": s.name, "status": s.status, "display_name": s.display_name or s.name, "source_type": s.source_type}
+        for s in sources
+    ]
 
 
 def _get_cached_search_results(search_id: str) -> list[dict] | None:
@@ -413,14 +380,23 @@ async def search_filter(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Re-render search results with filters applied, reading from Redis cache.
+    """Re-render the "Posting now" rows sorted / filtered, reading from the Redis cache.
 
-    Called by: search filter bar (HTMX)
-    Depends on: _get_cached_search_results, vendor_card.html template
+    ``search_id`` may carry several ids (comma-separated — one per part number in the
+    report); their cached result sets are merged. Returns <tr> rows for #live-rows.
+
+    Called by: report_live.html sort control (HTMX)
+    Depends on: _get_cached_search_results, _live_row.html template
     """
-    results = _get_cached_search_results(search_id)
-    if results is None:
-        return HTMLResponse('<div class="text-sm text-gray-500 p-4">Search results expired. Please search again.</div>')
+    results: list[dict] = []
+    for sid in [part.strip() for part in search_id.split(",") if part.strip()]:
+        cached = _get_cached_search_results(sid)
+        if cached:
+            results.extend({**row, "_search_id": sid} for row in cached)
+    if not results:
+        return HTMLResponse(
+            '<tr><td colspan="11" class="text-gray-600">Search results expired. Please search again.</td></tr>'
+        )
 
     # Apply filters
     if confidence != "all":
@@ -438,13 +414,9 @@ async def search_filter(
     else:
         results.sort(key=lambda r: (r.get("score", 0), r.get("confidence_pct", 0)), reverse=True)
 
-    # Re-render cards using vendor_card.html for each result
-    cards_html = ""
-    for i, card in enumerate(results):
-        cards_html += templates.get_template("htmx/partials/search/vendor_card.html").render(
-            card=card, card_index=i, search_id=search_id
-        )
-    return HTMLResponse(cards_html)
+    tmpl = templates.get_template("htmx/partials/search/_live_row.html")
+    rows_html = "".join(tmpl.render(card=card, search_id=card["_search_id"], swap_oob=False) for card in results)
+    return HTMLResponse(rows_html)
 
 
 @router.get("/v2/partials/search/lead-detail", response_class=HTMLResponse)
@@ -481,7 +453,7 @@ async def search_lead_detail(
             )
             if lead:
                 ctx = _base_ctx(request, user, "search")
-                ctx.update({"lead": lead, "mpn": lead.get("mpn_matched", "")})
+                ctx.update({"lead": lead, "mpn": lead.get("mpn_matched", ""), "search_id": search_id})
                 return template_response("htmx/partials/search/lead_detail.html", ctx)
         return HTMLResponse('<p class="p-4 text-sm text-gray-500">Lead not found in cache. Please search again.</p>')
 

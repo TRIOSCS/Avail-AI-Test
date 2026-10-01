@@ -1,0 +1,149 @@
+{# search/report_live.html — "Posting now": the live-market section of the Search report.
+   One run per part number (primary + substitutes). A run with fresh cached results renders
+   its rows server-side; a run without fires POST /v2/partials/search/run (hx-trigger="load"),
+   whose live_run.html fragment streams _live_row.html rows into the shared #live-rows tbody
+   over SSE. The header carries the live summary, the sort control (enabled once every run
+   has finished) and Refresh (re-runs every part, skipping the cache); the authorized
+   baseline line and the degraded-source banner sit under it.
+   Called by: part_dossier.dossier_market (GET /v2/partials/search/dossier/market).
+   Depends on: runs (list[{display, cached_search_id, cached_rows}]), live_runs (int),
+               cached_ids (list[str]), market_health, market_baseline, qs (str);
+               search/_live_row.html, search/live_run.html, search/_sources_banner.html,
+               GET /v2/partials/search/filter (sort), Alpine liveSection (defined below). #}
+<div class="report-section"
+     x-data='liveSection({{ live_runs }}, {{ cached_ids|tojson }})'
+     @live-run-done.window="onDone($event.detail)"
+     @live-rows-changed.window="recount()"
+     @htmx:after-swap.camel="recount()">
+  <header class="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 border-b border-line-subtle">
+    <h2 class="h4">Posting now</h2>
+    <span class="text-secondary" x-text="summary()"></span>
+    <form class="ml-auto flex items-center gap-2"
+          hx-get="/v2/partials/search/filter" hx-target="#live-rows" hx-swap="innerHTML" hx-trigger="change">
+      <input type="hidden" name="search_id" :value="ids.join(',')">
+      <label class="flex items-center gap-1.5 text-secondary">Sort
+        <select name="sort" class="input input-sm w-auto" aria-label="Sort postings" :disabled="!ready || !ids.length">
+          <option value="best">Best match</option>
+          <option value="cheapest">Lowest price</option>
+          <option value="stock">Most stock</option>
+        </select>
+      </label>
+      <button type="button" class="btn-ghost btn-sm" title="Run every source again"
+              hx-get="/v2/partials/search/dossier/market?{{ qs }}&amp;refresh=1"
+              hx-target="#report-live" hx-swap="innerHTML">Refresh</button>
+    </form>
+  </header>
+
+  {% include "htmx/partials/search/_sources_banner.html" %}
+
+  {% if market_baseline %}
+  <p class="px-4 py-2 text-xs text-gray-600 border-b border-line-subtle">
+    {% if market_baseline.has_authorized %}
+    Authorized baseline —
+    median {% if market_baseline.median_price is not none %}<span class="font-data text-gray-900">${{ market_baseline.median_price|unitprice }}</span>{% else %}n/a{% endif %}
+    · {% if market_baseline.total_stock is not none %}<span class="font-data text-gray-900">{{ "{:,}".format(market_baseline.total_stock) }}</span> in stock{% else %}stock unknown{% endif %}
+    · {{ market_baseline.sources }} authorized source{{ '' if market_baseline.sources == 1 else 's' }}
+    {% else %}
+    No authorized distributor pricing for this part.
+    {% endif %}
+  </p>
+  {% endif %}
+
+  {# One line per run: live runs swap in their source chips + SSE connection; cached runs
+     just say so. #}
+  <div class="space-y-1.5 px-4 py-2 border-b border-line-subtle">
+    {% for run in runs %}
+    {% if run.cached_rows is none %}
+    <div class="flex min-h-[22px] flex-wrap items-center gap-1.5"
+         hx-post="/v2/partials/search/run"
+         hx-vals='{{ {"mpn": run.display, "label": "1" if runs|length > 1 else ""}|tojson }}'
+         hx-trigger="load" hx-target="this" hx-swap="innerHTML">
+      <span class="text-tertiary">Starting {{ run.display }}…</span>
+    </div>
+    {% else %}
+    <div class="flex flex-wrap items-center gap-1.5 text-xs text-gray-600">
+      {% if runs|length > 1 %}<span class="font-data text-gray-700">{{ run.display }}</span>{% endif %}
+      <span class="text-tertiary">cached results · {{ run.cached_rows|length }} vendor{{ '' if run.cached_rows|length == 1 else 's' }}</span>
+    </div>
+    {% endif %}
+    {% endfor %}
+  </div>
+
+  <div class="overflow-x-auto">
+    <table class="data-table w-full whitespace-nowrap">
+      <thead>
+        <tr>
+          <th class="w-8"></th>
+          <th>Vendor</th>
+          <th>Part</th>
+          <th>Mfr</th>
+          <th class="text-right">Qty</th>
+          <th class="text-right">Price</th>
+          <th>Cond · DC</th>
+          <th>Lead</th>
+          <th>Source</th>
+          <th class="text-right">Match</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="live-rows">
+        {% for run in runs if run.cached_rows %}
+          {% for card in run.cached_rows %}
+            {% with search_id=run.cached_search_id, swap_oob=False %}{% include "htmx/partials/search/_live_row.html" %}{% endwith %}
+          {% endfor %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p x-show="ready && count === 0" x-cloak class="px-4 py-5 text-sm text-gray-600">No vendor is posting this part right now.</p>
+  <p x-show="ready && foot" x-cloak x-text="foot" class="px-4 py-2 text-tertiary border-t border-line-subtle"></p>
+</div>
+
+<script>
+  // Alpine.data factory for the section: counts live runs to completion (each live_run.html
+  // relays its SSE "done" as the window event live-run-done), keeps the search ids the sort
+  // control needs, and derives the header summary from the rows in #live-rows.
+  window.liveSection = window.liveSection || function (liveRuns, cachedIds) {
+    return {
+      pending: liveRuns,
+      ready: liveRuns === 0,
+      ids: (cachedIds || []).slice(),
+      cached: (cachedIds || []).length > 0,
+      count: 0,
+      auth: 0,
+      elapsed: 0,
+      offTarget: 0,
+      foot: '',
+      init() { this.recount(); },
+      recount() {
+        this.count = document.querySelectorAll('#live-rows > tr[data-live-row]').length;
+        this.auth = document.querySelectorAll('#live-rows > tr[data-live-row][data-auth="1"]').length;
+      },
+      onDone(d) {
+        d = d || {};
+        if (d.search_id && !this.ids.includes(d.search_id)) this.ids.push(d.search_id);
+        this.offTarget += d.off_target || 0;
+        this.elapsed = Math.max(this.elapsed, d.elapsed_seconds || 0);
+        this.pending = Math.max(0, this.pending - 1);
+        if (this.pending === 0) {
+          this.ready = true;
+          setTimeout(() => { this.recount(); this.foot = this.footText(); }, 150);
+        }
+      },
+      footText() {
+        const bits = [];
+        if (this.elapsed) bits.push('searched in ' + this.elapsed + 's');
+        if (this.offTarget) bits.push(this.offTarget + ' off-target catalog match' + (this.offTarget === 1 ? '' : 'es') + ' hidden');
+        return bits.join(' · ');
+      },
+      summary() {
+        if (!this.ready) return this.count ? 'Searching… ' + this.count + ' so far' : 'Searching…';
+        if (!this.count) return '';
+        let s = this.count + (this.count === 1 ? ' vendor' : ' vendors');
+        if (this.auth) s += ' · ' + this.auth + ' authorized';
+        if (this.cached && !this.elapsed) s += ' · cached';
+        return s;
+      },
+    };
+  };
+</script>

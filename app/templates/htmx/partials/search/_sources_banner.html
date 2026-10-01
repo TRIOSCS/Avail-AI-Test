@@ -5,10 +5,10 @@
    specific reason as a hover tooltip; the link deep-links Settings → Sources where
    credentials are rotated.
    Context: market_health = {available, total, down:[{name, display, reason}], unconfigured:[...]}.
-   Called by: dossier_market.html. Renders ONLY when market_health.down is non-empty —
+   Called by: search/report_live.html. Renders ONLY when market_health.down is non-empty —
    `unconfigured` (never-set-up) sources are deliberately NOT surfaced as a problem. #}
 {% if market_health and market_health.down %}
-<div class="mx-4 mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] leading-relaxed text-amber-800">
+<div class="mx-4 my-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] leading-relaxed text-amber-800">
   <div class="flex items-start gap-2">
     <svg class="h-4 w-4 shrink-0 mt-0.5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
       <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
