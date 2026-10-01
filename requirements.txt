@@ -117,7 +117,7 @@ msrest==0.7.1
     # via azure-communication-identity
 nh3==0.3.7
     # via -r requirements.in
-oauthlib==3.3.1
+oauthlib==4.0.0
     # via requests-oauthlib
 openpyxl==3.1.5
     # via -r requirements.in
