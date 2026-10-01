@@ -1,0 +1,60 @@
+{# search/report_offers.html — "Offered by email": offers and quotes vendors sent us for
+   the part (every part number in the search), newest first.
+   Called by: part_dossier.dossier_offers (GET /v2/partials/search/dossier/offers).
+   Depends on: offers (list[Offer]), vendor_count (int), |timeago, |localtime, |unitprice,
+               search/_macros.html. #}
+{% from "htmx/partials/search/_macros.html" import section_header, empty_note %}
+{% set status_tone = {
+  'won': 'badge-success', 'sold': 'badge-success', 'approved': 'badge-success',
+  'active': 'badge-info', 'pending_review': 'badge-warning',
+  'rejected': 'badge-neutral', 'expired': 'badge-neutral'
+} %}
+<div class="report-section">
+  {{ section_header('Offered by email', (offers|length ~ ' offer' ~ ('' if offers|length == 1 else 's') ~ ' · ' ~ vendor_count ~ ' vendor' ~ ('' if vendor_count == 1 else 's')) if offers else none) }}
+  {% if offers %}
+  <div class="overflow-x-auto">
+    <table class="data-table w-full whitespace-nowrap">
+      <thead>
+        <tr>
+          <th>Vendor</th>
+          <th>Part</th>
+          <th class="text-right">Qty</th>
+          <th class="text-right">Price</th>
+          <th>Cond · DC</th>
+          <th>Lead time</th>
+          <th>Via</th>
+          <th>Status</th>
+          <th>Date</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for o in offers %}
+        {% set src = (o.source or '')|lower %}
+        <tr>
+          <td><span class="font-medium text-gray-900">{{ o.vendor_name }}</span></td>
+          <td class="font-data">{{ o.mpn }}</td>
+          <td class="font-data text-right">{% if o.qty_available %}{{ "{:,}".format(o.qty_available) }}{% else %}<span class="text-gray-400">—</span>{% endif %}</td>
+          <td class="font-data text-right">{% if o.unit_price %}${{ o.unit_price|unitprice }}{% if o.currency and o.currency != 'USD' %} <span class="text-tertiary">{{ o.currency }}</span>{% endif %}{% else %}<span class="text-gray-400">—</span>{% endif %}</td>
+          <td class="text-gray-600">{{ o.condition or '' }}{% if o.condition and o.date_code %} · {% endif %}{{ o.date_code or '' }}{% if not o.condition and not o.date_code %}—{% endif %}</td>
+          <td class="text-gray-600">{{ o.lead_time or '—' }}</td>
+          <td class="text-gray-600">
+            {%- if src.startswith('email') or src in ('ai_parsed', 'freeform_parsed') %}Email
+            {%- elif src == 'manual' %}Manual
+            {%- elif src == 'stock_list' %}Stock list
+            {%- elif src.startswith('resell') %}Resell
+            {%- elif src %}{{ src|replace('_', ' ')|capitalize }}
+            {%- else %}—{% endif -%}
+          </td>
+          <td><span class="{{ status_tone.get(o.status, 'badge-neutral') }}">{{ (o.status or 'active')|replace('_', ' ')|capitalize }}</span></td>
+          <td class="whitespace-nowrap" title="{{ o.created_at|localtime }}">{{ o.created_at|timeago }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% elif error %}
+  {{ empty_note('This section could not be loaded. Try again.') }}
+  {% else %}
+  {{ empty_note('No offers or quotes on record for this part.') }}
+  {% endif %}
+</div>

@@ -1399,14 +1399,14 @@ def _render_search_vendor_cards_html(
     start_index: int = 0,
     swap_oob: bool = False,
 ) -> str:
-    """Render vendor_card.html fragments for HTMX SSE (must be HTML, not JSON).
+    """Render _live_row.html <tr> fragments for HTMX SSE (must be HTML, not JSON).
 
     Called by: stream_search_mpn (results + card-update events)
-    Depends on: app.template_env.templates, htmx/partials/search/vendor_card.html
+    Depends on: app.template_env.templates, htmx/partials/search/_live_row.html
     """
     from .template_env import templates
 
-    tmpl = templates.get_template("htmx/partials/search/vendor_card.html")
+    tmpl = templates.get_template("htmx/partials/search/_live_row.html")
     parts: list[str] = []
     for i, card in enumerate(cards):
         parts.append(

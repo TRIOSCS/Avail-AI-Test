@@ -207,44 +207,58 @@ Every MPN whose card was searched within 48h is skipped; prior sightings
 on those MPNs (across all requirements) are surfaced via the
 `material_card_id` linkage on Sighting rows.
 
-### 2a. Search-page part-history panel ("What we know")
+### 2a. Search report — the DB-backed sections (Posted before / Offered by email / Who to call)
 
-The `/v2/search` results shell (`results_shell.html`) renders a two-column
-grid: the left column streams live supplier offers over SSE (above), and the
-right column shows the searched part's **internal history**, loaded in
-parallel with — and independent of — the SSE stream:
+The `/v2/search?mpn=<PN>` report (`search/report.html`, § 2a-bis) lazy-loads three
+history sections, each its own GET, each rendered independently of the live SSE run:
 
 ```
-results_shell.html (right column)
+search/report.html
     |
-    +---> hx-get /v2/partials/search/history?mpn=<searched mpn>   (hx-trigger=load)
-              |
-              v
-          htmx.search_views.search_history_panel
-              |
-              +---> normalize_mpn_key(mpn)        # same key MaterialCard stores
-              +---> part_history_service.get_part_history(db, key)   # READ-ONLY
-              |        resolves MaterialCard (deleted_at IS NULL), then aggregates
-              |        BY material_card_id: offers, distinct buyers, confirmed/won
-              |        (won/sold offers + won requisitions + customer purchases),
-              |        sightings, requirements, and a min/max/last price trend.
-              +---> fru_matrix_service.get_fru_view / get_reverse_context(db, mpn)
-              |        FRU-crosswalk context (capped/cheap reads, only for a
-              |        concrete searched MPN — see "FRU crosswalk context" below).
-              |        Own scoped try/except: a crosswalk failure logs and degrades
-              |        to "no crosswalk card", never touching the loaded history.
-              +---> renders history_panel.html (or empty state if no card)
+    +---> GET /v2/partials/search/dossier/posted-before?mpn=<PN>[&subs=A,B]
+    |         part_dossier.dossier_posted_before
+    |             +---> part_report_service.resolve_parts(db, mpn, parse_substitutes(subs))
+    |             |       the searched part first, then up to 3 substitutes, each with its
+    |             |       live MaterialCard (get_live_card_by_key) or None
+    |             +---> part_report_service.posted_before(db, parts)      # READ-ONLY
+    |                     the parts' REAL Sighting rows (mirror_sighting_filter), newest
+    |                     first, grouped per vendor (vendor_name_normalized, else
+    |                     normalize_vendor_name): latest row = display name / part /
+    |                     qty / price / contact; earlier rows add sources + seen count
+    |             → report_posted_before.html (one row per vendor)
+    |
+    +---> GET /v2/partials/search/dossier/offers?mpn=…
+    |         part_dossier.dossier_offers
+    |             +---> part_report_service.offers_for_parts(db, parts)   # Offer rows,
+    |                     newest first, every part number in the search
+    |             +---> distinct_vendor_count(offers)                     # header count
+    |             → report_offers.html (vendor · part · qty · price · cond/DC · lead ·
+    |               via (email / manual / stock list / resell) · status · date)
+    |
+    +---> GET /v2/partials/search/dossier/contacts?mpn=…
+              part_dossier.dossier_contacts
+                  +---> posted_before + offers_for_parts (the vendor universe)
+                  +---> part_report_service.who_to_call(db, postings, offers)
+                          VendorCard lookup by normalized_name (contacts eager-loaded):
+                          best contact = is_primary, else highest relationship_score /
+                          interaction_count among reachable contacts; email/phone fall
+                          back to the card's lists. Vendors with no card use the contact
+                          the posting carried. Unreachable vendors are dropped;
+                          blacklisted ones are flagged, never hidden. Order: card vendors
+                          (most wins, then most recently contacted), then posting-only.
+                  → report_contacts.html
 ```
 
-`get_part_history` is the single source of truth for a part's history; the
-materials detail router (`material_detail_partial`, `material_tab_partial`)
-consumes the same `*_for_card` helpers, so the search panel and the full part
-page can never drift. The endpoint is wrapped in try/except (logged via
-Loguru) and degrades to an empty/error panel rather than failing the page.
+Every section route wraps its service call in try/except: a failure logs, rolls the
+session back, and renders an in-section "could not be loaded" note (HTTP 200) — never a
+500 that would leave the shell's skeleton spinning. `part_history_service` (the
+`*_for_card` helpers + `price_trend_for_card`) stays the single source of truth for the
+materials detail page; the report header reads `price_trend_for_card` for its "Recorded
+price" line.
 
-**FRU crosswalk context.** When the searched MPN matches `fru_links` in either
-direction, the panel appends a compact "FRU crosswalk" card (silent on no hit,
-matching the materials-detail decision):
+**FRU crosswalk context** now lives in the report **header** (`report_part.html`, GET
+`/dossier/hero`): when the searched MPN matches `fru_links` in either direction a compact
+"FRU crosswalk" line renders (silent on no hit, matching the materials-detail decision):
 
 - **Forward hit** (the MPN is a FRU): one-line counts via `FruView.summary`
   ("N drive PNs · M models · K 11S numbers · J trays", kind-neutral — no
@@ -254,10 +268,10 @@ matching the materials-detail decision):
   DISTINCT-FRU count (`ReverseContext.distinct_frus`, SQL aggregate; NOT the
   (FRU, role) usage count `ReverseView.total`) — plus up to 3 distinct FRUs in
   canonical (shortest, de-padded) spelling (`ReverseContext.top_frus`).
-  `get_reverse_context` is a lightweight column-fetch read path; the search
-  panel never hydrates full `FruLink` rows.
-- A crosswalk-known part with no trading history renders "No trading history
-  yet" instead of the "looks new to us" empty state.
+  `get_reverse_context` is a lightweight column-fetch read path; the header never
+  hydrates full `FruLink` rows.
+- A crosswalk-known part with no material card is badged "Known via FRU crosswalk"
+  instead of "New to us".
 - Both cases share a "View full FRU matrix →" deep link to the materials
   surface (`/v2/materials?q=<mpn>`, the same URL pattern the fru-lookup
   partial pushes). The faceted results (`materials_faceted_partial` →
@@ -265,6 +279,8 @@ matching the materials-detail decision):
   `q` hits `fru_links`, so the deep link delivers the matrix even for a
   crosswalk-only PN that matches no material card; the full matrix is never
   duplicated on the search page itself.
+- The FRU lookups have their own scoped try/except: a crosswalk failure logs and
+  degrades to "no FRU line", never taking the header down with it.
 
 ```
 Browser POST /v2/partials/sightings/{requirement_id}/refresh?source=user
@@ -396,79 +412,103 @@ search_service.py (orchestrator)
     +---> connector_status.py --> DB: UPDATE api_sources
 ```
 
-### 2a-bis. Part Dossier ("The Bench") — `/v2/search?mpn=<PN>`
+### 2a-bis. Search report — `/v2/search?mpn=<PN>[&subs=A,B]`
 
-The Search tab is a single one-PN **Part Dossier**: a scrolling document that paints
-identity/specs/history instantly from the DB, with the live market streaming in below.
+The Search tab is a single one-page **part report**, modelled on the broker search
+sites (Octopart / BrokerBin / NetComponents): a search bar, a part header, then four
+flat tables — **Posting now** (live market), **Posted before**, **Offered by email**,
+**Who to call** — each a `.report-section` box that lazy-loads into its own slot.
 
 ```
-GET /v2/search?mpn=<PN>  (v2_page → base_page.html fires hx-get partial_url)
-    |  v2_page search branch: partial_url = /v2/partials/search?mpn=<quote(PN)>
+GET /v2/search?mpn=<PN>[&subs=A,B]  (v2_page → base_page.html fires hx-get partial_url)
+    |  v2_page search branch: partial_url = /v2/partials/search?mpn=<quote(PN)>[&subs=…]
     v
-htmx/search_views.py: search_form_partial(mpn)
-    |  mpn present  → dossier_shell.html      (the Bench)
-    |  no mpn       → form.html landing + lazy /v2/partials/search/recent
+htmx/search_views.py: search_form_partial(mpn, subs)
+    |  mpn present  → search/report.html   (parse_substitutes: comma/space split,
+    |                 display-normalized, primary dropped, deduped, capped at 3;
+    |                 ctx.qs = report_query(mpn, subs) rides every section URL)
+    |  no mpn       → search/index.html landing (search_bar macro + lazy
+    |                 /v2/partials/search/recent → recent.html; the enabled live
+    |                 sources are listed under the box via _get_enabled_sources)
     v
-dossier_shell.html lazy-loads (each div has an explicit hx-target="this"):
-    +-- GET /v2/partials/search/dossier/hero?mpn=    part_dossier.dossier_hero
-    |     instant DB read (MaterialCard + PartHistory). Light-footprint write:
-    |     bumps search_count/last_searched_at on an EXISTING card only (never
-    |     creates one — unknown PN stays "New to us" / "Known via FRU crosswalk").
-    +-- GET /v2/partials/search/dossier/market?mpn=  part_dossier.dossier_market
-    |     A degraded-source banner (dossier_market_banner.html) renders above both
-    |     branches when live-market sources are down (auth/quota) — see market_health
-    |     below. cache HIT (Redis search:{key}:latest → search:{id}:results) → cached
-    |     vendor rows in the light market card + "↻ Refresh market"; cache MISS
-    |     (or ?refresh=1) → inner div auto-fires the EXISTING POST /v2/partials/
-    |     search/run SSE flow (results_shell.html). The banner sits OUTSIDE that
-    |     hx-post div so it survives the cache-miss SSE swap.
-    |     On cache HIT a read-only market-baseline strip renders above the rows
-    |     (compute_market_baseline helper): franchise-median price, authorized stock,
-    |     and authorized source count — computed from cached rows, no new DB columns,
-    |     no persistence. Graceful empty state when no authorized rows exist.
-    +-- GET /v2/partials/search/history?mpn=         (EXISTING search_history_panel)
-    +-- GET /v2/partials/search/dossier/specs?mpn=   part_dossier.dossier_specs
+search/report.html lazy-loads (each slot carries an explicit hx-target="this"):
+    +-- GET /v2/partials/search/dossier/hero?<qs>           part_dossier.dossier_hero
+    |     instant DB read → report_part.html: MPN · manufacturer · lifecycle badge
+    |     ("New to us" / "Known via FRU crosswalk" when there is no card) ·
+    |     description · category/brand/package/pins/RoHS/condition line ·
+    |     substitute chips (each a link to its own report) · "Also known as"
+    |     equivalence chips (AI-pooled ones carry the verify note + the
+    |     PROACTIVE-gated demote) · FRU crosswalk line (§ 2a) · "Recorded price"
+    |     range (price_trend_for_card) · actions: Specs & datasheet (lazy
+    |     /dossier/specs → report_specs.html, hx-trigger="click once"), Part page,
+    |     Add offer, Send RFQ. Light-footprint write: bumps search_count /
+    |     last_searched_at on an EXISTING card only (never creates one).
+    +-- GET /v2/partials/search/dossier/market?<qs>         part_dossier.dossier_market
+    |     → report_live.html, ONE RUN PER PART NUMBER. A run whose Redis pointer
+    |     (search:{key}:latest → search:{id}:results, written by stream_search_mpn,
+    |     TTL 900s) is fresh renders its cached rows server-side; a run without —
+    |     or every run on ?refresh=1 (the Refresh button) — is a line that fires
+    |     POST /v2/partials/search/run (hx-trigger="load") → live_run.html: the
+    |     run's source chips (.src-chip, recolored from source-status SSE events)
+    |     + the SSE connection whose sse-swap="results" targets the SHARED
+    |     #live-rows tbody (hx-target, beforeend). Rows are _live_row.html <tr>s
+    |     (id live-{search_id|slug}-{vendor|slug} — the |slug filter keeps the id
+    |     selector-safe for the card-update out-of-band swap). The header's
+    |     liveSection Alpine state counts runs to completion (each run relays SSE
+    |     "done" as the window event live-run-done), derives the summary
+    |     ("N vendors · M authorized · cached") from the rows, and enables the
+    |     Sort control (GET /v2/partials/search/filter with ALL run ids,
+    |     comma-separated — the endpoint merges their cached sets and re-renders
+    |     #live-rows). The degraded-source banner (_sources_banner.html,
+    |     get_market_source_health) and the authorized baseline line
+    |     (compute_market_baseline over the cached rows) sit under the header.
+    +-- GET /v2/partials/search/dossier/posted-before?<qs>  (§ 2a)
+    +-- GET /v2/partials/search/dossier/offers?<qs>         (§ 2a)
+    +-- GET /v2/partials/search/dossier/contacts?<qs>       (§ 2a)
 ```
 
-New router `app/routers/part_dossier.py` (GET-only; reuses data/services, no route
-moves). `stream_search_mpn` now also writes the pointer key `search:{normalize_mpn_key
-(mpn)}:latest = search_id` (TTL 900s) so the dossier market cache-hit path can find the
-freshest run. The search-flow templates (`dossier_shell` "Live market" section,
-`dossier_market`, `results_shell`, `vendor_card`, `shortlist_bar`,
-`requisition_picker_modal`) use the **light brand-card skin** matching the rest of the
-site — the earlier dark "terminal" look was the visual outlier and has been removed.
-Page-level + per-row RFQ/offer actions (the quick-source endpoints) are wired.
+**Row actions.** A `_live_row.html` click swaps `GET /v2/partials/search/lead-detail?
+search_id=&vendor_key=` into `#lead-drawer-content` (the right-hand drawer in
+`report.html`; `lead_detail.html` = the posting's full fields, every listing, links,
+contact channels, the safety review when on record, Select-for-RFQ + "Send RFQ to this
+vendor"). The row checkbox and the drawer's Select button share Alpine `$store.shortlist`
+(keyed vendor_name:mpn); while anything is selected `_selection_bar.html` offers Send
+RFQ / Add offer (`searchReport.post` → the quick-source endpoints, HX-Redirect to the
+scratch requisition workspace) / Add to requisition (the existing picker modal) / Clear.
+The per-row RFQ button posts that vendor alone to `quick-source/rfq`.
 
-**Market-baseline strip (price-sanity signal)** — `compute_market_baseline(rows)` in
-`app/search_service.py` filters the already-fetched cached rows to
-`is_authorized=True` rows and computes: franchise-median price (same upper-median
-algorithm as `search_service._median`), authorized stock (sum of `qty_available`),
-and authorized source count. `part_dossier.dossier_market` passes it as
-`market_baseline` to `dossier_market.html`, which renders a read-only strip above the
-vendor rows on cache HIT — the buyer-facing reference for spotting over/under-priced
-offers. No DB column, no persistence, no SSE change, no Alpine state — pure server-side
-summary. Graceful empty state ("No franchise/authorized pricing for this part.") when
-no authorized row exists. `market_baseline=None` on cache MISS (strip omitted entirely).
+Router `app/routers/part_dossier.py` (GET section routes + the quick-source POSTs);
+`search_views.py` keeps the entry point, `search/run`, `search/stream`, `search/filter`,
+`search/lead-detail` and the requisition picker. `/v2/partials/search/history` (the old
+"What we know" accordion) is gone — its content is the three sections of § 2a.
+
+**Authorized baseline (price-sanity signal)** — `compute_market_baseline(rows)` in
+`app/search_service.py` filters the cached rows to `is_authorized=True` and computes the
+upper-median price (same algorithm as `search_service._median`), the authorized stock
+(sum of `qty_available`) and the authorized source count. Rendered as one line under the
+"Posting now" header on a cache hit ("Authorized baseline — median $X · N in stock · M
+authorized sources"; "No authorized distributor pricing for this part." when none).
+Omitted on a cache miss. No DB column, no persistence, no SSE change.
 
 **Degraded-source banner** — `search_service.get_market_source_health(db)` reuses
 `_build_connectors` to partition the live-market connectors into available / `down`
 (health_monitor flagged ERROR — auth/quota, operator must rotate credentials in Settings
 → Connectors) / `unconfigured` (no API key). `dossier_market` passes the result as
 `market_health`; the banner names each down source with its specific error as a hover
-tooltip and deep-links `/v2/settings` (→ Settings → Connectors tab). Best-effort: a
-health lookup failure leaves `market_health=None` and never breaks the market section.
+tooltip and deep-links `/v2/settings`. Best-effort: a health lookup failure leaves
+`market_health=None` and never breaks the section.
 
 **Relevance guard** — `stream_search_mpn` keeps only hits whose `mpn_matched`
 `fuzzy_mpn_match`es the searched MPN (handles dash/case + ≤2-char revision suffixes,
 symmetrically). Keyword-match noise from catalog distributors (a different MPN — e.g. a
 component returned for a storage FRU) is excluded before scoring/dedup/cache; the dropped
-count rides the `done` SSE event as `off_target` and surfaces as a footnote in
-`#search-stats`. Cross-references (alternate/FRU part numbers) belong in "What we know",
-not the live-market offer list.
+count rides the `done` SSE event as `off_target` and surfaces in the section footer
+("N off-target catalog matches hidden"). Cross-references belong in the header's FRU /
+equivalence context, not the live table.
 
 **Auto-datasheet capture** — a fire-and-forget `capture_datasheet(mpn, user_id)` job is
 enqueued via `safe_background_task(..., suppress_in_testing=True)` on two triggers:
-(1) `dossier_hero` — every Part Dossier page-load; (2) `quick_source_rfq` /
+(1) `dossier_hero` — every report page-load; (2) `quick_source_rfq` /
 `quick_source_offer` + `add_requirements` (Requirements router) — whenever a part is
 added to an RFQ or the requirements list. The job opens its own DB session (request
 session is already closed) and follows this pipeline:
@@ -530,14 +570,14 @@ library, grant the Azure app `Sites.Selected` (application permission, admin-con
 scoped to that site, and set `DATASHEET_LIBRARY_DRIVE_ID` to the library's Graph drive
 id. Until that env var is set the upload step is silently skipped.
 
-**Dossier UI** (`dossier_datasheet_block.html`, included in `dossier_specs`) has three
+**Report UI** (`search/_datasheet_block.html`, included in `report_specs.html`) has three
 states: (a) `card.datasheets[0]` present → "Datasheet (saved MMM DD, YYYY)" link that
 hits the in-app streaming endpoint `GET /v2/partials/search/dossier/datasheet/{id}/download`
 (fetches from the company library via app-only token, streams as `application/pdf`);
 (b) `datasheet_searched_at` set but no captured copy → "No datasheet found (will retry)";
 (c) neither stamp yet → "Fetching Datasheet…" spinner that polls
 `GET /v2/partials/search/dossier/datasheet-status?mpn=` every 15 s
-(`hx-trigger="every 15s"`). The status endpoint returns the same `dossier_datasheet_block`
+(`hx-trigger="every 15s"`). The status endpoint returns the same `_datasheet_block`
 fragment and responds HTTP 286 (stops HTMX polling) once either stamp is set.
 
 ### 2b. Streaming Part-Search (`/v2/partials/search/run`)
@@ -548,7 +588,8 @@ Browser POST /v2/partials/search/run  (manual MPN entry)
     v
 htmx/search_views.py: search_run()
     |
-    +---> Returns HTML shell + spinner immediately (200 OK)
+    +---> Returns live_run.html immediately (200 OK): the run's source chips +
+    |     the SSE connection that streams _live_row.html rows into #live-rows
     |
     +---> _safe_bg(stream_search_mpn(search_id, mpn))   # fire-and-forget asyncio.Task
               |
@@ -5980,10 +6021,9 @@ GET /v2/partials/materials/faceted?q=<pn>     (faceted results — renders the
     |                                          fru_section above the card list on a
     |                                          crosswalk hit, so /v2/materials?q=
     |                                          deep links land on the matrix)
-GET /v2/partials/search/history?mpn=<pn>      (search-page "What we know" panel —
-    |                                          compact context card only, via the
-    |                                          lightweight get_reverse_context;
-    |                                          see §2a)
+GET /v2/partials/search/dossier/hero?mpn=<pn> (Search report header — compact
+    |                                          FRU line only, via the lightweight
+    |                                          get_reverse_context; see §2a)
     v
 fru_matrix_service.get_fru_view(db, mpn)      — forward: the part IS a FRU
 fru_matrix_service.get_reverse_view(db, mpn)  — reverse: FRUs the PN appears under

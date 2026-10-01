@@ -1,315 +1,99 @@
-{# Lead detail drawer content — shows full context for a single search result.
-   Sections per React spec: summary, why-found, evidence, contact, safety, actions, part details.
-   Called by: search_lead_detail route in htmx_views.py
-   Depends on: partials/shared/safety_review.html, scoring enrichment data
-#}
-
+{# search/lead_detail.html — drawer content for one "Posting now" row: the posting's full
+   fields, every source that listed it, the listing links, contact channels, and the vendor
+   safety review when one is on record. Actions: select for the RFQ (shortlist) and RFQ this
+   vendor alone (quick-source).
+   Called by: search_views.search_lead_detail (GET /v2/partials/search/lead-detail).
+   Depends on: #lead-drawer (report.html — drawerOpen scope), Alpine.js $store.shortlist,
+               shared/safety_review.html (only when safety_available), |unitprice, |safe_url.
+   Context: lead (dict), mpn (str); safety_available (bool) + safety_band / safety_summary /
+            safety_flags on the legacy (idx) path. #}
 {% set s = lead %}
+{% set part = s.mpn_matched or s.mpn or mpn %}
+<div class="flex h-full flex-col">
+  <header class="flex items-start justify-between gap-3 border-b border-line-subtle px-5 py-4">
+    <div class="min-w-0">
+      <h2 id="lead-drawer-title" class="h2 truncate">{{ s.vendor_name }}</h2>
+      <p class="mt-0.5 font-data text-gray-600">{{ part }}{% if s.manufacturer %} · {{ s.manufacturer }}{% endif %}</p>
+    </div>
+    <button type="button" class="btn-ghost btn-sm -mr-2" aria-label="Close" @click="drawerOpen = false">
+      <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+    </button>
+  </header>
 
-{# Drawer header with close button #}
-<div class="flex items-center justify-between px-5 py-4 border-b border-line-subtle bg-brand-700">
-  <div class="min-w-0">
-    <h2 class="h2 text-white truncate">{{ s.vendor_name }}</h2>
-    <p class="text-xs text-brand-300 mt-0.5">{{ s.mpn_matched or s.mpn or mpn }}</p>
-  </div>
-  <button type="button" @click="drawerOpen = false"
-          class="text-brand-300 hover:text-white p-1 rounded">
-    <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-    </svg>
-  </button>
-</div>
+  <div class="flex-1 space-y-5 overflow-y-auto px-5 py-4">
+    <div class="flex flex-wrap items-center gap-1.5">
+      {% if s.is_authorized %}<span class="badge-success">Authorized</span>{% endif %}
+      {% set conf = s.confidence_color|default('red') %}
+      <span class="{% if conf == 'green' %}badge-success{% elif conf == 'amber' %}badge-warning{% else %}badge-danger{% endif %}">{{ s.confidence_pct|default(0) }}% match</span>
+      {% if s.lead_quality %}<span class="badge-neutral">{{ s.lead_quality|title }} lead</span>{% endif %}
+      {% if s.evidence_tier %}<span class="badge-neutral">Evidence {{ s.evidence_tier|upper }}</span>{% endif %}
+    </div>
+    {% if s.reason %}<p class="text-sm text-gray-700">{{ s.reason }}</p>{% endif %}
 
-<div class="overflow-y-auto h-[calc(100vh-73px)] px-5 py-4 space-y-5">
-
-  {# ── Section 1: Badges row ── #}
-  <div class="flex items-center gap-2 flex-wrap">
-    {# Confidence badge #}
-    {% if s.confidence_color == "green" %}
-      <span class="px-2.5 py-1 text-xs font-semibold rounded-full bg-emerald-100 text-emerald-700">High Confidence · {{ s.confidence_pct }}%</span>
-    {% elif s.confidence_color == "amber" %}
-      <span class="px-2.5 py-1 text-xs font-semibold rounded-full bg-amber-100 text-amber-700">Medium Confidence · {{ s.confidence_pct }}%</span>
-    {% else %}
-      <span class="px-2.5 py-1 text-xs font-semibold rounded-full bg-rose-100 text-rose-700">Low Confidence · {{ s.confidence_pct }}%</span>
-    {% endif %}
-
-    {# Lead quality #}
-    {% if s.lead_quality == "strong" %}
-      <span class="px-2.5 py-1 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-600">Strong Lead</span>
-    {% elif s.lead_quality == "moderate" %}
-      <span class="px-2.5 py-1 text-xs font-semibold rounded-full bg-amber-50 text-amber-600">Moderate Lead</span>
-    {% else %}
-      <span class="px-2.5 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-500">Weak Lead</span>
-    {% endif %}
-
-    {# Authorized #}
-    {% if s.is_authorized %}
-      <span class="px-2.5 py-1 text-xs font-semibold rounded-full bg-brand-100 text-brand-700">Authorized</span>
-    {% endif %}
-
-    {# Source badge #}
-    {% set src = s.source_type|default("unknown")|lower %}
-    {% set source_colors = {
-      "nexar": "bg-violet-100 text-violet-700",
-      "brokerbin": "bg-sky-100 text-sky-700",
-      "digikey": "bg-orange-100 text-orange-700",
-      "mouser": "bg-teal-100 text-teal-700",
-      "ebay": "bg-yellow-100 text-yellow-700",
-      "oemsecrets": "bg-fuchsia-100 text-fuchsia-700",
-      "sourcengine": "bg-lime-100 text-lime-700",
-      "historical": "bg-gray-100 text-gray-600",
-      "vendor_affinity": "bg-brand-100 text-brand-700",
-      "ai_live_web": "bg-purple-100 text-purple-700"
-    } %}
-    <span class="px-2.5 py-1 text-xs font-medium rounded-full {{ source_colors.get(src, 'bg-gray-100 text-gray-600') }}">
-      {{ s.source_badge|default(s.source_type|default("unknown")) }}
-    </span>
-  </div>
-
-  {# ── Section 2: Why This Lead ── #}
-  <div class="bg-brand-50 rounded-lg p-4 border border-brand-100">
-    <h3 class="text-xs font-semibold text-brand-700 uppercase tracking-wider mb-1.5">Why This Lead</h3>
-    <p class="text-sm text-gray-700">{{ s.reason }}</p>
-  </div>
-
-  {# ── Section 3: Key Data ── #}
-  <div class="bg-white rounded-lg border border-line-subtle p-4">
-    <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Part Details</h3>
-    <dl class="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-      <div>
-        <dt class="text-gray-600 text-xs">MPN</dt>
-        <dd class="font-mono font-medium text-gray-900">{{ s.mpn_matched or s.mpn or "—" }}</dd>
-      </div>
-      <div>
-        <dt class="text-gray-600 text-xs">Manufacturer</dt>
-        <dd class="text-gray-900">{{ s.manufacturer or "—" }}</dd>
-      </div>
-      <div>
-        <dt class="text-gray-600 text-xs">Unit Price</dt>
-        <dd class="font-medium {{ 'text-emerald-700' if s.unit_price else 'text-gray-400' }}">
-          {% if s.unit_price %}
-            ${{ "%.4f"|format(s.unit_price) if s.unit_price < 1 else "%.2f"|format(s.unit_price) }}
-            {% if s.currency and s.currency != "USD" %}<span class="text-secondary ml-1">{{ s.currency }}</span>{% endif %}
-          {% else %}RFQ{% endif %}
-        </dd>
-      </div>
-      <div>
-        <dt class="text-gray-600 text-xs">Qty Available</dt>
-        <dd class="text-gray-900">{% if s.qty_available %}{{ "{:,}".format(s.qty_available) }}{% else %}—{% endif %}</dd>
-      </div>
-      {% if s.moq %}
-      <div>
-        <dt class="text-gray-600 text-xs">MOQ</dt>
-        <dd class="text-gray-900">{{ "{:,}".format(s.moq) }}</dd>
-      </div>
-      {% endif %}
-      {% if s.lead_time %}
-      <div>
-        <dt class="text-gray-600 text-xs">Lead Time</dt>
-        <dd class="text-gray-900">{{ s.lead_time }}</dd>
-      </div>
-      {% endif %}
-      {% if s.condition %}
-      <div>
-        <dt class="text-gray-600 text-xs">Condition</dt>
-        <dd class="text-gray-900">{{ s.condition }}</dd>
-      </div>
-      {% endif %}
-      {% if s.date_code %}
-      <div>
-        <dt class="text-gray-600 text-xs">Date Code</dt>
-        <dd class="text-gray-900">{{ s.date_code }}</dd>
-      </div>
-      {% endif %}
-      {% if s.packaging %}
-      <div>
-        <dt class="text-gray-600 text-xs">Packaging</dt>
-        <dd class="text-gray-900">{{ s.packaging }}</dd>
-      </div>
-      {% endif %}
-      {% if s.country %}
-      <div>
-        <dt class="text-gray-600 text-xs">Country</dt>
-        <dd class="text-gray-900">{{ s.country }}</dd>
-      </div>
-      {% endif %}
+    <dl class="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+      <div><dt class="text-[11px] uppercase tracking-wide text-gray-600">Price</dt>
+        <dd class="font-data text-gray-900">{% if s.unit_price %}${{ s.unit_price|unitprice }}{% if s.currency and s.currency != 'USD' %} {{ s.currency }}{% endif %}{% else %}RFQ{% endif %}</dd></div>
+      <div><dt class="text-[11px] uppercase tracking-wide text-gray-600">Quantity</dt>
+        <dd class="font-data text-gray-900">{% if s.qty_available %}{{ "{:,}".format(s.qty_available) }}{% else %}—{% endif %}{% if s.moq %} <span class="text-gray-600">· MOQ {{ "{:,}".format(s.moq) }}</span>{% endif %}</dd></div>
+      <div><dt class="text-[11px] uppercase tracking-wide text-gray-600">Lead time</dt><dd class="text-gray-900">{{ s.lead_time or '—' }}</dd></div>
+      <div><dt class="text-[11px] uppercase tracking-wide text-gray-600">Condition</dt><dd class="text-gray-900">{{ s.condition or '—' }}</dd></div>
+      <div><dt class="text-[11px] uppercase tracking-wide text-gray-600">Date code</dt><dd class="font-data text-gray-900">{{ s.date_code or '—' }}</dd></div>
+      <div><dt class="text-[11px] uppercase tracking-wide text-gray-600">Packaging</dt><dd class="text-gray-900">{{ s.packaging or '—' }}</dd></div>
+      {% if s.country %}<div><dt class="text-[11px] uppercase tracking-wide text-gray-600">Country</dt><dd class="text-gray-900">{{ s.country }}</dd></div>{% endif %}
+      {% if s.vendor_sku %}<div><dt class="text-[11px] uppercase tracking-wide text-gray-600">Vendor SKU</dt><dd class="font-data text-gray-900">{{ s.vendor_sku }}</dd></div>{% endif %}
+      <div><dt class="text-[11px] uppercase tracking-wide text-gray-600">Source</dt>
+        <dd class="text-gray-900">{{ s.source_badge|default(s.source_type|default('—')) }}
+          {%- if s.sources_found and s.sources_found|length > 1 %} <span class="text-gray-600">· also {{ s.sources_found|reject('equalto', s.source_type)|join(', ') }}</span>{% endif %}</dd></div>
     </dl>
-  </div>
 
-  {# ── Section 3b: Sub-offers table (when vendor has multiple source offers) ── #}
-  {% if s.sub_offers and s.sub_offers|length > 0 %}
-  <div class="bg-white rounded-lg border border-line-subtle p-4">
-    <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
-      All Offers ({{ s.sub_offers|length }})
-    </h3>
-    <div class="overflow-x-auto">
-      <table class="w-full text-sm">
-        <thead>
-          <tr class="text-xs text-gray-600 border-b border-line-subtle">
-            <th class="text-left pb-2 pr-3">Source</th>
-            <th class="text-right pb-2 pr-3">Price</th>
-            <th class="text-right pb-2">Qty</th>
-          </tr>
-        </thead>
-        <tbody class="text-gray-800">
+    {% if s.sub_offers %}
+    <div>
+      <h3 class="h4 mb-2">Other listings ({{ s.sub_offers|length }})</h3>
+      <table class="data-table w-full">
+        <thead><tr><th>Source</th><th class="text-right">Price</th><th class="text-right">Qty</th></tr></thead>
+        <tbody>
           {% for offer in s.sub_offers %}
-          <tr class="border-b border-line-subtle last:border-0">
-            <td class="py-1.5 pr-3 text-xs">{{ offer.source_type or "—" }}</td>
-            <td class="py-1.5 pr-3 text-right font-mono text-xs">
-              {% if offer.unit_price %}${{ "%.4f"|format(offer.unit_price) if offer.unit_price < 1 else "%.2f"|format(offer.unit_price) }}{% else %}RFQ{% endif %}
-            </td>
-            <td class="py-1.5 text-right font-mono text-xs">
-              {% if offer.qty_available %}{{ "{:,}".format(offer.qty_available) }}{% else %}—{% endif %}
-            </td>
+          <tr>
+            <td>{{ offer.source_type or '—' }}</td>
+            <td class="font-data text-right">{% if offer.unit_price %}${{ offer.unit_price|unitprice }}{% else %}RFQ{% endif %}</td>
+            <td class="font-data text-right">{% if offer.qty_available %}{{ "{:,}".format(offer.qty_available) }}{% else %}—{% endif %}</td>
           </tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
-  </div>
-  {% endif %}
-
-  {# ── Section 3c: Sources found ── #}
-  {% if s.sources_found and s.sources_found|length > 0 %}
-  <div class="flex items-center gap-2 flex-wrap">
-    <span class="text-xs text-gray-600">Found in:</span>
-    {% for src_name in s.sources_found %}
-    <span class="px-2 py-0.5 text-xs font-medium rounded bg-gray-100 text-gray-600">{{ src_name }}</span>
-    {% endfor %}
-  </div>
-  {% endif %}
-
-  {# ── Shortlist action ── #}
-  <div x-data class="flex gap-2">
-    <button @click="$store.shortlist && $store.shortlist.toggle({
-        vendor_name: '{{ s.vendor_name|replace("'", "\\'") }}',
-        mpn: '{{ (s.mpn_matched or s.mpn or "")|replace("'", "\\'") }}',
-        unit_price: {{ s.unit_price or 'null' }},
-        qty_available: {{ s.qty_available or 'null' }},
-        vendor_key: '{{ s.vendor_key|default("")|replace("'", "\\'") }}'
-      })"
-      class="btn-primary flex-1 text-center">
-      Add to Shortlist
-    </button>
-  </div>
-
-  {# ── Section 4: Source Attribution ── #}
-  <div class="bg-white rounded-lg border border-line-subtle p-4">
-    <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Source Attribution</h3>
-    <div class="space-y-2 text-sm">
-      <div class="flex items-center justify-between">
-        <span class="text-gray-600">Source</span>
-        <span class="font-medium text-gray-900">{{ s.source_type or "Unknown" }}</span>
-      </div>
-      {% if s.evidence_tier %}
-      <div class="flex items-center justify-between">
-        <span class="text-gray-600">Evidence Tier</span>
-        {% set tier = s.evidence_tier|upper %}
-        {% if tier in ("T1", "T2") %}
-          <span class="px-2 py-0.5 text-xs font-medium rounded bg-brand-50 text-brand-600">{{ tier }} — Direct Source</span>
-        {% elif tier in ("T3", "T4") %}
-          <span class="px-2 py-0.5 text-xs font-medium rounded bg-brand-50 text-brand-600">{{ tier }} — Marketplace</span>
-        {% else %}
-          <span class="px-2 py-0.5 text-xs font-medium rounded bg-gray-50 text-gray-500">{{ tier }} — Indirect</span>
-        {% endif %}
-      </div>
-      {% endif %}
-      {% if s.vendor_sku %}
-      <div class="flex items-center justify-between">
-        <span class="text-gray-600">Vendor SKU</span>
-        <span class="font-mono text-xs text-gray-700">{{ s.vendor_sku }}</span>
-      </div>
-      {% endif %}
-    </div>
-    {# External links #}
-    {% if s.click_url or s.octopart_url or s.vendor_url %}
-    <div class="mt-3 pt-3 border-t border-line-subtle flex gap-3 flex-wrap">
-      {% if s.click_url %}
-      <a href="{{ s.click_url }}" target="_blank" rel="noopener"
-         class="text-xs text-brand-600 hover:text-brand-700 underline">View on Source</a>
-      {% endif %}
-      {% if s.octopart_url %}
-      <a href="{{ s.octopart_url }}" target="_blank" rel="noopener"
-         class="text-xs text-brand-600 hover:text-brand-700 underline">Octopart</a>
-      {% endif %}
-      {% if s.vendor_url %}
-      <a href="{{ s.vendor_url }}" target="_blank" rel="noopener"
-         class="text-xs text-brand-600 hover:text-brand-700 underline">Vendor Website</a>
-      {% endif %}
-    </div>
     {% endif %}
-  </div>
 
-  {# ── Section 5: Contact Information ── #}
-  <div class="bg-white rounded-lg border border-line-subtle p-4">
-    <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Contact Information</h3>
-    {% if s.vendor_email or s.vendor_phone or s.vendor_url %}
-    <div class="space-y-2 text-sm">
-      {% if s.vendor_email %}
-      <div class="flex items-center gap-2">
-        <svg class="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
-        </svg>
-        <a href="mailto:{{ s.vendor_email }}" class="text-brand-600 hover:text-brand-700 underline">{{ s.vendor_email }}</a>
-      </div>
-      {% endif %}
-      {% if s.vendor_phone %}
-      <div class="flex items-center gap-2">
-        <svg class="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"/>
-        </svg>
-        <a href="tel:{{ s.vendor_phone }}" class="text-brand-600 hover:text-brand-700 underline">{{ s.vendor_phone }}</a>
-      </div>
-      {% endif %}
-      {% if s.vendor_url %}
-      <div class="flex items-center gap-2">
-        <svg class="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"/>
-        </svg>
-        <a href="{{ s.vendor_url }}" target="_blank" rel="noopener" class="text-brand-600 hover:text-brand-700 underline">{{ s.vendor_url }}</a>
-      </div>
-      {% endif %}
+    {% set click_url = s.click_url|safe_url('') %}
+    {% set octopart_url = s.octopart_url|safe_url('') %}
+    {% set vendor_url = s.vendor_url|safe_url('') %}
+    {% if click_url or octopart_url or vendor_url or s.vendor_email or s.vendor_phone %}
+    <div>
+      <h3 class="h4 mb-2">Contact &amp; links</h3>
+      <ul class="space-y-1.5 text-sm">
+        {% if s.vendor_email %}<li><a href="mailto:{{ s.vendor_email }}" class="text-accent-600 hover:underline">{{ s.vendor_email }}</a></li>{% endif %}
+        {% if s.vendor_phone %}<li><a href="tel:{{ s.vendor_phone }}" class="text-accent-600 hover:underline">{{ s.vendor_phone }}</a></li>{% endif %}
+        {% if click_url %}<li><a href="{{ click_url }}" target="_blank" rel="noopener" class="text-accent-600 hover:underline">View listing ↗</a></li>{% endif %}
+        {% if octopart_url %}<li><a href="{{ octopart_url }}" target="_blank" rel="noopener" class="text-accent-600 hover:underline">Octopart ↗</a></li>{% endif %}
+        {% if vendor_url %}<li><a href="{{ vendor_url }}" target="_blank" rel="noopener" class="text-accent-600 hover:underline">Vendor website ↗</a></li>{% endif %}
+      </ul>
     </div>
     {% else %}
-    <p class="text-sm text-gray-400 italic">No contact information available for this lead.</p>
+    <p class="text-sm text-gray-600">No contact details on this posting.</p>
+    {% endif %}
+
+    {% if safety_available %}
+    {% include "htmx/partials/shared/safety_review.html" %}
     {% endif %}
   </div>
 
-  {# ── Section 6: View Material Card Link ── #}
-  {% if material_card_id %}
-  <div class="bg-white rounded-lg border border-line-subtle p-4">
-    <a hx-get="/v2/partials/materials/{{ material_card_id }}"
-       hx-target="#main-content"
-       hx-push-url="/v2/materials/{{ material_card_id }}"
-       class="flex items-center gap-2 text-sm font-medium text-brand-600 hover:text-brand-700 cursor-pointer">
-      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
-      </svg>
-      View Material Card
-    </a>
-  </div>
-  {% endif %}
-
-  {# ── Section 7: Safety Review (reuses shared component) ── #}
-  {% include "htmx/partials/shared/safety_review.html" %}
-
-  {# ── Section 7: Score Breakdown ── #}
-  {% if s.score_components %}
-  <div class="bg-white rounded-lg border border-line-subtle p-4">
-    <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Score Breakdown</h3>
-    <div class="space-y-2">
-      {% for name, value in s.score_components.items() %}
-      <div class="flex items-center gap-3">
-        <span class="text-xs text-gray-600 w-24 capitalize">{{ name }}</span>
-        <div class="flex-1 bg-gray-100 rounded-full h-2">
-          <div class="h-2 rounded-full {{ 'bg-emerald-500' if value >= 60 else ('bg-amber-500' if value >= 40 else 'bg-rose-400') }}"
-               style="width: {{ value }}%"></div>
-        </div>
-        <span class="text-xs font-medium text-gray-600 w-8 text-right">{{ '%.0f'|format(value) }}</span>
-      </div>
-      {% endfor %}
-    </div>
-  </div>
-  {% endif %}
-
+  <footer class="flex items-center gap-2 border-t border-line-subtle px-5 py-3">
+    <button type="button" class="btn-secondary"
+            data-vn="{{ s.vendor_name }}" data-mpn="{{ part }}" data-st="{{ s.source_type or '' }}"
+            @click="$store.shortlist.toggle({vendor_name: $el.dataset.vn, mpn: $el.dataset.mpn, unit_price: {{ s.unit_price or 0 }}, qty_available: {{ s.qty_available or 0 }}, source_type: $el.dataset.st})"
+            x-text="$store.shortlist.has($el.dataset.vn, $el.dataset.mpn) ? 'Selected ✓' : 'Select for RFQ'"></button>
+    <button type="button" class="btn-primary"
+            hx-post="/v2/partials/search/quick-source/rfq"
+            hx-vals='{{ {"mpn": part, "vendor_name": s.vendor_name}|tojson }}'>Send RFQ to this vendor</button>
+  </footer>
 </div>

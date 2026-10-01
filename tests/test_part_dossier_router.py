@@ -1,12 +1,15 @@
-"""Tests for the Part Dossier ("The Bench") GET routes.
+"""Tests for the Search report routes (routers/part_dossier.py + the entry point).
 
-Covers the landing/dossier branch on /v2/partials/search, the four section endpoints
-(hero / specs / market / recent) for known + unknown PNs, the light-footprint
-search_count bump (existing card only — unknown PNs never create a card), and the
-v2_page ?mpn= deep-link passthrough.
+Covers the landing/report branch on /v2/partials/search (with and without substitutes),
+the header (known / unknown part, the light-footprint search_count bump — an unknown PN
+never creates a card), specs, the live section (cache miss → the SSE run frame per part
+number, cache hit → cached rows + Refresh, the degraded-source banner, the authorized
+baseline line, Refresh skipping the cache), the recent list, the v2_page ?mpn=/&subs=
+deep-link passthrough, and the stored-datasheet download.
 
 Called by: pytest
-Depends on: app/routers/part_dossier.py, app/routers/htmx_views.py, MaterialCard.
+Depends on: app/routers/part_dossier.py, app/routers/htmx/search_views.py,
+            app/routers/htmx_views.py, MaterialCard.
 """
 
 import json
@@ -20,12 +23,14 @@ from app.models.intelligence import MaterialCard
 
 @pytest.fixture()
 def known_card(db_session):
-    """A MaterialCard for LM317T with manufacturer + enrichment so the hero/specs
+    """A MaterialCard for LM317T with manufacturer + enrichment so the header/specs
     render."""
     card = MaterialCard(
         normalized_mpn="lm317t",
         display_mpn="LM317T",
         manufacturer="Texas Instruments",
+        description="Adjustable 1.2V–37V linear regulator, 1.5A.",
+        category="analog_ic",
         lifecycle_status="active",
         package_type="TO-220",
         rohs_status="compliant",
@@ -44,47 +49,87 @@ def known_card(db_session):
     return card
 
 
-# ── Landing vs dossier branch on /v2/partials/search ──────────────────────
+def _redis_with_rows(rows: list[dict], sid: str = "sid-cache-1") -> MagicMock:
+    """MagicMock Redis whose :latest pointer → sid and :results → json(rows)."""
+    rc = MagicMock()
+    rc.get.side_effect = lambda k: (
+        sid if k.endswith(":latest") else (json.dumps(rows) if k.endswith(":results") else None)
+    )
+    return rc
+
+
+_CACHED_ROW = {
+    "vendor_name": "Cached Vendor",
+    "mpn_matched": "LM317T",
+    "manufacturer": "TI",
+    "unit_price": 0.84,
+    "qty_available": 1000,
+    "confidence_color": "green",
+    "confidence_pct": 91,
+    "source_type": "brokerbin",
+    "sources_found": ["brokerbin"],
+}
+
+
+# ── Landing vs report branch on /v2/partials/search ──────────────────────
 
 
 def test_search_no_mpn_renders_landing(client):
-    """GET /v2/partials/search (no mpn) → 200, the landing search box + recent
-    section."""
+    """GET /v2/partials/search (no mpn) → 200, the search box + the recent list."""
     resp = client.get("/v2/partials/search")
     assert resp.status_code == 200
     body = resp.text
     assert 'name="mpn"' in body
-    # Recent-searches section lazy-loads from the recent endpoint.
+    assert 'name="subs"' in body  # optional substitutes field
     assert "/v2/partials/search/recent" in body
 
 
-def test_search_with_mpn_renders_dossier_shell(client):
-    """GET /v2/partials/search?mpn=LM317T → 200, the dossier shell with lazy
-    sections."""
-    resp = client.get("/v2/partials/search", params={"mpn": "LM317T"})
+def test_search_with_mpn_renders_report_shell(client):
+    """GET /v2/partials/search?mpn=LM317T → 200, the report shell wiring the header +
+    the four sections."""
+    resp = client.get("/v2/partials/search", params={"mpn": "lm317t"})
     assert resp.status_code == 200
     body = resp.text
-    # Hero lazy-load + all four section endpoints wired into the shell.
     assert "/v2/partials/search/dossier/hero?mpn=LM317T" in body
     assert "/v2/partials/search/dossier/market?mpn=LM317T" in body
-    assert "/v2/partials/search/dossier/specs?mpn=LM317T" in body
-    assert "/v2/partials/search/history?mpn=LM317T" in body
-    # MPN normalized to upper for display.
-    assert "LM317T" in body
+    assert "/v2/partials/search/dossier/posted-before?mpn=LM317T" in body
+    assert "/v2/partials/search/dossier/offers?mpn=LM317T" in body
+    assert "/v2/partials/search/dossier/contacts?mpn=LM317T" in body
+    # MPN normalized to upper for display; drawer + selection bar hosted here.
+    assert "LM317T — Search" in body
+    assert 'id="lead-drawer-content"' in body
+    assert "$store.shortlist.count > 0" in body
 
 
-# ── Hero endpoint ──────────────────────────────────────────────────────────
+def test_search_with_substitutes_threads_them_to_every_section(client):
+    """?subs= is parsed (deduped, primary dropped, capped at 3) and rides every section
+    URL; the bar is prefilled with the substitutes."""
+    resp = client.get("/v2/partials/search", params={"mpn": "LM317T", "subs": "lm317at, LM317T, lm338t"})
+    assert resp.status_code == 200
+    body = resp.text
+    assert "/v2/partials/search/dossier/market?mpn=LM317T&amp;subs=LM317AT%2CLM338T" in body
+    assert "/v2/partials/search/dossier/contacts?mpn=LM317T&amp;subs=LM317AT%2CLM338T" in body
+    assert "LM317AT, LM338T" in body  # bar prefill
 
 
-def test_hero_known_card_shows_identity_and_bumps_search_count(client, db_session, known_card):
-    """Hero for a known card → 200 with MPN + manufacturer + counts, and bumps
-    search_count."""
+# ── Header endpoint ───────────────────────────────────────────────────────
+
+
+def test_header_known_card_shows_identity_and_bumps_search_count(client, db_session, known_card):
+    """Header for a known card → 200 with MPN, manufacturer, description, tags and the
+    part-page link, and bumps search_count."""
     before = known_card.search_count
     resp = client.get("/v2/partials/search/dossier/hero", params={"mpn": "LM317T"})
     assert resp.status_code == 200
     body = resp.text
     assert "LM317T" in body
     assert "Texas Instruments" in body
+    assert "Adjustable 1.2V–37V linear regulator" in body
+    assert "Active" in body
+    assert "Analog ICs" in body  # category fact line (display name, not the key)
+    assert f"/v2/partials/materials/{known_card.id}" in body
+    assert "/v2/partials/search/dossier/specs?mpn=LM317T" in body
+    assert "New to us" not in body
 
     db_session.expire(known_card)
     refreshed = db_session.get(MaterialCard, known_card.id)
@@ -92,13 +137,22 @@ def test_hero_known_card_shows_identity_and_bumps_search_count(client, db_sessio
     assert refreshed.last_searched_at is not None
 
 
-def test_hero_unknown_mpn_is_new_to_us_and_creates_no_card(client, db_session):
-    """Hero for an unknown PN → 200 'New to us' state and does NOT create a card."""
+def test_header_unknown_mpn_is_new_to_us_and_creates_no_card(client, db_session):
+    """Header for an unknown PN → 200 'New to us' state and does NOT create a card."""
     resp = client.get("/v2/partials/search/dossier/hero", params={"mpn": "ZZ-NOPE-999"})
     assert resp.status_code == 200
     assert "New to us" in resp.text
+    assert "Send RFQ" in resp.text
     # No card was minted for the unknown PN.
     assert db_session.query(MaterialCard).filter(MaterialCard.normalized_mpn == "zznope999").first() is None
+
+
+def test_header_lists_substitute_chips(client, known_card):
+    resp = client.get("/v2/partials/search/dossier/hero", params={"mpn": "LM317T", "subs": "LM317AT"})
+    assert resp.status_code == 200
+    body = resp.text
+    assert "Substitutes:" in body
+    assert "/v2/search?mpn=LM317AT" in body
 
 
 # ── Specs endpoint ─────────────────────────────────────────────────────────
@@ -120,58 +174,63 @@ def test_specs_unknown_mpn_graceful(client):
     assert "New to us" in resp.text
 
 
-# ── Market endpoint ────────────────────────────────────────────────────────
+# ── Live section (Posting now) ────────────────────────────────────────────
 
 
-def test_market_cache_miss_returns_terminal_frame(client):
-    """Market with no Redis cache (TESTING → no Redis) → 200, the frame that fires the
-    existing /v2/partials/search/run SSE flow."""
+def test_market_cache_miss_fires_the_run_frame(client):
+    """No Redis cache (TESTING → no Redis) → 200, the frame that fires the existing POST
+    /v2/partials/search/run SSE flow for the part, with the table shell."""
     resp = client.get("/v2/partials/search/dossier/market", params={"mpn": "LM317T"})
     assert resp.status_code == 200
     body = resp.text
+    assert "Posting now" in body
     assert "/v2/partials/search/run" in body
-    assert "load" in body  # hx-trigger="load"
+    assert 'hx-trigger="load"' in body
+    assert 'id="live-rows"' in body
+    assert "liveSection(1, [])" in body  # one live run, no cached ids
+
+
+def test_market_cache_miss_with_substitutes_fires_one_run_per_part(client):
+    resp = client.get("/v2/partials/search/dossier/market", params={"mpn": "LM317T", "subs": "LM317AT,LM338T"})
+    assert resp.status_code == 200
+    body = resp.text
+    assert body.count("/v2/partials/search/run") == 3
+    assert "liveSection(3, [])" in body
+    # Several runs share the table → each run line is asked to print its part number.
+    assert '"label": "1"' in body
 
 
 def test_market_cache_hit_renders_cached_rows(client):
     """Market WITH a fresh Redis pointer (search:{key}:latest → id, :results → rows) →
-    200, renders the cached vendor rows in the terminal frame + freshness stamp +
-    Refresh, and does NOT auto-fire the SSE run flow.
+    200, renders the cached rows + the cached note + Refresh, and does NOT fire the SSE
+    run.
 
     The load-bearing cache-hit path.
     """
-    rows = [
-        {
-            "vendor_name": "Cached Vendor",
-            "mpn_matched": "LM317T",
-            "manufacturer": "TI",
-            "unit_price": 0.84,
-            "qty_available": 1000,
-            "confidence_color": "green",
-            "confidence_pct": 91,
-            "source_type": "brokerbin",
-            "sources_found": ["brokerbin"],
-        }
-    ]
-    rc = MagicMock()
-    rc.get.side_effect = lambda k: (
-        "sid-cache-1" if k.endswith(":latest") else (json.dumps(rows) if k.endswith(":results") else None)
-    )
-    with patch("app.search_service._get_search_redis", return_value=rc):
+    with patch("app.search_service._get_search_redis", return_value=_redis_with_rows([_CACHED_ROW])):
         resp = client.get("/v2/partials/search/dossier/market", params={"mpn": "LM317T"})
     assert resp.status_code == 200
     body = resp.text
     assert "Cached Vendor" in body
-    assert "cached" in body
-    assert "refresh=1" in body  # the Refresh-market button
+    assert "cached results · 1 vendor" in body
+    assert "refresh=1" in body  # the Refresh button
     assert "/v2/partials/search/run" not in body  # cache hit → no SSE re-fire
+    assert 'liveSection(0, ["sid-cache-1"])' in body
+
+
+def test_market_refresh_skips_the_cache(client):
+    with patch("app.search_service._get_search_redis", return_value=_redis_with_rows([_CACHED_ROW])):
+        resp = client.get("/v2/partials/search/dossier/market", params={"mpn": "LM317T", "refresh": 1})
+    assert resp.status_code == 200
+    assert "Cached Vendor" not in resp.text
+    assert "/v2/partials/search/run" in resp.text
 
 
 # ── Recent endpoint ────────────────────────────────────────────────────────
 
 
 def test_recent_endpoint_lists_searched_cards(client, known_card):
-    """Recent endpoint → 200 listing recently-searched cards as dossier deep links."""
+    """Recent endpoint → 200 listing recently-searched cards as report deep links."""
     resp = client.get("/v2/partials/search/recent")
     assert resp.status_code == 200
     body = resp.text
@@ -186,7 +245,7 @@ def test_recent_endpoint_empty_state(client):
     assert "No recent searches yet" in resp.text
 
 
-# ── v2_page ?mpn= passthrough ──────────────────────────────────────────────
+# ── v2_page ?mpn= / &subs= passthrough ────────────────────────────────────
 
 
 def test_v2_page_mpn_passthrough(client, test_user):
@@ -202,7 +261,14 @@ def test_v2_page_mpn_passthrough(client, test_user):
     assert "/v2/partials/search?mpn=LM317T" in resp.text
 
 
-# ── Degraded-market banner (market_health) ────────────────────────────────
+def test_v2_page_subs_passthrough(client, test_user):
+    with patch("app.routers.htmx_views.get_user", return_value=test_user):
+        resp = client.get("/v2/search", params={"mpn": "LM317T", "subs": "LM317AT,LM338T"})
+    assert resp.status_code == 200
+    assert "/v2/partials/search?mpn=LM317T&amp;subs=LM317AT%2CLM338T" in resp.text
+
+
+# ── Degraded-source banner (market_health) ────────────────────────────────
 
 
 class TestMarketSourceHealth:
@@ -236,8 +302,8 @@ class TestMarketSourceHealth:
 
 
 def test_market_banner_renders_when_sources_down(client):
-    """When live-market sources are down, the market section shows the degraded banner
-    with the source display name, its reason, and a Settings deep-link."""
+    """When live-market sources are down, the section shows the degraded banner with the
+    source display name, its reason, and a Settings deep-link."""
     health = {
         "available": 2,
         "total": 6,
@@ -264,8 +330,7 @@ def test_market_no_banner_when_all_sources_healthy(client):
 
 
 def test_market_section_survives_health_lookup_failure(client):
-    """A health-check failure must never break the market section (best-effort
-    banner)."""
+    """A health-check failure must never break the section (best-effort banner)."""
     with patch("app.search_service.get_market_source_health", side_effect=RuntimeError("boom")):
         resp = client.get("/v2/partials/search/dossier/market", params={"mpn": "LM317T"})
     assert resp.status_code == 200
@@ -292,10 +357,29 @@ def test_market_health_all_down_no_available(db_session):
     assert h["total"] == 2  # available(0) + down(2)
 
 
-def test_specs_shows_stored_datasheet(client, db_session):
-    from datetime import datetime
+def test_market_no_banner_when_only_unconfigured(client):
+    """Sources merely unconfigured (never set up) do NOT trigger the degraded banner —
+    only `down` (auth/quota errors) do.
 
-    from app.models.intelligence import MaterialCard, MaterialCardDatasheet
+    Confirms the asymmetry is intentional.
+    """
+    health = {
+        "available": 5,
+        "total": 5,
+        "down": [],
+        "unconfigured": [{"name": "ebay", "display": "eBay", "reason": "No API key configured"}],
+    }
+    with patch("app.search_service.get_market_source_health", return_value=health):
+        resp = client.get("/v2/partials/search/dossier/market", params={"mpn": "LM317T"})
+    assert resp.status_code == 200
+    assert "unavailable" not in resp.text
+
+
+# ── Datasheet ─────────────────────────────────────────────────────────────
+
+
+def test_specs_shows_stored_datasheet(client, db_session):
+    from app.models.intelligence import MaterialCardDatasheet
 
     card = MaterialCard(normalized_mpn="lm317t", display_mpn="LM317T", datasheet_captured_at=datetime.now(UTC))
     db_session.add(card)
@@ -321,9 +405,9 @@ def test_specs_shows_stored_datasheet(client, db_session):
 
 
 def test_datasheet_download_streams_pdf(client, db_session):
-    from unittest.mock import AsyncMock, patch
+    from unittest.mock import AsyncMock
 
-    from app.models.intelligence import MaterialCard, MaterialCardDatasheet
+    from app.models.intelligence import MaterialCardDatasheet
 
     card = MaterialCard(normalized_mpn="lm317z", display_mpn="LM317Z")
     db_session.add(card)
@@ -350,9 +434,9 @@ def test_datasheet_download_404_missing(client):
 
 
 def test_datasheet_download_sanitizes_content_disposition(client, db_session):
-    from unittest.mock import AsyncMock, patch
+    from unittest.mock import AsyncMock
 
-    from app.models.intelligence import MaterialCard, MaterialCardDatasheet
+    from app.models.intelligence import MaterialCardDatasheet
 
     card = MaterialCard(normalized_mpn="evil1", display_mpn="EVIL1")
     db_session.add(card)
@@ -376,32 +460,14 @@ def test_datasheet_download_sanitizes_content_disposition(client, db_session):
     assert "Set-Cookie" not in resp.headers  # no injected header
 
 
-def test_market_no_banner_when_only_unconfigured(client):
-    """Sources merely unconfigured (never set up) do NOT trigger the degraded banner —
-    only `down` (auth/quota errors) do.
-
-    Confirms the asymmetry is intentional.
-    """
-    health = {
-        "available": 5,
-        "total": 5,
-        "down": [],
-        "unconfigured": [{"name": "ebay", "display": "eBay", "reason": "No API key configured"}],
-    }
-    with patch("app.search_service.get_market_source_health", return_value=health):
-        resp = client.get("/v2/partials/search/dossier/market", params={"mpn": "LM317T"})
-    assert resp.status_code == 200
-    assert "unavailable" not in resp.text
-
-
-# ── Market-baseline strip — helper unit tests ──────────────────────────────
+# ── Authorized baseline — helper unit tests ───────────────────────────────
 
 
 class TestComputeMarketBaseline:
     """Unit tests for compute_market_baseline — no DB, no HTTP, no SSE.
 
-    The helper must be importable and work on plain dicts (same schema as cached_rows /
-    vendor_card.html).
+    The helper must be importable and work on plain dicts (same schema as cached rows /
+    _live_row.html).
     """
 
     def _make_row(self, *, is_authorized: bool, unit_price, qty_available) -> dict:
@@ -521,13 +587,12 @@ class TestComputeMarketBaseline:
         assert result["total_stock"] == 50
 
 
-# ── Market-baseline strip — render tests ──────────────────────────────────
+# ── Authorized baseline — render tests ────────────────────────────────────
 
 
-class TestMarketBaselineStripRender:
-    """Light render tests: the dossier_market template renders the strip (and the
-    empty-state path) without Jinja errors when cached rows are provided via a
-    mocked Redis pointer."""
+class TestAuthorizedBaselineRender:
+    """The live section renders the authorized baseline line (and its empty-state copy)
+    without Jinja errors when cached rows are provided via a mocked Redis pointer."""
 
     def _rows_with_baseline(self) -> list[dict]:
         return [
@@ -569,54 +634,53 @@ class TestMarketBaselineStripRender:
             },
         ]
 
-    def _patch_redis(self, rows):
-        rc = MagicMock()
-        rc.get.side_effect = lambda k: (
-            "sid-baseline-test" if k.endswith(":latest") else (json.dumps(rows) if k.endswith(":results") else None)
-        )
-        return rc
-
-    def test_baseline_strip_shows_franchise_fields(self, client):
-        """Cache hit with 2 authorized rows → strip renders median price, auth stock,
-        and auth source count without Jinja errors."""
-        rows = self._rows_with_baseline()
-        rc = self._patch_redis(rows)
+    def test_baseline_line_shows_authorized_fields(self, client):
+        """Cache hit with 2 authorized rows → median price, stock, and source count."""
+        rc = _redis_with_rows(self._rows_with_baseline(), sid="sid-baseline-test")
         with patch("app.search_service._get_search_redis", return_value=rc):
             resp = client.get("/v2/partials/search/dossier/market", params={"mpn": "LM317T"})
         assert resp.status_code == 200
         body = resp.text
-        assert "Franchise baseline" in body
-        assert "Median price" in body
-        assert "Auth stock" in body
-        assert "Auth sources" in body
-        # 2 authorized sources
+        assert "Authorized baseline" in body
+        assert "$1.50" in body  # upper-median of [1.25, 1.50]
         assert "800" in body  # total authorized stock = 500 + 300
+        assert "2 authorized sources" in body
 
-    def test_baseline_strip_empty_state_no_authorized(self, client):
-        """When all cached rows are non-authorized, the graceful empty-state renders."""
-        rows = [
-            {
-                "vendor_name": "GreyBroker",
-                "mpn_matched": "LM317T",
-                "manufacturer": "",
-                "unit_price": 0.75,
-                "qty_available": 2000,
-                "is_authorized": False,
-                "confidence_color": "amber",
-                "confidence_pct": 60,
-                "source_type": "brokerbin",
-                "sources_found": ["brokerbin"],
-            }
-        ]
-        rc = self._patch_redis(rows)
+    def test_baseline_empty_state_no_authorized(self, client):
+        """When all cached rows are non-authorized, the graceful empty-state copy
+        renders."""
+        rows = [row for row in self._rows_with_baseline() if not row["is_authorized"]]
+        rc = _redis_with_rows(rows, sid="sid-baseline-test")
         with patch("app.search_service._get_search_redis", return_value=rc):
             resp = client.get("/v2/partials/search/dossier/market", params={"mpn": "LM317T"})
         assert resp.status_code == 200
-        assert "No franchise/authorized pricing for this part" in resp.text
+        assert "No authorized distributor pricing for this part" in resp.text
 
-    def test_baseline_strip_absent_on_cache_miss(self, client):
-        """Cache miss → no baseline strip (it only renders when cached_rows exist)."""
+    def test_baseline_absent_on_cache_miss(self, client):
+        """Cache miss → no baseline line (it only renders when cached rows exist)."""
         resp = client.get("/v2/partials/search/dossier/market", params={"mpn": "LM317T"})
         assert resp.status_code == 200
-        assert "Franchise baseline" not in resp.text
+        assert "Authorized baseline" not in resp.text
         assert "/v2/partials/search/run" in resp.text  # SSE frame fires instead
+
+
+def test_landing_lists_enabled_search_sources_by_display_name(client, db_session):
+    """The landing's source line names the enabled SEARCH sources (display names) and
+    leaves enrichment sources and disabled ones out."""
+    from app.models.config import ApiSource
+
+    db_session.add_all(
+        [
+            ApiSource(name="nexar", display_name="Nexar", category="api", source_type="search", status="active"),
+            ApiSource(
+                name="brokerbin", display_name="BrokerBin", category="api", source_type="search", status="disabled"
+            ),
+            ApiSource(name="hunter", display_name="Hunter", category="api", source_type="enrichment", status="active"),
+        ]
+    )
+    db_session.commit()
+    resp = client.get("/v2/partials/search")
+    assert resp.status_code == 200
+    assert "Live sources: Nexar" in resp.text
+    assert "BrokerBin" not in resp.text
+    assert "Hunter" not in resp.text

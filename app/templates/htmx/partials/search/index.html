@@ -1,0 +1,23 @@
+{# search/index.html — Search landing: the part-number search control + recent searches.
+   Loaded via HTMX GET /v2/partials/search (no mpn) into #main-content.
+   Called by: routers/htmx/search_views.search_form_partial (no mpn).
+   Depends on: search/_macros.html (search_bar), GET /v2/partials/search/recent (lazy list).
+   Context: sources (list[str]) — display names of the live sources currently enabled. #}
+{% from "htmx/partials/search/_macros.html" import search_bar %}
+{% from "htmx/partials/shared/_macros.html" import lazy_body %}
+
+<title hx-swap-oob="true">Search — AvailAI</title>
+
+<div class="page-readable pt-8 sm:pt-16 pb-8">
+  <div class="mx-auto w-full max-w-2xl">
+    <h1 class="sr-only">Part search</h1>
+    {{ search_bar(large=True) }}
+    {% if sources %}
+    <p class="mt-2 text-tertiary">Live sources: {{ sources|join(' · ') }}</p>
+    {% endif %}
+
+    {% call lazy_body('recent-searches', '/v2/partials/search/recent', target='this', class_='mt-8') %}
+      <div class="h-3 w-32 rounded bg-brand-100 animate-pulse"></div>
+    {% endcall %}
+  </div>
+</div>

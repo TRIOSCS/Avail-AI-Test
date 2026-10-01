@@ -341,10 +341,16 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
             q_qs = request.query_params.get("q", "").strip()
             partial_url = f"/v2/partials/search/results?q={quote(q_qs)}"
         else:
-            # Deep-link the Part Dossier: ?mpn= rides along to /v2/partials/search so a
-            # bookmarked /v2/search?mpn=<PN> paints the dossier on first load.
+            # Deep-link the part report: ?mpn= (+ ?subs=) ride along to
+            # /v2/partials/search so a bookmarked /v2/search?mpn=<PN>&subs=… paints the
+            # same report on first load.
             mpn_qs = request.query_params.get("mpn", "").strip()
-            partial_url = f"/v2/partials/search?mpn={quote(mpn_qs)}" if mpn_qs else "/v2/partials/search"
+            subs_qs = request.query_params.get("subs", "").strip()
+            partial_url = "/v2/partials/search"
+            if mpn_qs:
+                partial_url = f"{partial_url}?mpn={quote(mpn_qs)}"
+                if subs_qs:
+                    partial_url = f"{partial_url}&subs={quote(subs_qs)}"
     elif current_view == "settings":
         # Thread ?tab= through so a deep-link / redirect (e.g. the legacy
         # /v2/trouble-tickets → /v2/settings?tab=tickets) paints the right tab on

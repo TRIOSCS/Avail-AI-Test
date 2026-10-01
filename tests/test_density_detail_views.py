@@ -173,11 +173,11 @@ class TestMaterialsDetailDensity:
         assert "material-tab-content" in html  # tab body mount preserved
 
 
-# ── Fix 3: search/dossier_hero.html + dossier_shell.html ─────────────────────────
+# ── Fix 3: search/report_part.html + report.html ───────────────────────────────
 
 
-class TestDossierHeroDensity:
-    def test_hero_renders_identity_and_zones(self, client: TestClient, db_session: Session):
+class TestReportHeaderDensity:
+    def test_header_renders_identity_and_actions(self, client: TestClient, db_session: Session):
         card = MaterialCard(
             normalized_mpn="dens555",
             display_mpn="DENS555",
@@ -189,24 +189,25 @@ class TestDossierHeroDensity:
         db_session.commit()
         html = client.get("/v2/partials/search/dossier/hero", params={"mpn": "DENS555"}).text
         assert "DENS555" in html
-        assert "Market price" in html
-        assert "What we know" in html
-        # Knowledge count tiles.
-        for tile in ("Offers", "Won", "Sightings", "Reqs"):
-            assert tile in html, f"count tile {tile!r} missing"
-
-    def test_hero_renders_action_ctas(self, client: TestClient, db_session: Session):
-        html = client.get("/v2/partials/search/dossier/hero", params={"mpn": "NEWPART99"}).text
+        assert "TI" in html
+        # Known part: specs toggle + part page + the two actions.
+        assert "Specs &amp; datasheet" in html
+        assert f"/v2/partials/materials/{card.id}" in html
         assert "Send RFQ" in html
-        assert "Add Offer" in html
-        assert "Add to Requisition" in html
+        assert "Add offer" in html
 
-    def test_shell_renders_live_market_and_tight_rhythm(self, client: TestClient, db_session: Session):
-        """The dossier shell keeps the Live market section wired and applies the
-        tightened section rhythm (space-y-4) that closes the flagged center gap."""
+    def test_header_unknown_part_keeps_actions(self, client: TestClient, db_session: Session):
+        html = client.get("/v2/partials/search/dossier/hero", params={"mpn": "NEWPART99"}).text
+        assert "New to us" in html
+        assert "Send RFQ" in html
+        assert "Add offer" in html
+        assert "Specs &amp; datasheet" not in html  # nothing to show for an unknown part
+
+    def test_shell_wires_the_four_sections_and_tight_rhythm(self, client: TestClient, db_session: Session):
+        """The report shell lazy-loads the header and all four sections, with the
+        tightened section rhythm (space-y-4)."""
         html = client.get("/v2/partials/search", params={"mpn": "DENS555"}).text
-        assert "Live market" in html
-        assert "What we know" in html
         assert "/v2/partials/search/dossier/hero?mpn=DENS555" in html
-        # Tightened vertical rhythm between the hero and the sections below it.
+        for section in ("market", "posted-before", "offers", "contacts"):
+            assert f"/v2/partials/search/dossier/{section}?mpn=DENS555" in html, section
         assert "space-y-4" in html

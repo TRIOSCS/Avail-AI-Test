@@ -439,11 +439,13 @@ aggregated internally by `htmx_views.py` itself so `main.py` needed zero new mou
   knowledge-base list/create routes. Moved verbatim — this is the surface P0.1/P2.8
   most recently touched, so behavior must stay byte-for-byte identical.
 - `app/routers/htmx/search_views.py` — **P4.3 final split (search slice)**: global
-  type-ahead + AI search + full results page, the Part Dossier search-form entry point
-  + "what we know" history panel, the streaming MPN search (`search/run` + SSE
-  `search/stream` + `search/filter` + `search/lead-detail`), and the requisition-picker
-  "add shortlisted results to a requisition" flow. Owns `_get_enabled_sources` /
-  `_get_cached_search_results` (Redis-backed search-result cache reads).
+  type-ahead + AI search + full results page, the Search surface entry point (landing
+  vs. the one-page part report, `?mpn=` + `?subs=`), the streaming MPN search behind the
+  report's "Posting now" table (`search/run` → `live_run.html` + SSE `search/stream` +
+  `search/filter` (several search ids, re-renders `#live-rows`) + `search/lead-detail`
+  drawer), and the requisition-picker "add selected results to a requisition" flow. Owns
+  `_get_enabled_sources` / `_get_cached_search_results` (Redis-backed search-result
+  cache reads). The report's section routes live in `app/routers/part_dossier.py`.
 - `app/routers/htmx/requisitions_edit.py` — **P4.3 final split (requisition bulk +
   inline-edit slice)**: the requisitions-list bulk action (owner reassign), inline
   cell edit + save (name/status/urgency/deadline/owner), win-probability +
@@ -521,7 +523,7 @@ authoritative reference. Static-analysis tests in
 | Parts | 13 | partials/parts/ |
 | Quotes | 5 | partials/quotes/ — `list.html` removed (standalone Quotes tab retired); detail/macros/line_row/preview/pricing_history remain |
 | Sightings | 7 | partials/sightings/ — incl. `_vendor_search_results.html` ("Find any vendor" server-rendered debounced dropdown, `GET /v2/partials/sightings/vendor-search`, swapped into `#vendor-search-results` inside `vendor_modal.html`'s `rfqVendorModal` Alpine scope). `list.html` (the workspace shell) carries a top **quick-links** bar with count-badged entry points to the offer-review queue + follow-up queue (both nav-swap `#main-content`, pushing their canonical URLs). |
-| Search | 13 | partials/search/ — incl. the Part Dossier ("Bench") at `/v2/search?mpn=`: `dossier_shell/hero/specs/recent/market.html` (routes in `routers/part_dossier.py`). |
+| Search | 19 | partials/search/ — the one-page part report at `/v2/search?mpn=[&subs=]`: `index.html` (landing) · `report.html` (shell) · `report_part/live/posted_before/offers/contacts/specs.html` (sections) · `live_run.html` + `_live_row.html` (SSE run + table row) · `lead_detail.html` (drawer) · `_selection_bar/_sources_banner/_datasheet_block/_macros.html` · `recent.html` (routes in `routers/part_dossier.py`; data in `services/part_report_service.py`). Plus the global-search `full_results.html` / `ask_result.html` and the `requisition_picker_modal.html`. |
 | Prospecting | 10 | partials/prospecting/ — list/_card/_macros/detail/stats/add_result/enrich_status/_action_oob/assign_modal/dismiss_modal; buyer-ready ranking via `services/prospect_priority.build_priority_snapshot` (single source of truth), ranked/aggregated in SQL through the write-through `buyer_ready_score`/`is_buyer_ready`/`ai_screen_verdict` cache columns (migrations 170+218); background enrich polls `/enrich-status` (HTTP 286 stops); grid actions OOB-remove cards + refresh `#prospect-stats` |
 | Proactive | 4 | partials/proactive/ |
 | Emails | 4 | partials/emails/ |

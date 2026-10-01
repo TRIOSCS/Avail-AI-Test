@@ -624,6 +624,8 @@ _PAGE_FLUID_SHELLS = (
     "app/templates/htmx/partials/requisitions/detail.html",
     "app/templates/htmx/partials/requisitions/list.html",
     "app/templates/htmx/partials/search/full_results.html",
+    # The one-page part report — four dense tables, fills the viewport.
+    "app/templates/htmx/partials/search/report.html",
     "app/templates/htmx/partials/settings/index.html",
     "app/templates/htmx/partials/tickets/workspace.html",
     "app/templates/htmx/partials/vendors/detail.html",
@@ -637,7 +639,7 @@ _PAGE_READABLE_SHELLS = (
     "app/templates/htmx/partials/knowledge/list.html",
     "app/templates/htmx/partials/proactive/prepare.html",
     "app/templates/htmx/partials/prospecting/detail.html",
-    "app/templates/htmx/partials/search/dossier_shell.html",
+    "app/templates/htmx/partials/search/index.html",
     "app/templates/htmx/partials/sourcing/lead_detail.html",
     "app/templates/htmx/partials/tickets/detail.html",
 )

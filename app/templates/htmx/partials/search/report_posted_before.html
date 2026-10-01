@@ -1,0 +1,55 @@
+{# search/report_posted_before.html — "Posted before": vendors who posted the part before
+   (one row per vendor, newest posting first, every part number in the search).
+   Called by: part_dossier.dossier_posted_before (GET /v2/partials/search/dossier/posted-before).
+   Depends on: postings (list[part_report_service.VendorPosting]), |timeago, |localtime,
+               |unitprice, search/_macros.html. #}
+{% from "htmx/partials/search/_macros.html" import section_header, empty_note %}
+<div class="report-section">
+  {{ section_header('Posted before', (postings|length ~ ' vendor' ~ ('' if postings|length == 1 else 's')) if postings else none) }}
+  {% if postings %}
+  <div class="overflow-x-auto">
+    <table class="data-table w-full whitespace-nowrap">
+      <thead>
+        <tr>
+          <th>Vendor</th>
+          <th>Part</th>
+          <th>Mfr</th>
+          <th>Last seen</th>
+          <th class="text-right">Seen</th>
+          <th class="text-right">Last qty</th>
+          <th class="text-right">Last price</th>
+          <th>Sources</th>
+          <th>Contact</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in postings %}
+        <tr>
+          <td>
+            <span class="font-medium text-gray-900">{{ p.vendor_name }}</span>
+            {% if p.is_authorized %}<span class="badge-mini ml-1.5 bg-emerald-50 text-emerald-700">Auth</span>{% endif %}
+            {% if p.is_unavailable %}<span class="badge-mini ml-1.5 bg-gray-100 text-gray-600" title="Vendor reported no stock on the latest posting">No stock</span>{% endif %}
+          </td>
+          <td class="font-data">{{ p.part }}</td>
+          <td class="text-gray-600">{{ p.manufacturer or '—' }}</td>
+          <td class="whitespace-nowrap" title="{{ p.last_seen|localtime }}">{{ p.last_seen|timeago }}</td>
+          <td class="font-data text-right">{{ p.times_seen }}×</td>
+          <td class="font-data text-right">{% if p.last_qty %}{{ "{:,}".format(p.last_qty) }}{% else %}<span class="text-gray-400">—</span>{% endif %}</td>
+          <td class="font-data text-right">{% if p.last_price %}${{ p.last_price|unitprice }}{% else %}<span class="text-gray-400">—</span>{% endif %}</td>
+          <td>{% for s in p.sources %}<span class="chip mr-1">{{ s }}</span>{% else %}<span class="text-gray-400">—</span>{% endfor %}</td>
+          <td class="text-xs whitespace-nowrap">
+            {%- if p.vendor_email %}<a href="mailto:{{ p.vendor_email }}" class="text-accent-600 hover:underline">{{ p.vendor_email }}</a>{% endif -%}
+            {%- if p.vendor_phone %}{% if p.vendor_email %} · {% endif %}<a href="tel:{{ p.vendor_phone }}" class="text-accent-600 hover:underline">{{ p.vendor_phone }}</a>{% endif -%}
+            {%- if not p.vendor_email and not p.vendor_phone %}<span class="text-gray-400">—</span>{% endif -%}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% elif error %}
+  {{ empty_note('This section could not be loaded. Try again.') }}
+  {% else %}
+  {{ empty_note('No earlier postings on record for this part.') }}
+  {% endif %}
+</div>
