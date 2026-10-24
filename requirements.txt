@@ -27,7 +27,7 @@ azure-core==1.41.0
     #   msrest
 beautifulsoup4==4.15.0
     # via -r requirements.in
-brotli==1.2.0
+brotli==1.2.1
     # via fonttools
 certifi==2026.5.20
     # via
