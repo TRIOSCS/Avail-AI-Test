@@ -117,7 +117,7 @@ matplotlib-inline==0.2.2
     # via ipython
 mdurl==0.1.2
     # via markdown-it-py
-msgpack==1.2.1
+msgpack==1.2.3
     # via cachecontrol
 mypy==2.3.1
     # via
